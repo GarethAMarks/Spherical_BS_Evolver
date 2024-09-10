@@ -1,3 +1,7 @@
+#ifndef SPACEDIM
+#define SPACEDIM 3
+#endif
+
 #ifndef BOSONSTAR_CPP_
 #define BOSONSTAR_CPP_
 

@@ -1,4 +1,3 @@
-
 #ifndef MATHUTILS_CPP_
 #define MATHUTILS_CPP_
 

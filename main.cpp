@@ -1,11 +1,16 @@
+#ifndef SPACEDIM
+#define SPACEDIM 3
+#endif
+
 #include <iostream>
 #include <math.h>
 #include <sstream>
-#include "DimensionMacros.h"
+//#include "DimensionMacros.h"
 #include "BosonStar.h"
 #include "EvolutionVariables.h"
 #include "mathutils.h" //no idea why this is necessary. gcc is screwy
 #include <iomanip>
+
 
 using namespace std;
 

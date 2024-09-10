@@ -1,9 +1,7 @@
 #ifndef DIMENSIONMACROS_HPP_
 #define DIMENSIONMACROS_HPP_
 
-#ifndef SPACEDIM
-#define SPACEDIM 3
-#endif
+
 
 #define PI 3.141592654
 

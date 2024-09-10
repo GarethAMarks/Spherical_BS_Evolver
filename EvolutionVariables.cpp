@@ -1,6 +1,10 @@
 #ifndef EVOLUTIONVARIABLES_CPP_
 #define EVOLUTIONVARIABLES_CPP_
 
+#ifndef SPACEDIM
+#define SPACEDIM 3
+#endif
+
 #include "EvolutionVariables.h"
 #include "DimensionMacros.h"
 #include "mathutils.h"
