@@ -1,0 +1,67 @@
+# depslib dependency file v1.0
+1725886567 source:/home/gmarks2000/Documents/codeBlocks projects/BosonStarStability/main.cpp
+	<iostream>
+	<math.h>
+	<sstream>
+	"DimensionMacros.h"
+	"BosonStar.h"
+	"EvolutionVariables.h"
+	"mathutils.h"
+	<iomanip>
+
+1724239448 /home/gmarks2000/Documents/codeBlocks projects/BosonStarStability/DimensionMacros.h
+
+1725619111 /home/gmarks2000/Documents/codeBlocks projects/BosonStarStability/BosonStar.h
+	<vector>
+	<math.h>
+	<iostream>
+	<string>
+	<fstream>
+
+1725620288 source:/home/gmarks2000/Documents/codeBlocks projects/BosonStarStability/BosonStar.cpp
+	"BosonStar.h"
+	"DimensionMacros.h"
+	"mathutils.h"
+	<sstream>
+	<iomanip>
+
+1720607577 /home/gmarks2000/Documents/codeBlocks projects/BosonStarStability/BosonStar.cpp
+	<vector>
+	"BosonStar.h"
+
+1725963678 /home/gmarks2000/Documents/codeBlocks projects/BosonStarStability/EvolutionVariables.h
+	<vector>
+	<math.h>
+	<iostream>
+	<string>
+	<fstream>
+	"BosonStar.h"
+
+1725963771 source:/home/gmarks2000/Documents/codeBlocks projects/BosonStarStability/EvolutionVariables.cpp
+	"EvolutionVariables.h"
+	"DimensionMacros.h"
+	"mathutils.h"
+	<iomanip>
+	<algorithm>
+	<complex.h>
+
+1725620503 /home/gmarks2000/Documents/codeBlocks projects/BosonStarStability/mathutils.h
+	<string.h>
+	<sstream>
+	<vector>
+
+1725619953 source:/home/gmarks2000/Documents/codeBlocks projects/BosonStarStability/mathutils.cpp
+	<math.h>
+	<iostream>
+	<vector>
+
+1725618899 /home/gmarks2000/Documents/codeBlocks projects/BosonStarStability/mathutils.impl.h
+	<math.h>
+	<iostream>
+	<vector>
+
+1725619953 /home/gmarks2000/Documents/codeBlocks projects/BosonStarStability/mathutils.cpp
+	<math.h>
+	<iostream>
+	<vector>
+

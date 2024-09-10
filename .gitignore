@@ -1,4 +1,4 @@
-	.ipynb_checkpoints/
+	.ipynb_checkpoints/*
 	BSParams.par
 	BSdata.dat
 	BosonStar
@@ -11,11 +11,10 @@
 	BosonStarsSigma0.3.dat
 	BosonStarsSigma0.4.dat
 	Diagnostics.dat
-	DimensionMacros.h
 	MiniBosonStars.dat
 	SliceData.dat
 	TangherliniDiagnostics.dat
-	bin/
+	bin/*
 	constraint_norms.dat
 	constraint_normsCF=0.05.dat
 	constraint_normsCF=0.1.dat
@@ -30,5 +29,6 @@
 	conv.dat
 	ftransf.dat
 	isotropic.dat
-	obj/
+	obj/*
 	update_boundaries
+	*.dat
