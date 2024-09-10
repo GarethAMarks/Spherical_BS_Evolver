@@ -5,10 +5,9 @@
 #include <iostream>
 #include <math.h>
 #include <sstream>
-//#include "DimensionMacros.h"
 #include "BosonStar.h"
 #include "EvolutionVariables.h"
-#include "mathutils.h" //no idea why this is necessary. gcc is screwy
+#include "mathutils.h"
 #include <iomanip>
 
 
