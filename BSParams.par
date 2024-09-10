@@ -1,0 +1,35 @@
+#BS params
+mu = 1.0
+solitonic = 0
+G = 1.0
+sigma = 0.15
+eigen = 0
+alpha_central = 1.0
+A_central = 0.03
+frequency_guess = 5.0
+freq_epsilon = 1e-12
+isotropic = 1
+
+
+#grid params
+R = 100.0
+n_gridpoints = 1000 #number of spatial gridpoints
+courant_factor = 0.25
+stop_time = 1000.08
+
+BS_resolution_factor = 1 #raise BS resolution in ID solver by this factor
+
+#evolution parameters
+min_chi = 0.0001
+min_z = 0.00001
+max_stored_slices = 50
+
+sigma_BSSN = 1.0
+eta = 1.0
+damping_factor = 0.0
+
+write_interval = 2
+write_CN_interval = 1
+evolve_shift = 1
+make_tangherlini = 0
+store_A0 = 1
