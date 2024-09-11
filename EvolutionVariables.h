@@ -176,6 +176,7 @@ class Spacetime
         int write_CN_interval;
         double min_z; //minimum z-value below which z-> regularizations will be used
         bool evolve_shift; //if false, shift is forced to be zero
+        bool run_quietly;
 
         bool make_tangherlini;
 
