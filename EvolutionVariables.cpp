@@ -910,6 +910,7 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "evolve_shift = ", evolve_shift, quiet);
         fill_parameter(current_line, "make_tangherlini = ", make_tangherlini, quiet);
         fill_parameter(current_line, "store_A0 = ", store_A0, quiet);
+        fill_parameter(current_line, "run_quietly = ", run_quietly, quiet);
     }
 
     cout << sigma_BSSN << eta << endl;
@@ -1112,7 +1113,7 @@ void Spacetime::evolve()
             rotate(slices.begin(), slices.begin() + 1, slices.end());
 
 
-        if ((time_step + 1) % 10 == 0) cout << "Time step " << time_step + 1 << " complete! t = " << dt * time_step << endl;
+        if ((time_step + 1) % 10 == 0 && !run_quietly) cout << "Time step " << time_step + 1 << " complete! t = " << dt * time_step << endl;
     }
 
 }
