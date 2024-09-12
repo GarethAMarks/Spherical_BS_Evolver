@@ -10,6 +10,7 @@
 #include "mathutils.h"
 #include <iomanip>
 #include<algorithm>
+#include<filesystem>
 #include <complex.h>
 
 using std::cout;
@@ -342,7 +343,6 @@ void BSSNSlice::write_slice(std::string file_name)
 
      if (!data_file)
     {
-        // Print an error and exit
         cerr << "SliceData.dat could not be opened for writing!\n";
         exit(1);
     }
@@ -350,11 +350,36 @@ void BSSNSlice::write_slice(std::string file_name)
 
     for (int j = 0; j < length; j++)
     {
-        data_file <<  std::setprecision (10) << dr * j << "   " << states[j].chi << "    " << states[j].h_zz << "    " << states[j].h_ww  << "    " << states[j].A_zz
+        data_file <<  std::setprecision (16) << dr * j << "   " << states[j].chi << "    " << states[j].h_zz << "    " << states[j].h_ww  << "    " << states[j].A_zz
         << "   " << states[j].A_ww << "    " << states[j].K << "    " << states[j].c_chris_Z  << "    " << states[j].phi_re << "    " << states[j].phi_im
         << "   " << states[j].K_phi_re << "    " << states[j].K_phi_im << "    " << states[j].alpha << "    " << states[j].beta << endl;
     }
 
+}
+
+//reads slice data from checkpoint file of form checkpoint(time).dat w/o parentheses
+void BSSNSlice::read_checkpoint(int time, int n_gridpoints)
+{
+    states.resize(n_gridpoints);
+
+    std::ifstream checkpoint_file("checkpoint" + std::to_string(time) + ".dat");
+    if (!checkpoint_file.is_open())
+    {
+        cerr << "Could not open checkpoint file!" << endl;
+        exit(1);
+    }
+
+    string line;
+    int j = 0;
+    while (std::getline(checkpoint_file, line))
+    {
+        std::istringstream iss(line);
+        double z;
+        BSSNState& s = states[j];
+
+        if(iss >> z >> s.chi >> s.h_zz >> s.h_ww >> s.A_zz >> s.A_ww >> s.K >> s.c_chris_Z >> s.phi_re >> s.phi_im >> s.K_phi_re >> s.K_phi_im >> s.alpha >> s.beta)
+            j++;
+    }
 }
 
 
@@ -794,6 +819,11 @@ void Spacetime::make_A_traceless(BSSNSlice* slice_ptr)
 }
 
 
+double Spacetime::slice_mass(BSSNSlice* slice_ptr)
+{
+/*TODO*/
+}
+
 //computes hamiltonian and momentum constraints and conformal metric determinant
 void Spacetime:: compute_diagnostics (BSSNSlice* slice_ptr)
 {
@@ -911,10 +941,14 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "make_tangherlini = ", make_tangherlini, quiet);
         fill_parameter(current_line, "store_A0 = ", store_A0, quiet);
         fill_parameter(current_line, "run_quietly = ", run_quietly, quiet);
+        fill_parameter(current_line, "start_time = ", start_time, quiet);
+        fill_parameter(current_line, "checkpoint_time = ", checkpoint_time, quiet);
     }
 
     cout << sigma_BSSN << eta << endl;
 }
+
+
 
 //read data from BosonStar to spacetime and construct initial time slice
 void Spacetime::initialize(BosonStar& boson_star)
@@ -961,7 +995,8 @@ void Spacetime::initialize(BosonStar& boson_star)
         boson_star.write_isotropic();
     }
 
-    slices[0].read_BS_data(boson_star, BS_resolution_factor, isotropic);
+    if (start_time == 0)
+        slices[0].read_BS_data(boson_star, BS_resolution_factor, isotropic);
 
     cout << "Read BS data" << endl;
 
@@ -969,7 +1004,11 @@ void Spacetime::initialize(BosonStar& boson_star)
     n_gridpoints -= 2 ;
     slices[0].states.resize(n_gridpoints);
     R *= (n_gridpoints - 1.) / (n_gridpoints + 1.); //also need to rescale R to avoid stretching solution
-    slices[0].R *= (n_gridpoints - 1.) / (n_gridpoints + 1.);
+    //slices[0].R *= (n_gridpoints - 1.) / (n_gridpoints + 1.);
+    slices[0].R = R;
+
+    if (start_time > 0)
+        slices[0].read_checkpoint(start_time, n_gridpoints);
 
 
     //resize all auxiliary/diagnostic arrays as appropriate
@@ -1024,6 +1063,7 @@ void Spacetime::evolve()
     cout << "dr = " << dr << ", dt = " << dt <<  "   " << endl;
 
     int num_timesteps = ceil(stop_time / dt);
+    int last_checkpoint_time = 0;
 
     if(store_A0)
         A0_values.resize(num_timesteps);
@@ -1045,9 +1085,7 @@ void Spacetime::evolve()
     BSSNSlice s1, s2, s3, s4, t1, t2, t3;
     for (int time_step = 0; time_step < num_timesteps; time_step++)
     {
-        //cout << "Starting loop..." << endl;
-        //set size of next slice
-
+        double t = time_step * dt;
 
         //fill out array until we've reached maximum number of stored slices, then update last element + rotate at end. Also add central chi to help diagnose BH collapse
         int n = (time_step > max_stored_slices - 2) ? (max_stored_slices - 2) : time_step;
@@ -1059,7 +1097,7 @@ void Spacetime::evolve()
         if (phase_diff < 0.) phase_diff += M_PI;
 
         if (time_step % write_CN_interval == 0)
-            constraints_file << std::setprecision (10) <<  dt * time_step << "   " << Ham_L2  << "   " << Mom_L2 <<  "   " << slices[n].states[0].chi << "   " << test_ctr << "   "  << phase_diff   << "   " <<  16 * M_PI * rho[0] << endl;
+            constraints_file << std::setprecision (10) << start_time + dt * time_step << "   " << Ham_L2  << "   " << Mom_L2 <<  "   " << slices[n].states[0].chi << "   " << test_ctr << "   "  << phase_diff   << "   " <<  16 * M_PI * rho[0] << endl;
 
         slices[n + 1].states.resize(n_gridpoints);
         slices[n + 1].R = R;
@@ -1108,12 +1146,21 @@ void Spacetime::evolve()
             write_diagnostics();
         }
 
+        //write checkpoint files
+        //cout << (int)std::floor(t) % checkpoint_time << endl;
+       //cout <<!std::filesystem::exists("checkpoint" + std::to_string((int)std::floor(t)) + ".dat" )  << endl;
+        if ((int)std::floor(t) % checkpoint_time == 0 && (int)std::floor(t) > last_checkpoint_time)
+        {
+            current_slice_ptr->write_slice("checkpoint" + std::to_string((int)std::floor(t)) + ".dat");
+            last_checkpoint_time = (int)std::floor(t);
+        }
+
         //cycles slice array back by one so that last entry can be overwritten
         if (time_step >= max_stored_slices - 2)
             rotate(slices.begin(), slices.begin() + 1, slices.end());
 
 
-        if ((time_step + 1) % 10 == 0 && !run_quietly) cout << "Time step " << time_step + 1 << " complete! t = " << dt * time_step << endl;
+        if ((time_step + 1) % 10 == 0 && !run_quietly) cout << "Time step " << time_step + 1 << " complete! t = " << t << endl;
     }
 
 }

@@ -58,6 +58,7 @@ class BSSNSlice
         std::vector<BSSNState> states; //array of states on a BSSN time slice
 
         void read_BS_data(BosonStar& boson_star,int BS_resolution_factor = 1., bool isotropic = 1);
+        void read_checkpoint(int time, int n_gridpoints);
         void write_slice(std::string file_name = "SliceData.dat");
         double make_tangherlini(double m, double min_chi);
 
@@ -153,13 +154,15 @@ class Spacetime
         int BS_resolution_factor;
         double min_chi;
 
-
         double R; //max radius of computational domain
         int n_gridpoints; // number of spatial gridpoints
         double courant_factor;
         double stop_time;
         double dt;
         double dr;
+
+        int start_time;
+        int checkpoint_time;
 
         //inherited BS parameters
         double sigma;
@@ -183,13 +186,14 @@ class Spacetime
         void read_parameters(bool quiet = 0); //read auxiliary parameters
 
 
-
+        //TODO: add checkpointing
 
         void auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j);
         void compute_auxiliary_quantities(BSSNSlice* slice_ptr, bool derivatives_computed = 0);
         BSSNSlice slice_rhs(BSSNSlice* slice_ptr);
         void make_A_traceless(BSSNSlice* slice_ptr);
         void compute_diagnostics(BSSNSlice* slice_ptr);
+        double slice_mass(BSSNSlice* slice_ptr);
         void update_outer_boundary(double time_step);
 
         double V(const double A);
