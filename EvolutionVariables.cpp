@@ -983,7 +983,7 @@ void Spacetime::initialize(BosonStar& boson_star)
         }
 
     //solve BS at higher resolution and read in data to first slice
-    if (BS_resolution_factor > 1)
+    if (BS_resolution_factor > 1 && start_time == 0 )
     {
         boson_star.n_gridpoints = boson_star.n_gridpoints * BS_resolution_factor - BS_resolution_factor + 1;
 
@@ -993,6 +993,9 @@ void Spacetime::initialize(BosonStar& boson_star)
         boson_star.write_field();
         boson_star.fill_isotropic_arrays();
         boson_star.write_isotropic();
+
+        //not sure if helpful yet!
+        omega = boson_star.omega;
     }
 
     if (start_time == 0)
@@ -1009,6 +1012,7 @@ void Spacetime::initialize(BosonStar& boson_star)
 
     if (start_time > 0)
         slices[0].read_checkpoint(start_time, n_gridpoints);
+
 
 
     //resize all auxiliary/diagnostic arrays as appropriate
