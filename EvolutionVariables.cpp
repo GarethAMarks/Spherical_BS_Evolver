@@ -821,7 +821,10 @@ void Spacetime::make_A_traceless(BSSNSlice* slice_ptr)
 
 double Spacetime::slice_mass(BSSNSlice* slice_ptr)
 {
-/*TODO*/
+    //BAD: just convert chi to m assuming isotropic coords for now. Should really use ADM mass!!!
+    const double& chi = slice_ptr->states[n_gridpoints - 1].chi;
+    return 2 * slice_ptr->R * (pow (chi, -0.25) - 1.);
+
 }
 
 //computes hamiltonian and momentum constraints and conformal metric determinant
@@ -1072,6 +1075,8 @@ void Spacetime::evolve()
     if(store_A0)
         A0_values.resize(num_timesteps);
 
+
+    //todo add labeling
     //write constraint norms at each timestep to file
     std::ofstream constraints_file{"constraint_norms.dat"};
     if (!constraints_file)
@@ -1089,7 +1094,7 @@ void Spacetime::evolve()
     BSSNSlice s1, s2, s3, s4, t1, t2, t3;
     for (int time_step = 0; time_step < num_timesteps; time_step++)
     {
-        double t = time_step * dt;
+        double t = start_time + time_step * dt;
 
         //fill out array until we've reached maximum number of stored slices, then update last element + rotate at end. Also add central chi to help diagnose BH collapse
         int n = (time_step > max_stored_slices - 2) ? (max_stored_slices - 2) : time_step;
@@ -1101,7 +1106,7 @@ void Spacetime::evolve()
         if (phase_diff < 0.) phase_diff += M_PI;
 
         if (time_step % write_CN_interval == 0)
-            constraints_file << std::setprecision (10) << start_time + dt * time_step << "   " << Ham_L2  << "   " << Mom_L2 <<  "   " << slices[n].states[0].chi << "   " << test_ctr << "   "  << phase_diff   << "   " <<  16 * M_PI * rho[0] << endl;
+            constraints_file << std::setprecision (10) << start_time + dt * time_step << "   " << Ham_L2  << "   " << Mom_L2 <<  "   " << slices[n].states[0].chi << "   " << test_ctr << "   "  << phase_diff   << "   " <<  slice_mass(current_slice_ptr) << endl;
 
         slices[n + 1].states.resize(n_gridpoints);
         slices[n + 1].R = R;
