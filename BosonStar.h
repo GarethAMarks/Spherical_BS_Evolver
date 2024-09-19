@@ -72,6 +72,8 @@ class BosonStar
         double omega_pre_rescale; //frequency before rescaling to enforce lapse BC, suitable
         double omega; //solved frequency
         double M; //solved mass
+        double binding_energy; //M - mu*N
+        double noether_charge;
         double r_99; //solved radius containing 99% of mass
 
         BosonStar() = default;
@@ -84,6 +86,8 @@ class BosonStar
         bool solve(bool quiet = 0);
 
         void cycle_models(int n_stars, double A_0, double delta_A);
+
+        double get_noether_charge();
 
         void fill_isotropic_arrays();
         void write_isotropic();

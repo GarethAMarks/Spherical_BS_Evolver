@@ -821,10 +821,29 @@ void Spacetime::make_A_traceless(BSSNSlice* slice_ptr)
 
 double Spacetime::slice_mass(BSSNSlice* slice_ptr)
 {
-    //BAD: just convert chi to m assuming isotropic coords for now. Should really use ADM mass!!!
-    const double& chi = slice_ptr->states[n_gridpoints - 1].chi;
-    return 2 * slice_ptr->R * (pow (chi, -0.25) - 1.);
 
+    const double& chi = slice_ptr->states[n_gridpoints - 1].chi;
+    //const double& h_zz = slice_ptr->states[n_gridpoints - 1].h_zz;
+    //const double& h_ww = slice_ptr->states[n_gridpoints - 1].h_ww;
+
+    //double h_ZZ = 1 / h_zz;
+    //double h_WW = 1 / h_ww;
+
+
+    //const double Z = slice_ptr->R;
+    const double n = D - 2;
+    //return 2 * slice_ptr->R * (pow (chi, -0.25) - 1.); //assumes isotropic Schawrzchild
+
+    //ADM mass. maybe replace w/ one-sided stencils for d_z
+    //return 0.25 * n * pow(chi, -0.5) * Z * ( Z * (h_ZZ - h_WW) - Z * h_ZZ * h_WW * d_z(v_h_ww, n_gridpoints - 3) + Z * h_ZZ * d_z(v_chi, n_gridpoints - 3) / chi);
+    double mass = 0;
+    for (int j = 0; j <  0.95 * n_gridpoints - 1; j++)
+    {
+        double z = dr * j;
+        const double& chi = slice_ptr->states[j].chi;
+        mass += -0.25 * dr * (Ham[j]- h_ZZ[j] * chi * R_zz[j] - n * h_WW[j] * chi * R_ww[j]) * z * z * pow(chi, -1.25) ; //-1.25 is spurious!
+    }
+    return mass;
 }
 
 //computes hamiltonian and momentum constraints and conformal metric determinant
@@ -1156,12 +1175,13 @@ void Spacetime::evolve()
         }
 
         //write checkpoint files
-        //cout << (int)std::floor(t) % checkpoint_time << endl;
-       //cout <<!std::filesystem::exists("checkpoint" + std::to_string((int)std::floor(t)) + ".dat" )  << endl;
+        //TODO make this work for pre C++17
+
         if ((int)std::floor(t) % checkpoint_time == 0 && (int)std::floor(t) > last_checkpoint_time)
         {
             current_slice_ptr->write_slice("checkpoint" + std::to_string((int)std::floor(t)) + ".dat");
             last_checkpoint_time = (int)std::floor(t);
+            cout << "Wrote checkpoint at t = " << last_checkpoint_time << endl;
         }
 
         //cycles slice array back by one so that last entry can be overwritten
@@ -1169,7 +1189,7 @@ void Spacetime::evolve()
             rotate(slices.begin(), slices.begin() + 1, slices.end());
 
 
-        if ((time_step + 1) % 10 == 0 && !run_quietly) cout << "Time step " << time_step + 1 << " complete! t = " << t << endl;
+        if ((time_step + 1) % 10 == 0 && !run_quietly) cout << "Time step " << time_step + 1 << " complete! t = " << (int)std::floor(t) << endl;
     }
 
 }

@@ -462,7 +462,17 @@ bool BosonStar:: fill_asymptotic(bool quiet)
         j++;
     }
 
-     if (!quiet) cout << "\nFinal frequency after enforcing lapse condition is " << omega << endl;
+     noether_charge = get_noether_charge();
+     binding_energy = M - mu * noether_charge;
+
+     if (!quiet)
+     {
+        cout << "\nFinal frequency after enforcing lapse condition is " << omega << endl;
+        cout << "\nMass is M =  " << M << endl;
+        cout << "\nBinding energy is E = " << binding_energy << endl;
+     }
+
+
 
      return 1;
 }
@@ -483,6 +493,24 @@ bool BosonStar::solve(bool quiet)
     return fill_asymptotic(quiet);
 }
 
+//returns the noether charge associated with the model. Must have computed model + frequency first (polar)
+double BosonStar::get_noether_charge()
+{
+
+    double Q = 0.; //charge to return
+    double dr = R / (n_gridpoints - 1);
+
+    //integrate charge over radius
+    for (int j = 0; j < n_gridpoints; j++)
+    {
+        double J_0 = 2 * omega * state[j].A * state[j].A; //0th component of the conserved current covector
+        double r = j * dr;
+        Q += r * r * dr * state[j].X * J_0 * exp(-1. * state[j].phi);
+    }
+
+    Q *= 2 * M_PI;
+    return Q;
+}
 
 //returns right-hand side for the ODE that f solves. r is areal radius
 double BosonStar::f_RHS(double r, double f)
@@ -824,7 +852,7 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
         phi0_values[j] = state[0].phi;
 
         //cout << frequency_guess << endl;
-        data_file << std::setprecision (10) <<  A_central << "     " << M << "     " << r_99 << "     " << omega << "     " << omega_pre_rescale << "     " << frequency_guess << "     " << state[0].phi << endl;
+        data_file << std::setprecision (10) <<  A_central << "     " << M << "     " << r_99 << "     " << noether_charge <<  "     " << binding_energy << "     "  << omega << "     " << omega_pre_rescale << "     " << frequency_guess << endl;
 
     }
 }

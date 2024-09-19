@@ -42,7 +42,7 @@ int main()
     boson_star.fill_isotropic_arrays();
     boson_star.write_isotropic();
 
-    //boson_star.cycle_models(500, 0.01, 0.0005);
+    boson_star.cycle_models(600, 0.01, 0.001);
     //boson_star.write_field();
 
     /*BSSNSlice sl{}; BSSNSlice sm{}; BSSNSlice sh{};
@@ -62,6 +62,7 @@ int main()
 
     //boson_star.convergence_test();
 
+    /*
     Spacetime st{};
     st.initialize(boson_star);
 
@@ -72,7 +73,7 @@ int main()
 
     st.evolve();
     st.fourier_transform_A0();
-
+    */
 
     //st.slices[st.slices.size() - 1].write_slice();
 
