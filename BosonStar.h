@@ -6,6 +6,7 @@
 #include <iostream>
 #include<string>
 #include <fstream>
+#include <quadmath.h>
 
 
 //holds field amplitude, conformal factor, their derivative, and the lapse
@@ -26,6 +27,7 @@ class BosonStar
 {
     private:
         double mu; //scalar mass
+        double lambda; //interaction term coefficient
         bool solitonic; //1 for solitonic BS, 0 for mini
         double G;
         double sigma;
@@ -34,6 +36,7 @@ class BosonStar
         bool isotropic; //whether we will use isotropic coordinates (otherwise polar-areal)
 
         double frequency_guess; //initial guess for eigenfrequency
+        double r_match_fac;
 
 
         std::vector<FieldState> state;
@@ -49,7 +52,8 @@ class BosonStar
         double V (const double p);
         double dV (const double p);
 
-        FieldState state_RHS(const double radius, const double frequency, FieldState  s, bool asymptotic_region);
+        FieldState state_RHS(const double radius, const long double frequency, FieldState  s, bool asymptotic_region, bool given_A = 0);
+
 
         double R; //max radius of computational domain
         int n_gridpoints; // number of spatial gridpoints
@@ -59,7 +63,7 @@ class BosonStar
         double freq_epsilon;//tolerance for the frequency finder
 
         int count_zero_crossings();
-        double find_frequency(bool quiet = 0);
+        long double find_frequency(bool quiet = 0);
         int find_last_minimum();
         bool fill_asymptotic(bool quiet = 0);
         double m(int j);
@@ -69,28 +73,35 @@ class BosonStar
 
     public:
         double A_central; //central field modulus
-        double omega_pre_rescale; //frequency before rescaling to enforce lapse BC, suitable
-        double omega; //solved frequency
+        long double omega_pre_rescale; //frequency before rescaling to enforce lapse BC, suitable
+        long double omega; //solved frequency
         double M; //solved mass
         double binding_energy; //M - mu*N
         double noether_charge;
+        double compactness;
         double r_99; //solved radius containing 99% of mass
 
         BosonStar() = default;
         //BosonStar(const BosonStar& boson_star); //copy constructor(don't seem to need for now)
-        void rk4_solve (const double freq);
+        void rk4_solve (const long double freq);
         void read_parameters(bool quiet = 0);
+        void read_thinshell();
         void write_field();
-        void convergence_test(double freq = 0.);
+        void convergence_test(long double freq = 0.);
         void double_resolution();
         bool solve(bool quiet = 0);
-
-        void cycle_models(int n_stars, double A_0, double delta_A);
-
+        bool solve_finding_A(long double freq, double A_guess, double A_range, bool quiet = 0);
         double get_noether_charge();
 
         void fill_isotropic_arrays();
         void write_isotropic();
+
+        void fill_given_A( const double freq);
+
+        void cycle_models(int n_stars, double A_0, double delta_A);
+
+
+
 
 
     //declare BSSNSlice a friend class so we can construct one from a boson_star object

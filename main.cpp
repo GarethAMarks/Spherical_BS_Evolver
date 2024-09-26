@@ -30,19 +30,21 @@ int main()
     BosonStar boson_star{};
     boson_star.read_parameters();
 
-    //boson_star.rk4_solve(2.85); //2.799473
-    //boson_star.write_field();
-    //boson_star.count_zero_crossings();
-    //boson_star.convergence_test(2.799473);
 
-
-    boson_star.solve();
+    cout << boson_star.solve() << endl;
     //boson_star.rk4_solve(50.0);
     boson_star.write_field();
     boson_star.fill_isotropic_arrays();
     boson_star.write_isotropic();
 
-    boson_star.cycle_models(600, 0.01, 0.001);
+    //boson_star.solve_finding_A(0.91, 0.042, 0.01, 1);
+
+    boson_star.read_thinshell();
+    boson_star.write_field();
+    //boson_star.cycle_models(5000, 0.01, 0.001);
+
+    //boson_star.A_central = 0.093;
+    //boson_star.rk4_solve(0.83);
     //boson_star.write_field();
 
     /*BSSNSlice sl{}; BSSNSlice sm{}; BSSNSlice sh{};

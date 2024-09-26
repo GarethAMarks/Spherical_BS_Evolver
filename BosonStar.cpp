@@ -34,20 +34,20 @@ FieldState operator*(double c, const FieldState& s)
 double BosonStar::V( const double A)
 {
     if (!solitonic)
-        return mu * mu * A * A;
+        return mu * mu * A * A + lambda * pow(A,4);
 
     else
-        return mu * mu * A * A * pow((1. - 2. * pow(A / sigma, 2)), 2);
+        return mu * mu * A * A * pow((1. - 2. * pow(A / sigma, 2)), 2) + lambda * pow(A,4);
 
 }
 
 double BosonStar::dV( const double A)
 {
     if (!solitonic)
-        return mu * mu;
+        return mu * mu + 2 * A * A * lambda;
 
     else
-        return mu * mu - 8. * mu * mu * pow(A / sigma, 2) + 12. * mu * mu * pow(A / sigma, 4);
+        return mu * mu - 8. * mu * mu * pow(A / sigma, 2) + 12. * mu * mu * pow(A / sigma, 4) + 2 * A * A * lambda ;
 
 }
 
@@ -92,6 +92,7 @@ void BosonStar::read_parameters(bool quiet)
     while (getline(params, current_line))
     {
         fill_parameter(current_line, "mu = ", mu, quiet);
+        fill_parameter(current_line, "lambda = ", lambda, quiet);
         fill_parameter(current_line, "solitonic = ", solitonic, quiet);
         fill_parameter(current_line, "G = ", G, quiet);
         fill_parameter(current_line, "sigma = ", sigma, quiet);
@@ -101,17 +102,19 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "frequency_guess = ", frequency_guess, quiet);
         fill_parameter(current_line, "freq_epsilon = ", freq_epsilon, quiet);
         fill_parameter(current_line, "isotropic = ", isotropic, quiet);
+        fill_parameter(current_line, "r_match_fac = ", r_match_fac, quiet);
 
         fill_parameter(current_line, "R = ", R, quiet);
-        fill_parameter(current_line, "n_gridpoints = ", n_gridpoints, quiet);
         fill_parameter(current_line, "courant_factor = ", courant_factor, quiet);
+        fill_parameter(current_line, "n_gridpoints = ", n_gridpoints, quiet);
         fill_parameter(current_line, "stop_time = ", stop_time, quiet);
+
     }
 }
 
 //right-hand side of the EKG system of equations
 //IDEA: add term in alpha to eta (tentative... for now)
-FieldState BosonStar::state_RHS(const double radius, const double frequency, FieldState  s, bool asymptotic_region)
+FieldState BosonStar::state_RHS(const double radius, const long double frequency, FieldState  s, bool asymptotic_region, bool given_A)
 {
     //enforce minimum radius epsilon if needed
     double epsilon = 0.0000001;
@@ -122,13 +125,11 @@ FieldState BosonStar::state_RHS(const double radius, const double frequency, Fie
     double T2 =  s.eta * s.eta + frequency * frequency * s.A * s.A / exp(2 * s.phi) ;
     double T3 = s.eta / r;
 
-
     double F1 = 2. * PI * G * r * s.X * s.X;
 
     //zero out terms that should be zeroed at origin as eta = 0, X = 1 there
     if (radius == 0.)
         {T1 = 0; T3 = 0;}
-
 
     double dPhi = T1 + F1 * (T2 - V(s.A));
 
@@ -137,6 +138,13 @@ FieldState BosonStar::state_RHS(const double radius, const double frequency, Fie
     {
         return  (FieldState) {0., s.X * ( F1 * (T2 + V(s.A)) - T1 ), dPhi, 0.};
     }
+    else if (given_A)
+    {
+        //return RHS of field state variables outside of asymptotic region, A excepted
+        return  (FieldState) {0, s.X * ( F1 * (T2 + V(s.A)) - T1 ), dPhi,
+        -2. * T3 - s.eta * dPhi + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi))};
+    }
+
     else
     {
         //return RHS of field state variables outside of asymptotic region
@@ -149,7 +157,7 @@ FieldState BosonStar::state_RHS(const double radius, const double frequency, Fie
 
 }
 
-void BosonStar::rk4_solve (const double freq)
+void BosonStar::rk4_solve (const long double freq)
 {
 
     state = {(FieldState){A_central, 1.0, log(alpha_central), 0.0 }};
@@ -162,7 +170,7 @@ void BosonStar::rk4_solve (const double freq)
 
     //cout << " \nInitialized state "  << endl;
 
-    double dr = R / (n_gridpoints - 1);
+    long double dr = R / (n_gridpoints - 1);
     //double dt = dr * courant_factor;
 
     //inter-level state values for RK4 evolution
@@ -171,7 +179,7 @@ void BosonStar::rk4_solve (const double freq)
     //fill in grid using RK4 evolution
     for (int j = 0; j < n_gridpoints - 1; j++)
     {
-        double r = j * dr;
+        long double r = j * dr;
 
         s1 = state_RHS(r, freq, state[j], 0);
         s2 = state_RHS(r + dr / 2., freq, state[j] + 0.5 * dr * s1, 0);
@@ -235,7 +243,7 @@ void BosonStar::double_resolution()
 }
 
 //convergence test for the RK4 solver
-void BosonStar::convergence_test(double freq)
+void BosonStar::convergence_test(long double freq)
 {
     //FieldState vectors for low, medium, high resolution, each off by factor of 2
     std::vector<FieldState> state_l, state_m, state_h;
@@ -245,7 +253,7 @@ void BosonStar::convergence_test(double freq)
     //fill in state vectors at low, mid, high resolution
     solve(1); // rk4_solve(freq);
 
-    cout << setprecision(10) << omega << endl;
+    cout << setprecision(10) << static_cast<double>(omega) << endl;
 
     state_l = state;
 
@@ -253,13 +261,13 @@ void BosonStar::convergence_test(double freq)
     solve(1); //rk4_solve(freq);
     state_m = state;
 
-    cout <<  setprecision(10) << omega << endl;
+    cout <<  setprecision(10) << static_cast<double>(omega) << endl;
 
     n_gridpoints = 2 * n_gridpoints - 1;
     solve(1); //rk4_solve(freq);
     state_h = state;
 
-    cout << setprecision(10) << omega << endl;
+    cout << setprecision(10) << static_cast<double>(omega) << endl;
 
     //write to file
     std::ofstream conv_file{ "conv.dat" };
@@ -297,17 +305,17 @@ int BosonStar::count_zero_crossings()
 }
 
 //interval bisection algorithm-- initial_guess must be greater than true value for search to work
-double BosonStar::find_frequency(bool quiet)
+long double BosonStar::find_frequency(bool quiet)
 {
     //lower bound on frequency
-    double lower_guess = frequency_guess;
+    long double lower_guess = frequency_guess;
 
     //tolerance for uncertainty in frequency, as well as minimum frequency to try
-    double epsilon = freq_epsilon;
+    long double epsilon = freq_epsilon;
 
     //at first, compute BS models, halving frequency each time until we find one with fewer/equal zero crossings to the number desired
     rk4_solve(lower_guess);
-    if (count_zero_crossings() <= eigen)
+    if (count_zero_crossings() <= eigen && !quiet)
     {
         cerr << "WARNING: initial guess of "<< frequency_guess << " too small for A_central = " << A_central << endl;
         //exit(1);
@@ -326,11 +334,13 @@ double BosonStar::find_frequency(bool quiet)
     }
 
     //upper bound on frequency
-    double upper_guess = lower_guess * 2.;
-    double midpoint = 0.5 * (upper_guess + lower_guess);
+    long double upper_guess = lower_guess * 2.;
+    long double midpoint = 0.5 * (upper_guess + lower_guess);
+
+    int num_solves = 0;
 
     //now use interval bisection to converge to correct frequency
-    while ( (upper_guess - lower_guess) > epsilon)
+    while ( (upper_guess - lower_guess) > epsilon && num_solves < 100)
     {
         //replace upper/lower bound with midpoint if it has greater/as many or fewer zero crossings than desired, so both ultimately converge on boundary value between eigen and eigen + 1 zero crossings as needed
         midpoint = 0.5 * (upper_guess + lower_guess);
@@ -339,6 +349,10 @@ double BosonStar::find_frequency(bool quiet)
             upper_guess = midpoint;
         else
             lower_guess = midpoint;
+
+        num_solves++;
+
+       // cout << static_cast<double>(upper_guess - lower_guess) << endl;
     }
 
     omega = lower_guess; //use lower_guess for frequency so we are guarenteed to have right # zero crossings in principle...
@@ -348,7 +362,7 @@ double BosonStar::find_frequency(bool quiet)
         cerr << "WARNING: zero crossing count may be incorrect for A_central = " << A_central << ", found " << count_zero_crossings() << endl;
 
 
-    if (!quiet) cout << " \nFound solution in eigenstate " << eigen  << " with frequency " << omega << endl;
+    if (!quiet) cout << " \nFound solution in eigenstate " << eigen  << " with frequency " << static_cast<double>(omega) << endl;
 
 
     return lower_guess;
@@ -362,7 +376,7 @@ int BosonStar::find_last_minimum()
 
     for (int j = blowup_point - 2; j > 1; j--)
     {
-     if (abs(state[j].A) <= abs(state[j - 1].A) && abs(state[j].A) <= abs(state[j + 1].A)  )
+     if (abs(state[j].A) <= abs(state[j - 1].A) && abs(state[j].A) <= abs(state[j + 1].A) && state[j].A < 0.05 * A_central  )
         return j;
     }
 
@@ -370,7 +384,7 @@ int BosonStar::find_last_minimum()
     if (blowup_point == n_gridpoints && abs(state[n_gridpoints - 1].A) <= abs(state[n_gridpoints - 2].A ))
         return (n_gridpoints - 1);
 
-    cerr << "ERROR: No local minimum in |A| found for A_central = " << A_central << endl;
+
     return -1; //signifies that next function should skip
 }
 //fill up the solution in the region after the blowup point, using asymptotic matching for A and eta and integrating phi and X. Returns 1 if successful
@@ -379,10 +393,13 @@ bool BosonStar:: fill_asymptotic(bool quiet)
 
     double min_index = find_last_minimum();
 
+    if (min_index == -1 && !quiet)
+        cerr << "ERROR: No local minimum in |A| found for A_central = " << A_central << endl;
+
     if (min_index == -1)
         return 0;
 
-    double r_match_fac = 0.9;
+    //double r_match_fac = 0.75;
     int j_match = round( r_match_fac * min_index); //index at which matching takes place
 
     //cout<< "Found last minimum at index j= " << j_match << endl;
@@ -413,7 +430,7 @@ bool BosonStar:: fill_asymptotic(bool quiet)
     FieldState s1, s2, s3, s4;
     for (int j = j_match; j < n_gridpoints - 1; j++)
     {
-        double r = j * dr;
+        long double r = j * dr;
 
         s1 = state_RHS(r, omega, state[j], 1);
         s2 = state_RHS(r + dr / 2.,  omega, state[j] + 0.5 * dr * s1, 1);
@@ -446,8 +463,6 @@ bool BosonStar:: fill_asymptotic(bool quiet)
     omega_pre_rescale = omega;
     rescale_lapse (phi_shift);
 
-
-
     //fills total mass
     M = m(n_gridpoints - 1);
 
@@ -464,13 +479,15 @@ bool BosonStar:: fill_asymptotic(bool quiet)
 
      noether_charge = get_noether_charge();
      binding_energy = M - mu * noether_charge;
+     compactness = M / r_99;
 
      if (!quiet)
      {
-        cout << "\nFinal frequency after enforcing lapse condition is " << omega << endl;
+        cout << "\nFinal frequency after enforcing lapse condition is " << static_cast<double>(omega) << endl;
         cout << "\nMass is M =  " << M << endl;
         cout << "\nBinding energy is E = " << binding_energy << endl;
      }
+
 
 
 
@@ -536,7 +553,6 @@ double BosonStar::f_RHS(double r, double f)
 }
 
 //returns areal radius corresponding to a given isotropic index
-//Currently using a separate array to give r_areal(r_iso) via RK4, so this is deprecated!
 double BosonStar::r_areal(int j_iso)
 {
 
@@ -724,6 +740,281 @@ void BosonStar::write_isotropic()
     }
 }
 
+//attempts to construct solution corresponding to a given frequency by finding A.
+//currently assumes omega decreasing with A
+//maybe use recursion here!
+bool BosonStar::solve_finding_A(long double freq, double A_guess, double A_range, bool quiet)
+{
+    long double A_upper = A_guess + A_range;
+    long double A_lower = A_guess - A_range;
+
+    /*int max_blowup_point = 0;
+
+    long double A_best = A_guess;
+    for (int n = 0; n < 1000; ++n)
+    {
+        int sign = 2 * (n % 2) - 1;
+        A_central = A_guess + sign * A_range * n;
+        rk4_solve(freq);
+
+        if (blowup_point > max_blowup_point)
+        {
+            max_blowup_point = blowup_point;
+            A_best = A_central;
+            cout << "blowup point = " << blowup_point << " at A = " << A_best<< endl;;
+        }
+
+    }*/
+
+
+    //interval bisection to find A, assuming omega is decreasing with A. may need to first figure out sign of d_A(omega)/d_omega
+    while (A_upper - A_lower > freq_epsilon)
+    {
+        long double midpoint = 0.5 * (A_upper + A_lower);
+
+
+        rk4_solve(midpoint);
+        if (count_zero_crossings() > eigen)
+            A_upper = midpoint;
+        else
+            A_lower = midpoint;
+
+        //cout << count_zero_crossings() << endl;
+    }
+
+    A_central = A_upper;
+    rk4_solve(freq);
+    fill_asymptotic(quiet);
+
+    return 1;
+
+}
+
+void BosonStar::fill_given_A(const double freq)
+{
+
+
+    blowup_point = n_gridpoints; //make this 1 larger than max possible value to start, in case solution does not break
+
+    state.resize(n_gridpoints);
+    radius_array.resize(n_gridpoints);
+
+    //cout << " \nInitialized state "  << endl;
+
+    long double dr = R / (n_gridpoints - 1);
+    //double dt = dr * courant_factor;
+
+    //inter-level state values for RK4 evolution
+    FieldState s1, s2, s3, s4;
+
+    //fill in grid using RK4 evolution
+    for (int j = 0; j < n_gridpoints - 1; j++)
+    {
+        long double r = j * dr;
+
+        s1 = state_RHS(r, freq, state[j], 0);
+        s2 = state_RHS(r + dr / 2., freq, state[j] + 0.5 * dr * s1, 0, 1);
+        s3 = state_RHS(r + dr / 2., freq, state[j] + 0.5 * dr * s2, 0, 1);
+        s4 = state_RHS(r + dr, freq, state[j] + dr * s3, 0);
+
+        //update state variables and radius array
+        state[j + 1] = state[j] + (dr / 6.) * (s1 + 2 * s2 + 2 * s3 + s4);
+        radius_array[j+1] = (j + 1) * dr;
+
+
+        if (isnan(state[j].A) || isnan(state[j].X) || isnan(state[j].phi) || isnan(state[j].eta))
+        {
+            //cerr << "State values have become nan on step " << j << endl;
+            blowup_point = j;
+            return;
+        }
+    }
+
+    //cout << "\n" << "Finished RK4 evolution" << endl;
+}
+
+
+//reads in data files from Uli's thin shell code
+void BosonStar::read_thinshell()
+{
+    ifstream A_file("A.dat");
+    ifstream X_file("rX.dat");
+    ifstream m_file("m.dat");
+    ifstream eta_file("thet.dat");
+    ifstream phi_file("Phi.dat");
+    ifstream info_file("output.dat");
+
+    solitonic = 1;
+
+    if (!A_file.is_open() ||!X_file.is_open() ||!phi_file.is_open() ||!info_file.is_open() || !m_file.is_open() || !eta_file.is_open() )
+    {
+        cerr << "Error reading thinshell files!" << endl;
+        exit(1);
+    }
+
+    int line_count = 0;
+    string line1, lineX, lineA, linePhi, lineInfo, lineEta, linem;
+    while (std::getline(X_file, line1)) {
+        ++line_count;
+    }
+    //cout << line_count << endl;
+    X_file.clear();
+    X_file.seekg(0, ios::beg);
+
+    n_gridpoints = line_count;
+    state.resize(n_gridpoints);
+    radius_array.resize(n_gridpoints);
+
+    int j = 0;
+    while (std::getline(X_file, lineX))
+    {
+        std::istringstream iss(lineX);
+        iss >> radius_array[j] >> state[j].X;
+           j++; //{  if(j > 0) cout << radius_array[j] - radius_array[j - 1] << endl; j++;}
+
+    }
+
+    R = radius_array[n_gridpoints - 1];
+
+    //holds the A, phi, and r values from the nonuniform r-y hybrid grid. Needed for interpolation
+    //TODO: size properly, currently overestimated
+    vector<double> A_vals(n_gridpoints);
+    vector<double> phi_vals(n_gridpoints);
+    //vector<double> yX_vals(n_gridpoints);
+    vector<double> eta_vals(n_gridpoints);
+    vector<double> m_vals(n_gridpoints);
+    vector<double> r_vals(n_gridpoints);
+    //vector<double> y_vals(n_gridpoints);
+
+    j = 0;
+
+    while (std::getline(A_file, lineA))
+    {
+        std::istringstream iss(lineA);
+        if(iss >> r_vals[j] >> A_vals[j])
+            j++;
+    }
+
+ //cout <<  "hoopla" << eta_vals.size() << endl;
+
+   j = 0;
+
+    while (std::getline(eta_file, lineEta))
+    {
+        std::istringstream iss(lineEta);
+        if(iss >> r_vals[j] >> eta_vals[j])
+            j++;
+    }
+
+    j = 0;
+
+    while (std::getline(m_file, linem))
+    {
+        std::istringstream iss(linem);
+        if(iss >> m_vals[j] >> m_vals[j])
+            j++;
+    }
+
+
+/* j = 0;
+    while (std::getline(A_file, lineyX))
+    {
+        std::istringstream iss(lineyX);
+        if(iss >> y_vals[j] >> A_vals[j])
+            j++;
+    }*/
+
+    j = 0;
+
+    double phi_offset;
+
+    //read in info values including omega, M, r_99, C
+    while (std::getline(info_file, lineInfo))
+    {
+        std::istringstream iss(lineInfo);
+        if (!lineInfo.empty() && lineInfo[0] != '#') //ignore leading commented lines
+        {
+            double junk;
+            if (!(iss >> A_central >> omega_pre_rescale >> junk >> omega >> phi_offset >> M >> junk >> junk >> compactness >> r_99 >> junk >> junk >> junk ))
+                cout << "WARNING: reading thinshell output.dat may have failed " << endl;
+        }
+
+    }
+
+    //read in phi-values, accounting for offset and (crudely) computing eta while we're at it
+    while (std::getline(phi_file, linePhi))
+    {
+        std::istringstream iss(linePhi);
+        if(iss >> r_vals[j] >> phi_vals[j] )
+        {
+            phi_vals[j] -= phi_offset; //enforce phi(infty) = 0
+            state[j].eta = (j == 0) ? 0 : (A_vals[j] - A_vals[j - 1] / ( r_vals[j] - r_vals[j - 1] ) / state[j].X ); //wrong currently bc of X
+            j++;
+
+            //cout << r_vals[j] << endl;
+        }
+    }
+
+
+
+    double dr = R / (n_gridpoints - 1);
+    //interpolate to fill uniform grid with A, phi, eta
+    for (int k = 0; k < n_gridpoints; k++)
+    {
+
+        int l = 0;
+
+        //cout << R << endl;
+
+        while (r_vals[l] < k * dr) //finds nearest r-value to uniform grid point
+             l++;
+
+
+
+        //while ( 1 / (y_vals[m] + 10e-9) > k * dr ) //similar but for y-values
+           // m++;
+
+
+    //extracts 4 surrounding grid points and their associated A, phi values
+    int l0 = bound(l - 2, 0, n_gridpoints - 4);
+    vector<int> L{0, 1, 2, 3};
+    vector<double> r(4);
+    vector<double> A(4);
+    vector<double> m(4);
+    vector<double> phi(4);
+    vector<double> eta(4);
+
+    for (int& index : L)
+    {
+        r[index] = r_vals[l0 + index];
+        phi[index] = phi_vals[l0 + index];
+        m[index] = m_vals[l0 + index];
+        A[index] = A_vals[l0 + index];
+        eta[index] = eta_vals[l0 + index];
+    }
+
+    //interpolates
+    state[k].A = lagrange_interp(k * dr, r, A);
+    double mass_val = lagrange_interp(k * dr, r, m);
+    state[k].phi = lagrange_interp(k * dr, r, phi);
+    state[k].eta = lagrange_interp(k * dr, r, eta);
+
+    state[k].X = 1 /sqrt(1 - 2 * mass_val / (dr * k));
+
+    }
+
+    //fill in X-array; requires existing knowledge of A,eta from ahead so do in separate loop.
+    /*for (int k = 0; k < n_gridpoints; k++)
+    {
+        if (k == 0) state[k].X = 1;
+        else if (k == n_gridpoints - 1) state[k].X = 1 / sqrt(1 - 2 * M / (k * dr));
+
+        //should do something better with 4th-order stencils here, only 2nd-order accurate in general.
+        else state[k].X = (state[k + 1].A - state[k - 1].A) / (2 * dr * pow(state[k].eta, 1.));
+    }*/
+
+}
+
 //TODO: resolving may need to only take place within [0,r_99]; add soft AMR support
 void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
 {
@@ -739,24 +1030,41 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
 
     // mini BS: {0.3, 0.375, 0.425, 0.475, 0.525, 0.575, 0.62, 0.66, 0.7, 0.73} is good with n_gridpoints = 2000 from patams file
     //sigma = 0.2: {0.25,0.325,0.375, 0.425, 0.475, 0.525, 0.575};
-    //sigma = 0.1: {0.2, 0.275}
-    vector<double> refine_thresholds{0.25,0.325,0.375, 0.425, 0.475, 0.525, 0.575};
+    //sigma = 0.1: {0.05, 0.15, 0.2, 0.25,0.325,0.375, 0.425, 0.475, 0.525, 0.575};
+    vector<double> refine_thresholds{0.05, 0.2, 0.25,0.325,0.375, 0.425, 0.475, 0.525, 0.575};
     //bool passed_last_threshold; //set to 1 after last threshold reached
 
     //frequency from previous guess for use in update
-    double omega_prev = frequency_guess;
+    long double omega_prev = frequency_guess;
 
-    //holds all unrescaled omega / A / phi[0] values yet computed
-    vector<double> omega_values(n_stars);
-    vector<double> A_values(n_stars);
-    vector<double> phi0_values(n_stars);
+    //holds all unrescaled omega / A / phi[0] values yet computed-
+    vector<long double> omega_values(n_stars);
+    vector<long double> A_values(n_stars);
+    vector<long double> phi0_values(n_stars);
 
-    double phi0_prev = 0.;
+    long double phi0_prev = 0.;
 
     bool var_dA_method = 0;
 
-    double guess_buffer = 0.00005;
+    double guess_buffer = 0.05;
 
+    double trouble_start = 10.0991;
+    double trouble_end = 10.1004;
+
+    int guess_layer = 0;
+    const int max_guess_layer = 50;
+
+    double f_start = frequency_guess;
+    double f_search_interval = f_start / max_guess_layer;
+    double dA_factor = 1;
+
+    double alpha_start = -1.0;
+    double alpha_end = -1.0;
+
+    bool alpha_flag = 0;
+
+
+    A_central = A_0;
 
     //double n_gridpoints_no_error = n_gridpoints; //stores number of gridpoints with exponential correction keeping the fractional part to avoid roundoff error accumulating
 
@@ -764,43 +1072,47 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
     {
 
         if (!var_dA_method)
-            A_central = A_0 + j * delta_A;
+            A_central +=  delta_A * dA_factor;
 
-
-        //writes info about list of solved boson stars
         if (j!= 0)
             {
-                //cout << omega_pre_rescale_prev << " " << omega_pre_rescale << endl;
-                //frequency_guess = omega_pre_rescale + max(1., 2. * (omega_pre_rescale - omega_pre_rescale_prev));
-                 //frequency_guess = omega + abs(omega_pre_rescale - omega) * 2;
-                //cout << frequency_guess << endl;
 
-                if(j > 2)
+                if(j > 2 && !alpha_flag)
                 {
-                    frequency_guess = omega_values[j - 1] +  (omega_values[j - 1] - omega_values[j - 2]) + guess_buffer;
-                    alpha_central = exp(2 * phi0_values[j - 1] - phi0_values[j - 2]);
+                    //frequency_guess = 1.2;//omega_values[j - 1] +  (omega_values[j - 1] - omega_values[j - 2]) + guess_buffer;
+
+                    //this breaks with __float128 : (
+                    alpha_central =  exp(2 * phi0_values[j - 1] - phi0_values[j - 2]);
                 }
 
-                //alpha_central = exp(2 * state[0].phi - phi0_prev);
+                alpha_central = exp(2 * state[0].phi - phi0_prev);
                 omega_prev = omega;
                 phi0_prev = state[0].phi;
 
             }
 
-        if (j > 2 && var_dA_method)
+        if (j > 3 && var_dA_method)
         {
 
 
-            double theta = atan((omega_values[j - 1] - omega_values[j - 2]) / (A_values[j - 1] - A_values[j - 2]));
+            double theta = atan(10 * (omega_values[j - 1] - omega_values[j - 2]) / (A_values[j - 1] - A_values[j - 2]));
+            double theta_prev = atan(10 * (omega_values[j - 2] - omega_values[j - 3]) / (A_values[j - 2] - A_values[j - 3]));
 
+            //account for branch cut in atan
+            if (theta > 0 && theta_prev < 0)
+                theta_prev += M_PI;
+
+            double theta_new = theta + delta_A * (theta - theta_prev);
+
+            cout << theta_new << endl;
 
             //cout << theta << endl;
 
             //linear extrapolation works fine for angles not too steep
             if (/*abs(theta) < 31. * M_PI / 32.*/ j > 20 )
                 {
-                    A_central = A_values[j - 1] + delta_A * cos(theta);
-                    frequency_guess = omega_values[j - 1] +  sin(theta) * delta_A + guess_buffer;
+                    A_central = A_values[j - 1] + delta_A * cos(theta_new);
+                    frequency_guess = omega_values[j - 1] +  sin(theta_new) * delta_A * 10. + guess_buffer ;
                 }
 
             else
@@ -816,8 +1128,32 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
             }
         }
 
-       // if (j == 10)
+       //if (j == 10)
             //var_dA_method = 1;
+
+
+        if (A_central > trouble_start && alpha_start < 0)
+            alpha_start = exp(phi0_values[j - 1]);
+
+        alpha_flag = 0;
+        //vertical searching of manually entered trouble range using variety of frequency guesses
+       if (A_central > trouble_end && guess_layer <= max_guess_layer)
+       {
+            A_central = trouble_start;
+            alpha_central = alpha_start;
+            alpha_end = exp(phi0_values[j - 1]);
+            frequency_guess -= f_search_interval;
+            cout << frequency_guess << endl;
+            dA_factor = 0.1;
+            guess_layer++;
+            alpha_flag = 1;
+       }
+
+       if (A_central > trouble_end && guess_layer > max_guess_layer)
+            {frequency_guess = f_start; dA_factor = 1.; alpha_central = alpha_end; alpha_flag = 1;}
+
+
+
 
         //updates resolution according to # of threshold A-values passed
         while ( threshold_counter < refine_thresholds.size() - 1 && A_central > refine_thresholds[threshold_counter])
@@ -844,17 +1180,27 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
 
         }
 
+        //cout << state[0].phi << endl;
+
          if (!solve(1) )
-            cout << "Failed to solve with A = " << A_central << endl;
+        {
+            //cout << "Failed to solve with A = " << A_central << endl;
+            omega = 0;
+            //exit(1);
+        }
+        else data_file << std::setprecision (10) <<  A_central << "     " << M << "     " << r_99 << "     " << noether_charge <<  "     " << binding_energy
+        << "     "  << static_cast<double>(omega) << "     " << static_cast<double>(omega_pre_rescale) << "     " << state[0].phi << endl;
 
         A_values[j] = A_central;
         omega_values[j]  = omega;
         phi0_values[j] = state[0].phi;
 
         //cout << frequency_guess << endl;
-        data_file << std::setprecision (10) <<  A_central << "     " << M << "     " << r_99 << "     " << noether_charge <<  "     " << binding_energy << "     "  << omega << "     " << omega_pre_rescale << "     " << frequency_guess << endl;
+
 
     }
+
+
 }
 
 
