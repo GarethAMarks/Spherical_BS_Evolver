@@ -992,16 +992,16 @@ void BosonStar::read_thinshell()
         A[index] = A_vals[l0 + index];
         eta[index] = eta_vals[l0 + index];
     }
-
-    //interpolates
-    state[k].A = lagrange_interp(k * dr, r, A);
     double mass_val = lagrange_interp(k * dr, r, m);
+
+    state[k].A = lagrange_interp(k * dr, r, A);
     state[k].phi = lagrange_interp(k * dr, r, phi);
     state[k].eta = lagrange_interp(k * dr, r, eta);
 
     state[k].X = 1 /sqrt(1 - 2 * mass_val / (dr * k));
 
     }
+    state[0].X = 1; //interpolation for m seems to fail at r = 0
 
     //fill in X-array; requires existing knowledge of A,eta from ahead so do in separate loop.
     /*for (int k = 0; k < n_gridpoints; k++)

@@ -561,7 +561,6 @@ void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
     double R_ww_c = -0.5 * h_ZZ[j] * d_zz(v_h_ww,j) + 3 * h_ZZ[j] * chris_Wwz * chris_wwz - 0.5 * n * h_WW[j] * d_h_ww_z
                         + h_WW[j] * (chris_Zww[j] * chris_zww + 2. * chris_Zww[j] * chris_wwz) + h_ww * c_chris_Z_overz +  c_chris_Z * chris_wwz - h_WW[j] * h_zw_diff;
 
-    //cout<< test_ctr << endl;
 
     R_zz[j] = R_zz_c + R_zz_chi /*d_zz(v_chi,j)*/;
     R_ww[j] = R_ww_c + R_ww_chi;
@@ -914,15 +913,6 @@ void Spacetime:: write_diagnostics()
 
     for (int j = 0; j < length - 2; j++)
     {
-        /*
-        double chi = current_slice_ptr->states[j].chi;
-        const double h_zz = current_slice_ptr->states[j].h_zz;
-        const double h_ww = current_slice_ptr->states[j].h_ww;
-        const double A_zz = current_slice_ptr->states[j].A_zz;
-        const double A_ww = current_slice_ptr->states[j].A_ww;
-        const double K = current_slice_ptr->states[j].K;
-        const double alpha = current_slice_ptr->states[j].alpha;
-        */
 
         const double& phi_re = current_slice_ptr->states[j].phi_re;
         const double& phi_im = current_slice_ptr->states[j].phi_im;
@@ -965,6 +955,7 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "run_quietly = ", run_quietly, quiet);
         fill_parameter(current_line, "start_time = ", start_time, quiet);
         fill_parameter(current_line, "checkpoint_time = ", checkpoint_time, quiet);
+         fill_parameter(current_line, "read_thinshell = ", read_thinshell, quiet);
     }
 
     cout << sigma_BSSN << eta << endl;
@@ -992,6 +983,9 @@ void Spacetime::initialize(BosonStar& boson_star)
 
     read_parameters();
 
+    if (read_thinshell)
+        BS_resolution_factor = 1;
+
     dr = R / (n_gridpoints - 1);
     dt = courant_factor * dr;
     int num_timesteps = ceil(stop_time / dt);
@@ -1005,7 +999,7 @@ void Spacetime::initialize(BosonStar& boson_star)
         }
 
     //solve BS at higher resolution and read in data to first slice
-    if (BS_resolution_factor > 1 && start_time == 0 )
+    if (BS_resolution_factor > 1 && start_time == 0 && !read_thinshell)
     {
         boson_star.n_gridpoints = boson_star.n_gridpoints * BS_resolution_factor - BS_resolution_factor + 1;
 
@@ -1189,7 +1183,7 @@ void Spacetime::evolve()
             rotate(slices.begin(), slices.begin() + 1, slices.end());
 
 
-        if ((time_step + 1) % 10 == 0 && !run_quietly) cout << "Time step " << time_step + 1 << " complete! t = " << (int)std::floor(t) << endl;
+        if ((time_step + 1) % 10 == 0 && !run_quietly) cout << "Time step " << time_step + 1 << " complete! t = " << t << endl;
     }
 
 }

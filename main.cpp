@@ -31,11 +31,11 @@ int main()
     boson_star.read_parameters();
 
 
-    cout << boson_star.solve() << endl;
+    //cout << boson_star.solve() << endl;
     //boson_star.rk4_solve(50.0);
-    boson_star.write_field();
-    boson_star.fill_isotropic_arrays();
-    boson_star.write_isotropic();
+    //boson_star.write_field();
+    //boson_star.fill_isotropic_arrays();
+    //boson_star.write_isotropic();
 
     //boson_star.solve_finding_A(0.91, 0.042, 0.01, 1);
 
@@ -64,18 +64,16 @@ int main()
 
     //boson_star.convergence_test();
 
-    /*
+
     Spacetime st{};
     st.initialize(boson_star);
-
-    //st.slices[0].make_tangherlini(1.);
 
     st.slices[0].write_slice();
     st.write_diagnostics();
 
     st.evolve();
-    st.fourier_transform_A0();
-    */
+    //st.fourier_transform_A0();
+
 
     //st.slices[st.slices.size() - 1].write_slice();
 

@@ -180,6 +180,7 @@ class Spacetime
         double min_z; //minimum z-value below which z-> regularizations will be used
         bool evolve_shift; //if false, shift is forced to be zero
         bool run_quietly;
+        bool read_thinshell;
 
         bool make_tangherlini;
 
