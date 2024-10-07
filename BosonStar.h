@@ -96,7 +96,7 @@ class BosonStar
         void fill_isotropic_arrays();
         void write_isotropic();
 
-        void fill_given_A( const double freq);
+        void fill_given_A( const long double freq);
 
         void cycle_models(int n_stars, double A_0, double delta_A);
 

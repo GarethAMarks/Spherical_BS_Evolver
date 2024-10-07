@@ -181,6 +181,7 @@ class Spacetime
         bool evolve_shift; //if false, shift is forced to be zero
         bool run_quietly;
         bool read_thinshell;
+        double cutoff_frac;
 
         bool make_tangherlini;
 

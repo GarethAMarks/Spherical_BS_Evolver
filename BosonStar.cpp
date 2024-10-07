@@ -51,30 +51,6 @@ double BosonStar::dV( const double A)
 
 }
 
-
-//helper function for read_parameters; searches current_line for line_start and fills in parameter
-//TODO: add default parameters for not found case
-/*template <typename T>
-void fill_parameter (string& current_line, string line_start, T& parameter, bool quiet)
-{
-    if (current_line.find(line_start) != string::npos)
-    {
-        // Create a substring starting from the position right after line_start
-        size_t pos = current_line.find(line_start);
-        string rest_of_line = current_line.substr(pos + line_start.length());
-
-        // Create a stringstream from the rest_of_line
-        stringstream ss(rest_of_line);
-
-        // Extract the double value from the stringstream
-        if (ss >> parameter) {
-            if (!quiet) cout << "Read in " << line_start << parameter << endl;
-        } else if (!(ss >> parameter)) {
-            cout << "WARNING: Failed to extract value for parameter " << line_start << endl;
-        }
-    }
-}*/
-
 //read parameters in from file BSParams.par. TODO: default values
 void BosonStar::read_parameters(bool quiet)
 {
@@ -170,7 +146,7 @@ void BosonStar::rk4_solve (const long double freq)
 
     //cout << " \nInitialized state "  << endl;
 
-    long double dr = R / (n_gridpoints - 1);
+    double dr = R / (n_gridpoints - 1);
     //double dt = dr * courant_factor;
 
     //inter-level state values for RK4 evolution
@@ -179,7 +155,7 @@ void BosonStar::rk4_solve (const long double freq)
     //fill in grid using RK4 evolution
     for (int j = 0; j < n_gridpoints - 1; j++)
     {
-        long double r = j * dr;
+        double r = j * dr;
 
         s1 = state_RHS(r, freq, state[j], 0);
         s2 = state_RHS(r + dr / 2., freq, state[j] + 0.5 * dr * s1, 0);
@@ -705,7 +681,7 @@ void BosonStar::fill_isotropic_arrays()
         }
 
         //linearly transition between interpolated and asymptotic f in this region. u_frac must be small enough that we have non-extrapolated r_areal values there
-        double l_frac = 0.7;
+        double l_frac = 0.8;
         double u_frac = 0.9;
 
         if (j > n_gridpoints * l_frac)
@@ -742,7 +718,7 @@ void BosonStar::write_isotropic()
 
 //attempts to construct solution corresponding to a given frequency by finding A.
 //currently assumes omega decreasing with A
-//maybe use recursion here!
+//tried to use for cycle_models; currently defunct
 bool BosonStar::solve_finding_A(long double freq, double A_guess, double A_range, bool quiet)
 {
     long double A_upper = A_guess + A_range;
@@ -790,19 +766,24 @@ bool BosonStar::solve_finding_A(long double freq, double A_guess, double A_range
 
 }
 
-void BosonStar::fill_given_A(const double freq)
+
+void BosonStar::fill_given_A(const long double freq)
 {
 
-
-    blowup_point = n_gridpoints; //make this 1 larger than max possible value to start, in case solution does not break
 
     state.resize(n_gridpoints);
     radius_array.resize(n_gridpoints);
 
-    //cout << " \nInitialized state "  << endl;
+    //copy old A-values to use later in RK4 loop
+    vector<double> A_vals(n_gridpoints);
+    vector<double> eta_vals(n_gridpoints);
 
-    long double dr = R / (n_gridpoints - 1);
-    //double dt = dr * courant_factor;
+    for (int j = 0; j < n_gridpoints; j++)
+        {A_vals[j] = state[j].A; eta_vals[j] = state[j].eta;}
+
+    blowup_point = n_gridpoints; //make this 1 larger than max possible value to start, in case solution does not break
+
+    double dr = R / (n_gridpoints - 1);
 
     //inter-level state values for RK4 evolution
     FieldState s1, s2, s3, s4;
@@ -810,15 +791,27 @@ void BosonStar::fill_given_A(const double freq)
     //fill in grid using RK4 evolution
     for (int j = 0; j < n_gridpoints - 1; j++)
     {
-        long double r = j * dr;
+        double r = j * dr;
 
-        s1 = state_RHS(r, freq, state[j], 0);
-        s2 = state_RHS(r + dr / 2., freq, state[j] + 0.5 * dr * s1, 0, 1);
-        s3 = state_RHS(r + dr / 2., freq, state[j] + 0.5 * dr * s2, 0, 1);
-        s4 = state_RHS(r + dr, freq, state[j] + dr * s3, 0);
+        s1 = state_RHS(r, freq, state[j], 1, 1);
+
+        state[j].A = 0.5 * (A_vals[j + 1] + A_vals[j]); //use linearly interpolated A-values for intermediate stages
+        state[j].eta = 0.5 * (eta_vals[j + 1] + eta_vals[j]);
+
+        s2 = state_RHS(r + dr / 2., freq, state[j] + 0.5 * dr * s1, 1, 1);
+        s3 = state_RHS(r + dr / 2., freq, state[j] + 0.5 * dr * s2, 1, 1);
+
+        state[j].A = A_vals[j + 1];
+        state[j].eta = eta_vals[j + 1];
+
+        s4 = state_RHS(r + dr, freq, state[j] + dr * s3, 1, 1);
 
         //update state variables and radius array
         state[j + 1] = state[j] + (dr / 6.) * (s1 + 2 * s2 + 2 * s3 + s4);
+
+        state[j + 1].A = A_vals[j];
+        state[j + 1].eta = eta_vals[j];
+
         radius_array[j+1] = (j + 1) * dr;
 
 
@@ -826,9 +819,13 @@ void BosonStar::fill_given_A(const double freq)
         {
             //cerr << "State values have become nan on step " << j << endl;
             blowup_point = j;
+            cout << "WARNING: obtained nan's during fill_given_A routine." << endl;
             return;
         }
     }
+
+    state[0].A = A_vals[0];
+    state[0].eta = eta_vals[0];
 
     //cout << "\n" << "Finished RK4 evolution" << endl;
 }
@@ -853,38 +850,41 @@ void BosonStar::read_thinshell()
     }
 
     int line_count = 0;
-    string line1, lineX, lineA, linePhi, lineInfo, lineEta, linem;
-    while (std::getline(X_file, line1)) {
+    string line1, lineX, lineA, linePhi, lineInfo, lineThet, linem;
+    while (std::getline(A_file, line1)) {
         ++line_count;
     }
-    //cout << line_count << endl;
-    X_file.clear();
-    X_file.seekg(0, ios::beg);
+    cout << line_count << endl;
+    A_file.clear();
+    A_file.seekg(0, ios::beg);
 
-    n_gridpoints = line_count;
+    //n_gridpoints = line_count;
     state.resize(n_gridpoints);
-    radius_array.resize(n_gridpoints);
+    radius_array.resize(line_count);
 
     int j = 0;
-    while (std::getline(X_file, lineX))
+   /* while (std::getline(X_file, lineX))
     {
+        double junk;
         std::istringstream iss(lineX);
-        iss >> radius_array[j] >> state[j].X;
+        iss >> radius_array[j] >> junk;
            j++; //{  if(j > 0) cout << radius_array[j] - radius_array[j - 1] << endl; j++;}
 
-    }
+    }*/
 
-    R = radius_array[n_gridpoints - 1];
+    //R = radius_array[line_count - 1];
+
+
+    radius_array.resize(n_gridpoints);
 
     //holds the A, phi, and r values from the nonuniform r-y hybrid grid. Needed for interpolation
     //TODO: size properly, currently overestimated
-    vector<double> A_vals(n_gridpoints);
-    vector<double> phi_vals(n_gridpoints);
-    //vector<double> yX_vals(n_gridpoints);
-    vector<double> eta_vals(n_gridpoints);
-    vector<double> m_vals(n_gridpoints);
-    vector<double> r_vals(n_gridpoints);
-    //vector<double> y_vals(n_gridpoints);
+    vector<double> A_vals(line_count);
+    vector<double> phi_vals(line_count);
+    vector<double> thet_vals(line_count);
+    vector<double> m_vals(line_count);
+    vector<double> r_vals(line_count);
+
 
     j = 0;
 
@@ -895,14 +895,13 @@ void BosonStar::read_thinshell()
             j++;
     }
 
- //cout <<  "hoopla" << eta_vals.size() << endl;
 
    j = 0;
 
-    while (std::getline(eta_file, lineEta))
+    while (std::getline(eta_file, lineThet))
     {
-        std::istringstream iss(lineEta);
-        if(iss >> r_vals[j] >> eta_vals[j])
+        std::istringstream iss(lineThet);
+        if(iss >> r_vals[j] >> thet_vals[j])
             j++;
     }
 
@@ -914,15 +913,6 @@ void BosonStar::read_thinshell()
         if(iss >> m_vals[j] >> m_vals[j])
             j++;
     }
-
-
-/* j = 0;
-    while (std::getline(A_file, lineyX))
-    {
-        std::istringstream iss(lineyX);
-        if(iss >> y_vals[j] >> A_vals[j])
-            j++;
-    }*/
 
     j = 0;
 
@@ -948,7 +938,7 @@ void BosonStar::read_thinshell()
         if(iss >> r_vals[j] >> phi_vals[j] )
         {
             phi_vals[j] -= phi_offset; //enforce phi(infty) = 0
-            state[j].eta = (j == 0) ? 0 : (A_vals[j] - A_vals[j - 1] / ( r_vals[j] - r_vals[j - 1] ) / state[j].X ); //wrong currently bc of X
+            //state[j].eta = (j == 0) ? 0 : (A_vals[j] - A_vals[j - 1] / ( r_vals[j] - r_vals[j - 1] ) / state[j].X ); //wrong currently bc of X
             j++;
 
             //cout << r_vals[j] << endl;
@@ -964,25 +954,25 @@ void BosonStar::read_thinshell()
 
         int l = 0;
 
-        //cout << R << endl;
-
         while (r_vals[l] < k * dr) //finds nearest r-value to uniform grid point
              l++;
 
+    //interpolation order; must be odd!
+    int interp_order = 3;
 
-
-        //while ( 1 / (y_vals[m] + 10e-9) > k * dr ) //similar but for y-values
-           // m++;
-
+    //if (k * dr > 1.5 * r_99 ) interp_order = 1; //switch to linear interpolation well outside BS; turns out to be bad : (
 
     //extracts 4 surrounding grid points and their associated A, phi values
-    int l0 = bound(l - 2, 0, n_gridpoints - 4);
-    vector<int> L{0, 1, 2, 3};
-    vector<double> r(4);
-    vector<double> A(4);
-    vector<double> m(4);
-    vector<double> phi(4);
-    vector<double> eta(4);
+    int l0 = bound(l - interp_order + 1, 0, n_gridpoints - interp_order - 1);
+    vector<int> L(interp_order + 1);
+    for (int i = 0; i < interp_order + 1; i++ )
+        L[i] = i;
+
+    vector<double> r(interp_order + 1);
+    vector<double> A(interp_order + 1);
+    vector<double> m(interp_order + 1);
+    vector<double> phi(interp_order + 1);
+    vector<double> thet(interp_order + 1);
 
     for (int& index : L)
     {
@@ -990,28 +980,40 @@ void BosonStar::read_thinshell()
         phi[index] = phi_vals[l0 + index];
         m[index] = m_vals[l0 + index];
         A[index] = A_vals[l0 + index];
-        eta[index] = eta_vals[l0 + index];
+        thet[index] = thet_vals[l0 + index];
     }
+
     double mass_val = lagrange_interp(k * dr, r, m);
+    state[k].phi = lagrange_interp(k * dr, r, phi);
+
+    //if (k * dr > 1.2 * r_99) //hard cutoff on M, phi prevents spurious oscillations when changing resolution at large r.
+   // {
+      //  mass_val = M;
+        //state[k].phi = log(sqrt(1 - 2 * M / (k * dr)));
+    //}
 
     state[k].A = lagrange_interp(k * dr, r, A);
-    state[k].phi = lagrange_interp(k * dr, r, phi);
-    state[k].eta = lagrange_interp(k * dr, r, eta);
+
+    state[k].eta = lagrange_interp(k * dr, r, thet) * exp(-state[k].phi - phi_offset ) ;
 
     state[k].X = 1 /sqrt(1 - 2 * mass_val / (dr * k));
+    radius_array[k] = dr * k;
+
+   // double r_match = 28.9;
+   // double interval = 0.5;
+
+   // if (dr * k < r_match + 0.5 * interval && dr * k > r_match - 0.5 * interval)
+        //{
+
+       // }
 
     }
     state[0].X = 1; //interpolation for m seems to fail at r = 0
 
-    //fill in X-array; requires existing knowledge of A,eta from ahead so do in separate loop.
-    /*for (int k = 0; k < n_gridpoints; k++)
-    {
-        if (k == 0) state[k].X = 1;
-        else if (k == n_gridpoints - 1) state[k].X = 1 / sqrt(1 - 2 * M / (k * dr));
+    //fill_given_A(omega);
 
-        //should do something better with 4th-order stencils here, only 2nd-order accurate in general.
-        else state[k].X = (state[k + 1].A - state[k - 1].A) / (2 * dr * pow(state[k].eta, 1.));
-    }*/
+    //for (int j = 0; j < n_gridpoints; j++)
+       // state[j].eta *= exp(state[j].phi + phi_offset );
 
 }
 

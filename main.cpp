@@ -39,7 +39,10 @@ int main()
 
     //boson_star.solve_finding_A(0.91, 0.042, 0.01, 1);
 
-    boson_star.read_thinshell();
+    //boson_star.read_thinshell();
+    boson_star.solve();
+    boson_star.fill_isotropic_arrays();
+    boson_star.write_isotropic();
     boson_star.write_field();
     //boson_star.cycle_models(5000, 0.01, 0.001);
 
@@ -47,20 +50,7 @@ int main()
     //boson_star.rk4_solve(0.83);
     //boson_star.write_field();
 
-    /*BSSNSlice sl{}; BSSNSlice sm{}; BSSNSlice sh{};
-    sl.read_BS_data(boson_star);
 
-    boson_star.double_resolution();
-    boson_star.solve(1);
-    boson_star.fill_isotropic_arrays();
-    sm.read_BS_data(boson_star);
-
-    boson_star.double_resolution();
-    boson_star.solve(1);
-    boson_star.fill_isotropic_arrays();
-    sh.read_BS_data(boson_star);
-
-    slice_convergence_test(sl, sm, sh);*/
 
     //boson_star.convergence_test();
 
@@ -88,6 +78,21 @@ int main()
     return 0;
 }
 
+
+/*BSSNSlice sl{}; BSSNSlice sm{}; BSSNSlice sh{};
+    sl.read_BS_data(boson_star);
+
+    boson_star.double_resolution();
+    boson_star.solve(1);
+    boson_star.fill_isotropic_arrays();
+    sm.read_BS_data(boson_star);
+
+    boson_star.double_resolution();
+    boson_star.solve(1);
+    boson_star.fill_isotropic_arrays();
+    sh.read_BS_data(boson_star);
+
+    slice_convergence_test(sl, sm, sh);*/
 
   /*Spacetime stl{}; Spacetime stm{}; Spacetime sth{};
     stl.initialize(boson_star);

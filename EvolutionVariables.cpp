@@ -562,7 +562,7 @@ void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
                         + h_WW[j] * (chris_Zww[j] * chris_zww + 2. * chris_Zww[j] * chris_wwz) + h_ww * c_chris_Z_overz +  c_chris_Z * chris_wwz - h_WW[j] * h_zw_diff;
 
 
-    R_zz[j] = R_zz_c + R_zz_chi /*d_zz(v_chi,j)*/;
+    R_zz[j] = R_zz_c + R_zz_chi;// d_z(v_chi,j);
     R_ww[j] = R_ww_c + R_ww_chi;
 
     //traceless part of Ricci components
@@ -955,7 +955,9 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "run_quietly = ", run_quietly, quiet);
         fill_parameter(current_line, "start_time = ", start_time, quiet);
         fill_parameter(current_line, "checkpoint_time = ", checkpoint_time, quiet);
-         fill_parameter(current_line, "read_thinshell = ", read_thinshell, quiet);
+        fill_parameter(current_line, "read_thinshell = ", read_thinshell, quiet);
+        fill_parameter(current_line, "cutoff_frac = ", cutoff_frac, quiet);
+
     }
 
     cout << sigma_BSSN << eta << endl;
@@ -1014,6 +1016,14 @@ void Spacetime::initialize(BosonStar& boson_star)
         omega = boson_star.omega;
     }
 
+    if (read_thinshell)
+    {
+        boson_star.read_thinshell();
+        boson_star.write_field();
+        boson_star.fill_isotropic_arrays();
+        boson_star.write_isotropic();
+    }
+
     if (start_time == 0)
         slices[0].read_BS_data(boson_star, BS_resolution_factor, isotropic);
 
@@ -1021,9 +1031,15 @@ void Spacetime::initialize(BosonStar& boson_star)
 
     //cut off outermost 2 gripoints, where the christoffel symbols will be generally polluted by garbage due to not having data to take derivatives there. Temporary solution; might be better to just extrapolate long term.
     n_gridpoints -= 2 ;
-    slices[0].states.resize(n_gridpoints);
+
     R *= (n_gridpoints - 1.) / (n_gridpoints + 1.); //also need to rescale R to avoid stretching solution
-    //slices[0].R *= (n_gridpoints - 1.) / (n_gridpoints + 1.);
+    slices[0].R = R;
+
+    int n_old = n_gridpoints;
+    n_gridpoints = round(cutoff_frac * n_gridpoints); //shrink domain by cutoff_frac, ideally to remove detritus in H
+    R = (R * (n_gridpoints - 1.)) / (n_old - 1.);
+
+    slices[0].states.resize(n_gridpoints);
     slices[0].R = R;
 
     if (start_time > 0)
