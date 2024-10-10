@@ -53,6 +53,8 @@ class BSSNSlice
     private:
 
     bool has_BH = 0;
+    double make_tangherlini(double m, double min_chi);
+
 
     public:
         std::vector<BSSNState> states; //array of states on a BSSN time slice
@@ -60,7 +62,8 @@ class BSSNSlice
         void read_BS_data(BosonStar& boson_star,int BS_resolution_factor = 1., bool isotropic = 1);
         void read_checkpoint(int time, int n_gridpoints);
         void write_slice(std::string file_name = "SliceData.dat");
-        double make_tangherlini(double m, double min_chi);
+
+        bool smooth_lapse();
 
         //BSSNState end_state1; //states off the boundary, computed by assuming outward spherical wave propagation and used in the evolution of the endpoints via Sommerfeld BCs
         //BSSNState end_state2;
@@ -85,6 +88,7 @@ class Spacetime
         void write_diagnostics();
         void evolve();
 
+        void halve_resolution();
         void fourier_transform_A0();
 
 //auxiliary variables held on a particular time slice-- CONVENTION: upper/lowercase r,w denote upstairs/downstairs indices where relevent

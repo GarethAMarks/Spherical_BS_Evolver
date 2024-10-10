@@ -59,6 +59,13 @@ int main()
     st.initialize(boson_star);
 
     st.slices[0].write_slice();
+
+
+    //in principle can use this to push discontinuity to boundary and then chop, but would like better approach...
+    //for (int j = 0; j < 500; j++)
+         //cout << st.slices[0].smooth_lapse() << endl;
+
+    //st.slices[0].smooth_lapse();
     st.write_diagnostics();
 
     st.evolve();

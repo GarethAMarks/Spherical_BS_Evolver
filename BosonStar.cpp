@@ -910,7 +910,7 @@ void BosonStar::read_thinshell()
     while (std::getline(m_file, linem))
     {
         std::istringstream iss(linem);
-        if(iss >> m_vals[j] >> m_vals[j])
+        if(iss >> r_vals[j] >> m_vals[j])
             j++;
     }
 
@@ -960,7 +960,7 @@ void BosonStar::read_thinshell()
     //interpolation order; must be odd!
     int interp_order = 3;
 
-    //if (k * dr > 1.5 * r_99 ) interp_order = 1; //switch to linear interpolation well outside BS; turns out to be bad : (
+    //if (k * dr > 1.5 * r_99 ) interp_order = 1; //switch to linear interpolation well outside BS; turns out to be bad :(
 
     //extracts 4 surrounding grid points and their associated A, phi values
     int l0 = bound(l - interp_order + 1, 0, n_gridpoints - interp_order - 1);

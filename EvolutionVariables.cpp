@@ -210,6 +210,55 @@ double BSSNSlice::d_zz(bssn_var var, int index )
     return d_z(var, index, 2);
 }
 
+//ad hoc function to deal with the discontinuities in d_zz(alpha) around the matching radius from Uli's code. Returns true if smoothing found necessary.
+//currently doesn't work well, deprecated in favor of numpy smoothing.
+bool BSSNSlice::smooth_lapse()
+{
+    int d_start, d_end; //beginning and end of the discontinuities
+
+    double dr = R / (states.size() - 1);
+    for (int j = 2; j < states.size() - 4; j++ )
+    {
+        if ( abs(d_zz(v_alpha, j) - d_zz(v_alpha, j - 1)) > 5. * abs(d_zz(v_alpha, j - 1) - d_zz(v_alpha, j - 2))  ) //look for discontinuities. far from perfect solution
+        {
+            d_start = j - 2;
+            d_end = j + 8;
+            break;
+        }
+
+        if (j == states.size() - 4)
+            return 0;
+    }
+
+    //cout << d_start << "  " << d_end << endl;
+
+    vector<double> interped_alphas(d_end - d_start);
+
+    for ( int k = 0; k < d_end - d_start; k++)
+    {
+        double h = (k + 1) * dr ;
+        double z_gap = d_end * dr - (d_start - 1) * dr;
+
+        interped_alphas[k] = states[d_start - 1].alpha + h * d_z(v_alpha, d_start - 1) + 0.5 * h * h * d_zz(v_alpha, d_start - 1)
+                           + (1. / 6.) * h * h * h * (d_zz(v_alpha, d_end) - d_zz(v_alpha, d_start - 1) ) / z_gap;
+    }
+
+    for (int j = d_start; j < d_end; j++ )
+    {
+        //vector<double> Z = {dr * (d_start -1), dr * (d_end)};
+        //vector<double> Alpha = {states[d_start - 1].alpha, states[d_end].alpha};
+
+        //vector<double> Z = {dr * (d_start - 2), dr * (d_start - 1), dr * (d_end), dr * (d_end + 1)};
+        //vector<double> Alpha = {states[d_start - 2].alpha, states[d_start - 1].alpha, states[d_end].alpha, states[d_end + 1].alpha};
+
+
+        //states[j].alpha = lagrange_interp(j * dr, Z, Alpha);
+
+        states[j].alpha = interped_alphas[j - d_start];
+    }
+
+    return 1;
+}
 
 //converts the current slice to a tangherlini BH of mass m; must have set states vector size already. Also returns mass so it can be set in spacetime object
 double BSSNSlice::make_tangherlini (double m, double min_chi)
@@ -916,9 +965,13 @@ void Spacetime:: write_diagnostics()
 
         const double& phi_re = current_slice_ptr->states[j].phi_re;
         const double& phi_im = current_slice_ptr->states[j].phi_im;
+
+        const double& chi = current_slice_ptr->states[j].chi;
+        const double& c_chris_Z = current_slice_ptr->states[j].c_chris_Z;
+
         double A = sqrt(phi_re * phi_re + phi_im * phi_im);
 
-        data_file << std::setprecision (10) <<  dr * j << "   " << Ham[j] << "    " << Mom_Z[j]<< "    " << det_h[j]  << "    " << aux_test[j] << "    " << A << "    "  << R_zz[j]/*chi * (alpha * R_zz_TF[j] - D_zz_alpha_TF[j] )*/  << endl;
+        data_file << std::setprecision (10) <<  dr * j << "   " << Ham[j] << "    " << Mom_Z[j]<< "    " << det_h[j]  << "    " << aux_test[j] << "    " << A << "    "  << d_zz(v_alpha, j) /*c_chris_Z +  (8.) / (2. * chi) * d_z(v_chi, j) * h_ZZ[j]*/    << endl;
     }
 
     //cout << "Wrote diagnostics" << endl;
