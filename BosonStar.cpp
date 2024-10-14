@@ -769,8 +769,6 @@ bool BosonStar::solve_finding_A(long double freq, double A_guess, double A_range
 
 void BosonStar::fill_given_A(const long double freq)
 {
-
-
     state.resize(n_gridpoints);
     radius_array.resize(n_gridpoints);
 
@@ -834,23 +832,25 @@ void BosonStar::fill_given_A(const long double freq)
 //reads in data files from Uli's thin shell code
 void BosonStar::read_thinshell()
 {
-    ifstream A_file("A.dat");
-    ifstream X_file("rX.dat");
-    ifstream m_file("m.dat");
-    ifstream eta_file("thet.dat");
-    ifstream phi_file("Phi.dat");
+
+    bool uniform_data = 1;
+
+    ifstream A_file("unif_A.dat");
+    ifstream m_file("unif_m.dat");
+    ifstream eta_file("unif_thet.dat");
+    ifstream phi_file("unif_Phi.dat");
     ifstream info_file("output.dat");
 
     solitonic = 1;
 
-    if (!A_file.is_open() ||!X_file.is_open() ||!phi_file.is_open() ||!info_file.is_open() || !m_file.is_open() || !eta_file.is_open() )
+    if (!A_file.is_open() ||!phi_file.is_open() ||!info_file.is_open() || !m_file.is_open() || !eta_file.is_open() )
     {
         cerr << "Error reading thinshell files!" << endl;
         exit(1);
     }
 
     int line_count = 0;
-    string line1, lineX, lineA, linePhi, lineInfo, lineThet, linem;
+    string line1, lineA, linePhi, lineInfo, lineThet, linem;
     while (std::getline(A_file, line1)) {
         ++line_count;
     }
@@ -858,19 +858,14 @@ void BosonStar::read_thinshell()
     A_file.clear();
     A_file.seekg(0, ios::beg);
 
-    //n_gridpoints = line_count;
+    if (uniform_data)
+        n_gridpoints = line_count;
+
     state.resize(n_gridpoints);
     radius_array.resize(line_count);
 
     int j = 0;
-   /* while (std::getline(X_file, lineX))
-    {
-        double junk;
-        std::istringstream iss(lineX);
-        iss >> radius_array[j] >> junk;
-           j++; //{  if(j > 0) cout << radius_array[j] - radius_array[j - 1] << endl; j++;}
 
-    }*/
 
     //R = radius_array[line_count - 1];
 
@@ -895,6 +890,9 @@ void BosonStar::read_thinshell()
             j++;
     }
 
+    //in case of uniformly spaced data (interpolated from numpy) get n_gridpoints and R from file
+    if (uniform_data)
+        R = r_vals[r_vals.size() - 1];
 
    j = 0;
 
@@ -957,64 +955,61 @@ void BosonStar::read_thinshell()
         while (r_vals[l] < k * dr) //finds nearest r-value to uniform grid point
              l++;
 
-    //interpolation order; must be odd!
-    int interp_order = 3;
+        //interpolation order; must be odd!
+        int interp_order = 3;
 
-    //if (k * dr > 1.5 * r_99 ) interp_order = 1; //switch to linear interpolation well outside BS; turns out to be bad :(
+        //if (k * dr > 1.5 * r_99 ) interp_order = 1; //switches to linear interpolation well outside BS; turns out to be bad :(
 
-    //extracts 4 surrounding grid points and their associated A, phi values
-    int l0 = bound(l - interp_order + 1, 0, n_gridpoints - interp_order - 1);
-    vector<int> L(interp_order + 1);
-    for (int i = 0; i < interp_order + 1; i++ )
-        L[i] = i;
+        //extracts 4 surrounding grid points and their associated A, phi values
+        int l0 = bound(l - interp_order + 1, 0, n_gridpoints - interp_order - 1);
+        vector<int> L(interp_order + 1);
+        for (int i = 0; i < interp_order + 1; i++ )
+            L[i] = i;
 
-    vector<double> r(interp_order + 1);
-    vector<double> A(interp_order + 1);
-    vector<double> m(interp_order + 1);
-    vector<double> phi(interp_order + 1);
-    vector<double> thet(interp_order + 1);
+        vector<double> r(interp_order + 1);
+        vector<double> A(interp_order + 1);
+        vector<double> m(interp_order + 1);
+        vector<double> phi(interp_order + 1);
+        vector<double> thet(interp_order + 1);
 
-    for (int& index : L)
-    {
-        r[index] = r_vals[l0 + index];
-        phi[index] = phi_vals[l0 + index];
-        m[index] = m_vals[l0 + index];
-        A[index] = A_vals[l0 + index];
-        thet[index] = thet_vals[l0 + index];
+        for (int& index : L)
+        {
+            r[index] = r_vals[l0 + index];
+            phi[index] = phi_vals[l0 + index];
+            m[index] = m_vals[l0 + index];
+            A[index] = A_vals[l0 + index];
+            thet[index] = thet_vals[l0 + index];
+        }
+
+        double mass_val = lagrange_interp(k * dr, r, m);
+        state[k].phi = lagrange_interp(k * dr, r, phi);
+
+        //if (k * dr > 1.2 * r_99) //hard cutoff on M, phi prevents spurious oscillations when changing resolution at large r.
+       // {
+          //  mass_val = M;
+            //state[k].phi = log(sqrt(1 - 2 * M / (k * dr)));
+        //}
+
+        if (uniform_data)
+        {
+            state[k].A = A_vals[k];
+            state[k].X = 1 /sqrt(1 - 2 * m_vals[k] / (dr * k));
+            state[k].phi = phi_vals[k];
+            state[k].eta = thet_vals[k] * exp(-state[k].phi - phi_offset );
+            radius_array[k] = dr * k;
+        }
+
+        else
+        {
+            state[k].A = lagrange_interp(k * dr, r, A);
+            state[k].eta = lagrange_interp(k * dr, r, thet) * exp(-state[k].phi - phi_offset ) ;
+            state[k].X = 1 /sqrt(1 - 2 * mass_val / (dr * k));
+            radius_array[k] = dr * k;
+        }
     }
-
-    double mass_val = lagrange_interp(k * dr, r, m);
-    state[k].phi = lagrange_interp(k * dr, r, phi);
-
-    //if (k * dr > 1.2 * r_99) //hard cutoff on M, phi prevents spurious oscillations when changing resolution at large r.
-   // {
-      //  mass_val = M;
-        //state[k].phi = log(sqrt(1 - 2 * M / (k * dr)));
-    //}
-
-    state[k].A = lagrange_interp(k * dr, r, A);
-
-    state[k].eta = lagrange_interp(k * dr, r, thet) * exp(-state[k].phi - phi_offset ) ;
-
-    state[k].X = 1 /sqrt(1 - 2 * mass_val / (dr * k));
-    radius_array[k] = dr * k;
-
-   // double r_match = 28.9;
-   // double interval = 0.5;
-
-   // if (dr * k < r_match + 0.5 * interval && dr * k > r_match - 0.5 * interval)
-        //{
-
-       // }
-
-    }
-    state[0].X = 1; //interpolation for m seems to fail at r = 0
+    state[0].X = 1; //interpolation for m seems to fail at r = 0, so just hardcode this as it's true by def'n
 
     //fill_given_A(omega);
-
-    //for (int j = 0; j < n_gridpoints; j++)
-       // state[j].eta *= exp(state[j].phi + phi_offset );
-
 }
 
 //TODO: resolving may need to only take place within [0,r_99]; add soft AMR support

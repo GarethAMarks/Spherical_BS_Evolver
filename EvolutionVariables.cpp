@@ -1016,7 +1016,30 @@ void Spacetime::read_parameters(bool quiet)
     cout << sigma_BSSN << eta << endl;
 }
 
+//halves number of gridpoints while keeping R. Should only be called before evolving!
+void Spacetime::halve_resolution()
+{
+    int n_old = n_gridpoints;
 
+    vector<BSSNState> old_states(n_old);
+
+    //cut off one point at end to get odd # of gridpoints if needed
+    if (n_gridpoints % 2 == 0)
+        {
+            n_gridpoints -= 1;
+            R *= (n_gridpoints - 1.) / (n_old - 1.);
+        }
+
+    for (int j = 0; j < n_gridpoints; j++) //fill old array with states
+        old_states[j] = slices[0].states[j];
+
+    n_gridpoints = (n_gridpoints + 1) / 2;
+
+    for (int k = 0; k < n_gridpoints; k++)
+        slices[0].states[k] = old_states[2 * k];
+
+    dr = R / (n_gridpoints - 1);
+}
 
 //read data from BosonStar to spacetime and construct initial time slice
 void Spacetime::initialize(BosonStar& boson_star)
@@ -1041,11 +1064,6 @@ void Spacetime::initialize(BosonStar& boson_star)
     if (read_thinshell)
         BS_resolution_factor = 1;
 
-    dr = R / (n_gridpoints - 1);
-    dt = courant_factor * dr;
-    int num_timesteps = ceil(stop_time / dt);
-
-    slices.resize(std::min(num_timesteps + 1, max_stored_slices));
 
     if ((BS_resolution_factor & (BS_resolution_factor - 1)) != 0 || BS_resolution_factor <= 0)
         {
@@ -1075,7 +1093,19 @@ void Spacetime::initialize(BosonStar& boson_star)
         boson_star.write_field();
         boson_star.fill_isotropic_arrays();
         boson_star.write_isotropic();
+
+        R = boson_star.R;
+        n_gridpoints = boson_star.n_gridpoints;
+        omega = boson_star.omega;
+
+        cout << "R = " << boson_star.R << endl;
     }
+
+    dr = R / (n_gridpoints - 1);
+    dt = courant_factor * dr;
+    int num_timesteps = ceil(stop_time / dt);
+
+    slices.resize(std::min(num_timesteps + 1, max_stored_slices));
 
     if (start_time == 0)
         slices[0].read_BS_data(boson_star, BS_resolution_factor, isotropic);
@@ -1097,7 +1127,6 @@ void Spacetime::initialize(BosonStar& boson_star)
 
     if (start_time > 0)
         slices[0].read_checkpoint(start_time, n_gridpoints);
-
 
 
     //resize all auxiliary/diagnostic arrays as appropriate
