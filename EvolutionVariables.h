@@ -63,6 +63,8 @@ class BSSNSlice
         void read_checkpoint(int time, int n_gridpoints);
         void write_slice(std::string file_name = "SliceData.dat");
 
+        int get_refinement_level(int j, std::vector<int>& refinement_points);
+
         bool smooth_lapse();
 
         //BSSNState end_state1; //states off the boundary, computed by assuming outward spherical wave propagation and used in the evolution of the endpoints via Sommerfeld BCs
@@ -139,6 +141,10 @@ class Spacetime
         bool store_A0;
         std::vector<double>  A0_values; // if store_A0 true will hold an array of central field amplitudes
 
+
+        std::vector<int> refinement_points; //points at which refinement should be halved
+        std::vector<bool> active_points; //determines whether each point needs to be updated; 1 if active 0 if not
+
         //some commonly-used derivatives that we store to avoid re-evaluating across update procedure.
         double d_z_chi ;
         double d_z_h_zz;
@@ -201,6 +207,8 @@ class Spacetime
         void compute_diagnostics(BSSNSlice* slice_ptr);
         double slice_mass(BSSNSlice* slice_ptr);
         void update_outer_boundary(double time_step);
+
+        void fill_active_points();
 
         double V(const double A);
         double dV(const double A);

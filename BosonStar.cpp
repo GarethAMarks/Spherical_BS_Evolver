@@ -84,6 +84,7 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "courant_factor = ", courant_factor, quiet);
         fill_parameter(current_line, "n_gridpoints = ", n_gridpoints, quiet);
         fill_parameter(current_line, "stop_time = ", stop_time, quiet);
+        fill_parameter(current_line, "uniform_data = ", uniform_data, quiet);
 
     }
 }
@@ -833,12 +834,18 @@ void BosonStar::fill_given_A(const long double freq)
 void BosonStar::read_thinshell()
 {
 
-    bool uniform_data = 1;
+    string A_filename = "A.dat";
+    string m_filename = "m.dat";
+    string eta_filename = "thet.dat";
+    string phi_filename = "Phi.dat";
 
-    ifstream A_file("unif_A.dat");
-    ifstream m_file("unif_m.dat");
-    ifstream eta_file("unif_thet.dat");
-    ifstream phi_file("unif_Phi.dat");
+    if (uniform_data)
+        { A_filename = "unif_A.dat"; m_filename = "unif_m.dat"; eta_filename = "unif_thet.dat"; phi_filename = "unif_Phi.dat";}
+
+    ifstream A_file(A_filename);
+    ifstream m_file(m_filename);
+    ifstream eta_file(eta_filename);
+    ifstream phi_file(phi_filename);
     ifstream info_file("output.dat");
 
     solitonic = 1;
@@ -866,20 +873,14 @@ void BosonStar::read_thinshell()
 
     int j = 0;
 
-
-    //R = radius_array[line_count - 1];
-
-
     radius_array.resize(n_gridpoints);
 
     //holds the A, phi, and r values from the nonuniform r-y hybrid grid. Needed for interpolation
-    //TODO: size properly, currently overestimated
     vector<double> A_vals(line_count);
     vector<double> phi_vals(line_count);
     vector<double> thet_vals(line_count);
     vector<double> m_vals(line_count);
     vector<double> r_vals(line_count);
-
 
     j = 0;
 
@@ -926,7 +927,6 @@ void BosonStar::read_thinshell()
             if (!(iss >> A_central >> omega_pre_rescale >> junk >> omega >> phi_offset >> M >> junk >> junk >> compactness >> r_99 >> junk >> junk >> junk ))
                 cout << "WARNING: reading thinshell output.dat may have failed " << endl;
         }
-
     }
 
     //read in phi-values, accounting for offset and (crudely) computing eta while we're at it

@@ -431,6 +431,23 @@ void BSSNSlice::read_checkpoint(int time, int n_gridpoints)
     }
 }
 
+//determines which refinement level j belongs to. 1 is highest resolution; for each level up the resolution halves.
+int BSSNSlice::get_refinement_level(int j, std::vector<int>& refinement_points)
+{
+    int n_refinements = refinement_points.size();
+    int level = 1;
+
+    int k = 0;
+
+    while ( k < n_refinements && j >= refinement_points[k])
+    {
+        level++;
+        k++;
+    }
+
+    return level;
+
+}
 
 void slice_convergence_test (BSSNSlice& sl, BSSNSlice& sm, BSSNSlice& sh)
 {
@@ -698,9 +715,6 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
         const double alpha = slice_ptr->states[j].alpha;
         const double beta = slice_ptr->states[j].beta;
 
-        //if (chi < min_chi)
-           // chi = min_chi;
-
         //store local variables for commonly-used derivatives to avoid unnecessary re-computation
         d_z_chi = d_z(v_chi,j);
         d_z_h_zz = d_z(v_h_zz,j);
@@ -711,10 +725,6 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
         d_z_beta = d_z(v_beta,j);
 
         auxiliary_quantities_at_point(slice_ptr, j);
-
-        /*double BSSN_sigma = 1.; //constraint damping parameter in BSSN eqns, set to 1 for now
-        double BSSN_eta = 1.; // Gamma driver parameter, 1 for now*/
-
 
         double beta_z = ((z <= min_z) ? d_z_beta : (beta / z)); //beta / z replaced by z-derivative at z = 0
 
@@ -766,12 +776,9 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
                                - 0.5 * chi * (h_ZZ[j] * d_z_alpha * d_z_phi_im + alpha * (h_ZZ[j] * cD_zz_phi_im + n * h_WW[j] * cD_ww_phi_im) )
                                + 0.25 * alpha * h_ZZ[j] * d_z_chi * d_z_phi_im;
 
-        //Gauge variable update using moving puncture evolution
+        //Gauge variable update using moving puncture evolution, unless evolve_shift is off in which case do not update
         rhs.states[j].alpha = beta * d_z_alpha - 2. * pow(alpha, 1.) * K;
         rhs.states[j].beta =  (evolve_shift)? (beta * d_z_beta + 0.75 * c_chris_Z - eta * beta): 0.;
-
-        //if (evolve_shift)
-            //rhs.states[j].beta = beta * d_z_beta + 0.75 * c_chris_Z - eta * beta;
 
         //add damping in away from edges for now; may need to add for edges-- we'll see
         if (damping_factor != 0. && j < n_gridpoints - 3)
@@ -819,6 +826,10 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
     }
 
     // Radiative BC stuff currently only works for D = 4!!!!!
+
+    //version without spatially varying asymptotics
+    //BSSNState asymp_state{1., 1., 1., 0., 0., 0., 0., 0., 0., 0., 0.,1., 0.};
+    //BSSNState asymp_deriv{0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.};
 
     //asymptotic states and their derivatives where relevant (can ignore for matter values as they decay exponentially)
     BSSNState asymp_state{chi_asymp(R - dr), 1., 1., 0., 0., 0., 0., 0., 0., 0., 0.,alpha_asymp(R - dr), 0.};
@@ -1011,6 +1022,8 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "read_thinshell = ", read_thinshell, quiet);
         fill_parameter(current_line, "cutoff_frac = ", cutoff_frac, quiet);
 
+        fill_param_array(current_line, "refinement_points = ", refinement_points, quiet);
+
     }
 
     cout << sigma_BSSN << eta << endl;
@@ -1041,6 +1054,31 @@ void Spacetime::halve_resolution()
     dr = R / (n_gridpoints - 1);
 }
 
+void Spacetime::fill_active_points()
+{
+    //first dactivate all points in case of empty refinement_levels
+    for (int j = 0; j < n_gridpoints; j++)
+        active_points[j] = 0;
+
+    int step_size = 1; //amount we step forward by in activating points
+    int refinement_layers_crossed = 0;
+
+    //now fill in points, halving the number of points filled in every time we pass a refinement layer
+    for (int k = 0; k < n_gridpoints; k += step_size)
+        {
+            active_points[k] = 1;
+
+            //when we cross refinement layer, double step size unless we're already on the last one
+            if (refinement_layers_crossed < refinement_points.size() && k > refinement_points[refinement_layers_crossed]  )
+            {
+                refinement_layers_crossed++;
+                step_size *= 2;
+            }
+        }
+    //for (int j = 0; j < n_gridpoints; j++)
+        //cout << active_points[j] << endl;
+}
+
 //read data from BosonStar to spacetime and construct initial time slice
 void Spacetime::initialize(BosonStar& boson_star)
 {
@@ -1058,8 +1096,11 @@ void Spacetime::initialize(BosonStar& boson_star)
 
     D = SPACEDIM + 1.;
 
-
+    refinement_points = {};
     read_parameters();
+
+    if (refinement_points[0] == -1) //signal to disable any refinement and use all points
+         refinement_points = {};
 
     if (read_thinshell)
         BS_resolution_factor = 1;
@@ -1129,6 +1170,10 @@ void Spacetime::initialize(BosonStar& boson_star)
         slices[0].read_checkpoint(start_time, n_gridpoints);
 
 
+    //n_gridpoints should not change after this point!!!
+
+    cout << n_gridpoints << endl;
+
     //resize all auxiliary/diagnostic arrays as appropriate
     h_ZZ.resize(n_gridpoints);
     h_WW.resize(n_gridpoints);
@@ -1157,6 +1202,9 @@ void Spacetime::initialize(BosonStar& boson_star)
     Mom_Z.resize(n_gridpoints);
     det_h.resize(n_gridpoints);
 
+    active_points.resize(n_gridpoints);
+    fill_active_points();
+
     //compute auxiliary/diagnostic quantities on initial slice
     current_slice_ptr = &slices[0];
 
@@ -1170,6 +1218,9 @@ void Spacetime::initialize(BosonStar& boson_star)
     compute_auxiliary_quantities(current_slice_ptr);
     rho0_init = make_tangherlini ? 1. : rho[0];
     compute_diagnostics(current_slice_ptr);
+
+    for (int k = 0; k < refinement_points.size(); k++)
+        cout << refinement_points[k] << endl;
 }
 
 
@@ -1186,8 +1237,6 @@ void Spacetime::evolve()
     if(store_A0)
         A0_values.resize(num_timesteps);
 
-
-    //todo add labeling
     //write constraint norms at each timestep to file
     std::ofstream constraints_file{"constraint_norms.dat"};
     if (!constraints_file)
@@ -1195,9 +1244,6 @@ void Spacetime::evolve()
         std::cerr << "constraint_norms.dat could not be opened for writing!\n";
         exit(1);
     }
-
-    //cout << "About to resize" << endl;
-    //slices.resize(num_timesteps + 1);
 
     cout <<" \n Will evolve with " << num_timesteps << " time steps \n" << endl;
 
@@ -1229,7 +1275,6 @@ void Spacetime::evolve()
         current_slice_ptr = &slices[n];
         //compute_diagnostics(current_slice_ptr);
 
-
         s1 = slice_rhs(current_slice_ptr);
         t1 = slices[n]  + (0.5 * dt) * s1;
 
@@ -1249,8 +1294,6 @@ void Spacetime::evolve()
 
         //update slice
         slices[n + 1] = slices[n] + (dt / 6.) * (s1 + 2. * s2 + 2. * s3 + s4);
-
-
 
         //enforce that A is traceless
         current_slice_ptr = &slices[n + 1];
