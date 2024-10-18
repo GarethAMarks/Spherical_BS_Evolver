@@ -33,7 +33,6 @@ BSSNState operator+(const BSSNState& s1, const BSSNState& s2)
     s1.phi_re + s2.phi_re, s1.phi_im + s2.phi_im, s1.K_phi_re + s2.K_phi_re, s1.K_phi_im + s2.K_phi_im, s1.alpha + s2.alpha, s1.beta + s2.beta};
 }
 
-
 BSSNState operator-(const BSSNState& s1, const BSSNState& s2)
 {
     return (BSSNState){s1.chi - s2.chi, s1.h_zz - s2.h_zz, s1.h_ww - s2.h_ww, s1.A_zz - s2.A_zz, s1.A_ww - s2.A_ww, s1.K - s2.K, s1.c_chris_Z - s2.c_chris_Z,
@@ -77,6 +76,7 @@ BSSNSlice operator+(const BSSNSlice& slice1, const BSSNSlice& slice2)
     return_slice.states.resize(length);
     return_slice.R = slice1.R;
     return_slice.has_BH = slice1.has_BH;
+    return_slice.refinement_points = slice1.refinement_points;
 
     for (int j = 0; j < length; j++)
     {
@@ -95,6 +95,7 @@ BSSNSlice operator*(double c, const BSSNSlice& slice)
 
     return_slice.R = slice.R;
     return_slice.has_BH = slice.has_BH;
+    return_slice.refinement_points = slice.refinement_points;
 
     for (int j = 0; j < length; j++)
     {
@@ -106,11 +107,14 @@ BSSNSlice operator*(double c, const BSSNSlice& slice)
 
 
 //radial partial derivative of a given bssn var at index. Order is an optional argument that allows higher z-derivatives to be taken, default is 1.
+//should add chacks on refinement levels
 double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
 {
 
     int n_gridpoints = states.size();
     double dr = R / (n_gridpoints - 1);
+
+    int ref_level = get_refinement_level(index, refinement_points); //refinement level; starts at 1 for no refinement and halves every time.
 
     //check index is valid and error out if not
    if (index < 0 || index >= n_gridpoints )
@@ -120,7 +124,7 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
     }
 
     //set of indices using which derivative will be evaluated
-    vector<int> J{index - 2, index - 1, index, index + 1, index + 2};
+    vector<int> J{index - 2 * ref_level, index - ref_level, index, index + ref_level, index + 2 * ref_level};
 
     //enforce BC at z = 0 by using symmetry
     if (index <= 1)
@@ -129,17 +133,17 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
         J[1] = -J[1];
 
 
-    //TEMPORARY: at outer edge just use central value for rightmost two for now (very bad, fix this)
-    if (index == n_gridpoints - 1)
+    //TEMPORARY: at outer edge just use central value for rightmost two; this is cut off in initialize()/ overwritten with BCs anyway
+    if (index == n_gridpoints - ref_level)
         J[3] = J[2];
-    if (index >= n_gridpoints - 2)
+    if (index >= n_gridpoints - 2 * ref_level)
         J[4] = J[3];
 
     //set of values used to compute derivative
     vector<double> F{0., 0., 0., 0., 0.};
 
     //Fill out five values; note that at outer boundary this gives unreliable results
-    if (index < n_gridpoints /*- 2*/)
+    if (index < n_gridpoints)
     {
         //maybe test if swapping order of for/switch affects runtime
         for (int j  = 0; j < 5; j++)
@@ -211,7 +215,7 @@ double BSSNSlice::d_zz(bssn_var var, int index )
 }
 
 //ad hoc function to deal with the discontinuities in d_zz(alpha) around the matching radius from Uli's code. Returns true if smoothing found necessary.
-//currently doesn't work well, deprecated in favor of numpy smoothing.
+//currently doesn't work well, deprecated in favor of python smoothing script using numpy splines.
 bool BSSNSlice::smooth_lapse()
 {
     int d_start, d_end; //beginning and end of the discontinuities
@@ -399,6 +403,9 @@ void BSSNSlice::write_slice(std::string file_name)
 
     for (int j = 0; j < length; j++)
     {
+        //if (!active_points[j]) //perform no computations on inactive points
+            //continue;
+
         data_file <<  std::setprecision (16) << dr * j << "   " << states[j].chi << "    " << states[j].h_zz << "    " << states[j].h_ww  << "    " << states[j].A_zz
         << "   " << states[j].A_ww << "    " << states[j].K << "    " << states[j].c_chris_Z  << "    " << states[j].phi_re << "    " << states[j].phi_im
         << "   " << states[j].K_phi_re << "    " << states[j].K_phi_im << "    " << states[j].alpha << "    " << states[j].beta << endl;
@@ -434,21 +441,25 @@ void BSSNSlice::read_checkpoint(int time, int n_gridpoints)
 //determines which refinement level j belongs to. 1 is highest resolution; for each level up the resolution halves.
 int BSSNSlice::get_refinement_level(int j, std::vector<int>& refinement_points)
 {
+    //cout << "Size is " <<  refinement_points.size() << endl;
+
+    if (refinement_points.empty()) //always return 1 if no refinement
+        return 1;
+
     int n_refinements = refinement_points.size();
     int level = 1;
-
     int k = 0;
 
-    while ( k < n_refinements && j >= refinement_points[k])
+    while ( k < n_refinements && j >= refinement_points[k] - pow(2, k + 1))//check this difference -- meant to ensure we can use a stencil at points spaced by 2^(k + 1) safely at j
     {
         level++;
         k++;
     }
 
     return level;
-
 }
 
+//convergence test for three slices. Resolutions must differ by factor of 2. Also, currently does not support refinement.
 void slice_convergence_test (BSSNSlice& sl, BSSNSlice& sm, BSSNSlice& sh)
 {
     if (sl.R != sm.R || sm.R != sh.R)
@@ -482,7 +493,6 @@ void slice_convergence_test (BSSNSlice& sl, BSSNSlice& sm, BSSNSlice& sh)
 }
 
 
-
 //these let us call d_z and d_zz on the current slice without explicitly referencing it
 //must remember to update current_slice_ptr appropriately!!!
 double Spacetime::d_z(bssn_var var, int index, int order = 1)
@@ -495,7 +505,7 @@ double Spacetime::d_zz(bssn_var var, int index)
     return current_slice_ptr->d_zz(var, index);
 }
 
-double Spacetime::V( const double A)
+double Spacetime::V(const double A)
 {
     if (!solitonic)
         return mu * mu * A * A;
@@ -505,7 +515,7 @@ double Spacetime::V( const double A)
 
 }
 
-double Spacetime::dV( const double A)
+double Spacetime::dV(const double A)
 {
     if (!solitonic)
         return mu * mu;
@@ -543,9 +553,7 @@ double Spacetime::d_alpha_asymp(double r)
         return (M / (R * R)) / sqrt(1 - 2. * M / r);
 }
 
-
-
-//compute auxiliary quantities jth point
+//compute auxiliary quantities at jth point
 void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
 {
     double n = D - 2.;
@@ -561,9 +569,6 @@ void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
     const double K_phi_re = slice_ptr->states[j].K_phi_re;
     const double K_phi_im = slice_ptr->states[j].K_phi_im;
     const double beta = slice_ptr->states[j].beta;
-
-    //if (chi < min_chi)
-       // chi = min_chi;
 
     //inverse metric components
     h_WW[j] = 1 / h_ww;
@@ -694,10 +699,14 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
     rhs.R = R;
     rhs.states.resize(n_gridpoints);
 
-
-
     for (int j = 0; j < n_gridpoints - 2; j++)
     {
+        if (!active_points[j])//perform no calculations and skip on inactive points
+        {
+                //rhs.states[j] = {0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.}
+                continue;
+        }
+
         double z = j * dr;
 
         //shorthand versions of the BSSN vars on desired slice for convenience
@@ -751,7 +760,7 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
         if (z >= min_z) //add terms in d_z(beta) / z - beta /z^2 when z =/= 0
             rhs.states[j].c_chris_Z += n * (h_WW[j] + (D - 3.) * h_ZZ[j] / (D - 1.)) * (d_z_beta / z - beta / (z * z));
 
-        //|phi|^2
+        //|phi|
         double mod_phi = sqrt(phi_re * phi_re + phi_im * phi_im);
 
         rhs.states[j].phi_re = beta * d_z_phi_re - 2 * alpha * K_phi_re;
@@ -781,6 +790,7 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
         rhs.states[j].beta =  (evolve_shift)? (beta * d_z_beta + 0.75 * c_chris_Z - eta * beta): 0.;
 
         //add damping in away from edges for now; may need to add for edges-- we'll see
+        //WARNING: damping + refinement not currently compatible
         if (damping_factor != 0. && j < n_gridpoints - 3)
             {
                 vector<int> J = {j - 3, j - 2, j - 1, j, j + 1, j + 2, j + 3}; //indices at which to take stencil
@@ -831,30 +841,42 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
     //BSSNState asymp_state{1., 1., 1., 0., 0., 0., 0., 0., 0., 0., 0.,1., 0.};
     //BSSNState asymp_deriv{0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.};
 
+
+    int max_ref = (refinement_levels.size() == 0 ) ? 1 : refinement_levels[refinement_levels.size() - 1]; //refinement level at outermost bdry
+    int res_fac = pow(2, max_ref - 1); //number of points skipped per slot in stencil
+
     //asymptotic states and their derivatives where relevant (can ignore for matter values as they decay exponentially)
-    BSSNState asymp_state{chi_asymp(R - dr), 1., 1., 0., 0., 0., 0., 0., 0., 0., 0.,alpha_asymp(R - dr), 0.};
-    BSSNState asymp_deriv{d_chi_asymp(R - dr), 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., d_alpha_asymp(R - dr), 0.}; // r-derivative of asymptotic expansion
+    BSSNState asymp_state{chi_asymp(R - dr * res_fac), 1., 1., 0., 0., 0., 0., 0., 0., 0., 0.,alpha_asymp(R - dr * res_fac), 0.};
+    BSSNState asymp_deriv{d_chi_asymp(R - dr * res_fac), 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., d_alpha_asymp(R - dr * res_fac), 0.}; // r-derivative of asymptotic expansion
 
     //maybe adjust to account for purported 1/r^2 decay in K!
     BSSNState N{1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.};
 
-    BSSNState& s1= slice_ptr->states[n_gridpoints - 5];
-    BSSNState& s2= slice_ptr->states[n_gridpoints - 4];
-    BSSNState& s3= slice_ptr->states[n_gridpoints - 3];
-    BSSNState& s4= slice_ptr->states[n_gridpoints - 2];
-    BSSNState& s5= slice_ptr->states[n_gridpoints - 1];
+    /*BSSNState& s1= slice_ptr->states[n_gridpoints - 5 * max_ref];
+    BSSNState& s2= slice_ptr->states[n_gridpoints - 4 * max_ref];
+    BSSNState& s3= slice_ptr->states[n_gridpoints - 3 * max_ref];
+    BSSNState& s4= slice_ptr->states[n_gridpoints - 2 * max_ref];
+    BSSNState& s5= slice_ptr->states[n_gridpoints - 1 * max_ref];*/
 
+    //outermost 5 active gridpoints
+    BSSNState& s1= slice_ptr->states[last_active_j - 4 * res_fac];
+    BSSNState& s2= slice_ptr->states[last_active_j - 3 * res_fac];
+    BSSNState& s3= slice_ptr->states[last_active_j - 2 * res_fac];
+    BSSNState& s4= slice_ptr->states[last_active_j - 1 * res_fac];
+    BSSNState& s5= slice_ptr->states[last_active_j];
     //limiting characteristic speeds at infinity
     BSSNState char_speeds{sqrt(2. / s4.alpha), 1., 1., 1., 1., sqrt(2. / s4.alpha), 1., 1., 1., 1., 1., sqrt(2. / s4.alpha), 1.};
 
-    rhs.states[n_gridpoints - 2] = (-1) * char_speeds * ( p4_stencil(dr, s1, s2, s3, s4, s5) + N * (s4 - asymp_state) /  (dr * (n_gridpoints - 2.))- asymp_deriv);
+    rhs.states[last_active_j - res_fac] = (-1) * char_speeds * ( p4_stencil(dr * res_fac, s1, s2, s3, s4, s5) + N * (s4 - asymp_state) /  (dr * (last_active_j - res_fac))- asymp_deriv);
 
     //update variable asymptotic states to outermost edge
     asymp_state.chi = chi_asymp(R);  asymp_state.alpha = alpha_asymp(R);
     asymp_deriv.chi = d_chi_asymp(R);  asymp_deriv.alpha = d_alpha_asymp(R);
 
-    rhs.states[n_gridpoints - 1] = (-1) * char_speeds * ( p5_stencil(dr, s1, s2, s3, s4, s5) + N * (s5 - asymp_state) / (dr * (n_gridpoints - 1.)) - asymp_deriv);
+    rhs.states[last_active_j] = (-1) * char_speeds * ( p5_stencil(dr, s1, s2, s3, s4, s5) + N * (s5 - asymp_state) / (dr * last_active_j) - asymp_deriv);
+
     rhs.has_BH = slice_ptr->has_BH;
+    rhs.refinement_points = slice_ptr->refinement_points;
 
     return rhs;
 }
@@ -866,6 +888,9 @@ void Spacetime::make_A_traceless(BSSNSlice* slice_ptr)
 
     for (int j = 0; j < n_gridpoints; j++)
     {
+        if (!active_points[j]) //perform no computations on inactive points
+            continue;
+
         const double h_zz = slice_ptr->states[j].h_zz;
         const double h_ww = slice_ptr->states[j].h_ww;
         const double A_zz = slice_ptr->states[j].A_zz;
@@ -877,7 +902,7 @@ void Spacetime::make_A_traceless(BSSNSlice* slice_ptr)
     }
 }
 
-
+//TODO: make compatible with refinement
 double Spacetime::slice_mass(BSSNSlice* slice_ptr)
 {
 
@@ -898,6 +923,9 @@ double Spacetime::slice_mass(BSSNSlice* slice_ptr)
     double mass = 0;
     for (int j = 0; j <  0.95 * n_gridpoints - 1; j++)
     {
+        if (!active_points[j]) //perform no computations on inactive points
+            continue;
+
         double z = dr * j;
         const double& chi = slice_ptr->states[j].chi;
         mass += -0.25 * dr * (Ham[j]- h_ZZ[j] * chi * R_zz[j] - n * h_WW[j] * chi * R_ww[j]) * z * z * pow(chi, -1.25) ; //-1.25 is spurious!
@@ -916,8 +944,10 @@ void Spacetime:: compute_diagnostics (BSSNSlice* slice_ptr)
 
     for (int j = 0; j < n_gridpoints - 2; j++)
     {
-        double z = j * dr;
+        if (!active_points[j]) //perform no computations on inactive points
+            continue;
 
+        double z = j * dr;
 
         //shorthand versions of the BSSN vars on desired slice for convenience
         double chi = slice_ptr->states[j].chi;
@@ -973,6 +1003,8 @@ void Spacetime:: write_diagnostics()
 
     for (int j = 0; j < length - 2; j++)
     {
+        if (!active_points[j]) //perform no computations on inactive points
+            continue;
 
         const double& phi_re = current_slice_ptr->states[j].phi_re;
         const double& phi_im = current_slice_ptr->states[j].phi_im;
@@ -1056,7 +1088,7 @@ void Spacetime::halve_resolution()
 
 void Spacetime::fill_active_points()
 {
-    //first dactivate all points in case of empty refinement_levels
+    //first deactivate all points in case of empty refinement_levels
     for (int j = 0; j < n_gridpoints; j++)
         active_points[j] = 0;
 
@@ -1079,6 +1111,13 @@ void Spacetime::fill_active_points()
         //cout << active_points[j] << endl;
 }
 
+void Spacetime::fill_refinement_levels()
+{
+    refinement_levels.resize(n_gridpoints);
+    for (int j = 0; j < n_gridpoints; j++)
+        refinement_levels[j] = slices[0].get_refinement_level(j, refinement_points);
+}
+
 //read data from BosonStar to spacetime and construct initial time slice
 void Spacetime::initialize(BosonStar& boson_star)
 {
@@ -1099,12 +1138,13 @@ void Spacetime::initialize(BosonStar& boson_star)
     refinement_points = {};
     read_parameters();
 
-    if (refinement_points[0] == -1) //signal to disable any refinement and use all points
-         refinement_points = {};
+    //cout << refinement_points.size() << endl;
+
+    if (refinement_points[0] <= 0) //signal to disable any refinement and use all points
+         refinement_points.clear();//refinement_points = {};
 
     if (read_thinshell)
         BS_resolution_factor = 1;
-
 
     if ((BS_resolution_factor & (BS_resolution_factor - 1)) != 0 || BS_resolution_factor <= 0)
         {
@@ -1147,6 +1187,7 @@ void Spacetime::initialize(BosonStar& boson_star)
     int num_timesteps = ceil(stop_time / dt);
 
     slices.resize(std::min(num_timesteps + 1, max_stored_slices));
+    slices[0].refinement_points = refinement_points;
 
     if (start_time == 0)
         slices[0].read_BS_data(boson_star, BS_resolution_factor, isotropic);
@@ -1159,6 +1200,7 @@ void Spacetime::initialize(BosonStar& boson_star)
     R *= (n_gridpoints - 1.) / (n_gridpoints + 1.); //also need to rescale R to avoid stretching solution
     slices[0].R = R;
 
+
     int n_old = n_gridpoints;
     n_gridpoints = round(cutoff_frac * n_gridpoints); //shrink domain by cutoff_frac, ideally to remove detritus in H
     R = (R * (n_gridpoints - 1.)) / (n_old - 1.);
@@ -1169,10 +1211,9 @@ void Spacetime::initialize(BosonStar& boson_star)
     if (start_time > 0)
         slices[0].read_checkpoint(start_time, n_gridpoints);
 
-
     //n_gridpoints should not change after this point!!!
 
-    cout << n_gridpoints << endl;
+    //cout << n_gridpoints << endl;
 
     //resize all auxiliary/diagnostic arrays as appropriate
     h_ZZ.resize(n_gridpoints);
@@ -1203,7 +1244,13 @@ void Spacetime::initialize(BosonStar& boson_star)
     det_h.resize(n_gridpoints);
 
     active_points.resize(n_gridpoints);
+
     fill_active_points();
+    fill_refinement_levels();
+
+    last_active_j = n_gridpoints - 1; //find last active gridpoint
+    while (!active_points[last_active_j])
+        last_active_j--;
 
     //compute auxiliary/diagnostic quantities on initial slice
     current_slice_ptr = &slices[0];
@@ -1218,9 +1265,6 @@ void Spacetime::initialize(BosonStar& boson_star)
     compute_auxiliary_quantities(current_slice_ptr);
     rho0_init = make_tangherlini ? 1. : rho[0];
     compute_diagnostics(current_slice_ptr);
-
-    for (int k = 0; k < refinement_points.size(); k++)
-        cout << refinement_points[k] << endl;
 }
 
 
@@ -1267,6 +1311,7 @@ void Spacetime::evolve()
 
         slices[n + 1].states.resize(n_gridpoints);
         slices[n + 1].R = R;
+        slices[n + 1].refinement_points = refinement_points;
 
         if (make_tangherlini || slices[n].states[0].chi < 10 * min_chi)
             slices[n + 1].has_BH = 1;

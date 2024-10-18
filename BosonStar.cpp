@@ -192,10 +192,10 @@ double BosonStar::m(int j)
 }
 
 //writes field values to BSdata.dat
-void BosonStar::write_field()
+void BosonStar::write_field(string filename)
 {
 
-    std::ofstream data_file{ "BSdata.dat" };
+    std::ofstream data_file{filename};
     //double dr = R / (n_gridpoints - 1);
 
     // If we couldn't open the output file stream for writing
@@ -788,11 +788,16 @@ void BosonStar::fill_given_A(const long double freq)
     FieldState s1, s2, s3, s4;
 
     //fill in grid using RK4 evolution
+
+    //TODO: maybe support higher-res solving for X, phi
+
     for (int j = 0; j < n_gridpoints - 1; j++)
     {
         double r = j * dr;
 
         s1 = state_RHS(r, freq, state[j], 1, 1);
+
+        //state[j].A = A_vals[j];
 
         state[j].A = 0.5 * (A_vals[j + 1] + A_vals[j]); //use linearly interpolated A-values for intermediate stages
         state[j].eta = 0.5 * (eta_vals[j + 1] + eta_vals[j]);
@@ -808,8 +813,8 @@ void BosonStar::fill_given_A(const long double freq)
         //update state variables and radius array
         state[j + 1] = state[j] + (dr / 6.) * (s1 + 2 * s2 + 2 * s3 + s4);
 
-        state[j + 1].A = A_vals[j];
-        state[j + 1].eta = eta_vals[j];
+        state[j + 1].A = A_vals[j + 1];
+        state[j + 1].eta = eta_vals[j + 1];
 
         radius_array[j+1] = (j + 1) * dr;
 
@@ -823,8 +828,8 @@ void BosonStar::fill_given_A(const long double freq)
         }
     }
 
-    state[0].A = A_vals[0];
-    state[0].eta = eta_vals[0];
+    for (int j = 0; j < n_gridpoints; j++)
+        {  state[j].A = A_vals[j]; state[j].eta = eta_vals[j];}
 
     //cout << "\n" << "Finished RK4 evolution" << endl;
 }
@@ -939,11 +944,8 @@ void BosonStar::read_thinshell()
             //state[j].eta = (j == 0) ? 0 : (A_vals[j] - A_vals[j - 1] / ( r_vals[j] - r_vals[j - 1] ) / state[j].X ); //wrong currently bc of X
             j++;
 
-            //cout << r_vals[j] << endl;
         }
     }
-
-
 
     double dr = R / (n_gridpoints - 1);
     //interpolate to fill uniform grid with A, phi, eta
@@ -981,14 +983,7 @@ void BosonStar::read_thinshell()
             thet[index] = thet_vals[l0 + index];
         }
 
-        double mass_val = lagrange_interp(k * dr, r, m);
-        state[k].phi = lagrange_interp(k * dr, r, phi);
-
-        //if (k * dr > 1.2 * r_99) //hard cutoff on M, phi prevents spurious oscillations when changing resolution at large r.
-       // {
-          //  mass_val = M;
-            //state[k].phi = log(sqrt(1 - 2 * M / (k * dr)));
-        //}
+        radius_array[k] = dr * k;
 
         if (uniform_data)
         {
@@ -996,19 +991,23 @@ void BosonStar::read_thinshell()
             state[k].X = 1 /sqrt(1 - 2 * m_vals[k] / (dr * k));
             state[k].phi = phi_vals[k];
             state[k].eta = thet_vals[k] * exp(-state[k].phi - phi_offset );
-            radius_array[k] = dr * k;
         }
 
         else
         {
+             double mass_val = lagrange_interp(k * dr, r, m);
+            state[k].phi = lagrange_interp(k * dr, r, phi);
+
             state[k].A = lagrange_interp(k * dr, r, A);
             state[k].eta = lagrange_interp(k * dr, r, thet) * exp(-state[k].phi - phi_offset ) ;
             state[k].X = 1 /sqrt(1 - 2 * mass_val / (dr * k));
-            radius_array[k] = dr * k;
         }
+
+
     }
     state[0].X = 1; //interpolation for m seems to fail at r = 0, so just hardcode this as it's true by def'n
 
+    //write_field("BSdata1.dat");
     //fill_given_A(omega);
 }
 

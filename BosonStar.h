@@ -87,7 +87,7 @@ class BosonStar
         void rk4_solve (const long double freq);
         void read_parameters(bool quiet = 0);
         void read_thinshell();
-        void write_field();
+        void write_field(std::string filename="BSdata.dat");
         void convergence_test(long double freq = 0.);
         void double_resolution();
         bool solve(bool quiet = 0);

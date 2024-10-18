@@ -54,14 +54,18 @@ class BSSNSlice
 
     bool has_BH = 0;
     double make_tangherlini(double m, double min_chi);
+    double refinement_level;
+
 
 
     public:
         std::vector<BSSNState> states; //array of states on a BSSN time slice
 
+        std::vector<int> refinement_points; //points at which refinement should be halved; to be copied from spacetime version at start of each step
+
         void read_BS_data(BosonStar& boson_star,int BS_resolution_factor = 1., bool isotropic = 1);
         void read_checkpoint(int time, int n_gridpoints);
-        void write_slice(std::string file_name = "SliceData.dat");
+        void write_slice( std::string file_name = "SliceData.dat");
 
         int get_refinement_level(int j, std::vector<int>& refinement_points);
 
@@ -145,6 +149,10 @@ class Spacetime
         std::vector<int> refinement_points; //points at which refinement should be halved
         std::vector<bool> active_points; //determines whether each point needs to be updated; 1 if active 0 if not
 
+        std::vector<int> refinement_levels; //lists the refinement levels of each point.
+
+        int last_active_j;//outermost active gridpoint, for bdry purposes
+
         //some commonly-used derivatives that we store to avoid re-evaluating across update procedure.
         double d_z_chi ;
         double d_z_h_zz;
@@ -209,6 +217,7 @@ class Spacetime
         void update_outer_boundary(double time_step);
 
         void fill_active_points();
+        void fill_refinement_levels();
 
         double V(const double A);
         double dV(const double A);
