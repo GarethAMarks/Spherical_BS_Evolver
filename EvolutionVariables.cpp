@@ -115,6 +115,7 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
     double dr = R / (n_gridpoints - 1);
 
     int ref_level = get_refinement_level(index, refinement_points); //refinement level; starts at 1 for no refinement and halves every time.
+    int res_fac = pow(2, ref_level - 1);
 
     //check index is valid and error out if not
    if (index < 0 || index >= n_gridpoints )
@@ -124,7 +125,7 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
     }
 
     //set of indices using which derivative will be evaluated
-    vector<int> J{index - 2 * ref_level, index - ref_level, index, index + ref_level, index + 2 * ref_level};
+    vector<int> J{index - 2 * res_fac, index - res_fac, index, index + res_fac, index + 2 * res_fac};
 
     //enforce BC at z = 0 by using symmetry
     if (index <= 1)
@@ -134,9 +135,9 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
 
 
     //TEMPORARY: at outer edge just use central value for rightmost two; this is cut off in initialize()/ overwritten with BCs anyway
-    if (index == n_gridpoints - ref_level)
+    if (index >= n_gridpoints - res_fac)
         J[3] = J[2];
-    if (index >= n_gridpoints - 2 * ref_level)
+    if (index >= n_gridpoints - 2 * res_fac)
         J[4] = J[3];
 
     //set of values used to compute derivative
@@ -205,7 +206,7 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
             if (index == 0 && parity_is_odd)
                 F[1] = -F[1];
     }
-    return fivePointDeriv(dr, order, F[0],F[1],F[2],F[3],F[4]);
+    return fivePointDeriv(res_fac * dr, order, F[0],F[1],F[2],F[3],F[4]);
 }
 
 //second z-derivative, basically syntactic sugar for d_z(var, index, 2)
