@@ -3,14 +3,30 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import UnivariateSpline, make_lsq_spline, BSpline, CubicSpline
 
 
+
+
+def find_float(filename, search_string):
+    with open(filename, 'r') as file:
+        for line in file:
+            if line.startswith(search_string):
+                try:
+                    # Strip the search string and convert the remainder to double
+                    remainder = line[len(search_string):].strip()
+                    float_value = float(remainder)
+                    return float_value
+                except ValueError:
+                    print(f"Error: Couldn't convert remainder '{remainder}' to float.")
+                    return None
+
+
 #number of gridpoints before and after jump to skip, and threshold value: magnitude of second-derivative-jump must be at least this much to trigger discontinuity finder
 start_gap = 40
 end_gap = 100
 jump_thresh = 5
 
 #number of gridpoints and total radius
-n_gridpoints = 12800
-R = 120
+n_gridpoints = int(find_float("BSParams.par", "n_gridpoints = "))
+R = find_float("BSParams.par", "R = ")
 
 #use this global variable to store the known matching location so smoothing can be done on variables with less detectable discontinuities
 gap_loc = -1
