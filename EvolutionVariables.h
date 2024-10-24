@@ -93,6 +93,7 @@ class Spacetime
         void initialize(BosonStar& boson_star);
         void write_diagnostics();
         void evolve();
+        void write_current_slice( std::string file_name = "SliceData.dat");
 
         void halve_resolution();
         void fourier_transform_A0();
@@ -157,6 +158,7 @@ class Spacetime
         double d_z_chi ;
         double d_z_h_zz;
         double d_z_h_ww;
+        double d_z_K;
         double d_z_phi_re;
         double d_z_phi_im;
         double d_z_alpha;
@@ -167,6 +169,7 @@ class Spacetime
         //L2 norms of hamiltonian/momentum constraints
         double Ham_L2;
         double Mom_L2;
+        bool only_BS_violation; // if true, only counts violation inside BS radius r_99 towards Ham/Mom norms
 
         int max_stored_slices; //will only hold this many previous slices in memory
         int BS_resolution_factor;
@@ -189,6 +192,7 @@ class Spacetime
         double omega;
         bool isotropic; //whether we will use isotropic coordinates (otherwise polar-areal)
         double M;
+        double r_99;
 
         double sigma_BSSN; //multiplier of constraint term in the gamma evolution equation
         double eta; //gamma driver condition parameter
@@ -218,6 +222,7 @@ class Spacetime
 
         void fill_active_points();
         void fill_refinement_levels();
+        void kill_refinement_noise();
 
         double V(const double A);
         double dV(const double A);

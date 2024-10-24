@@ -451,7 +451,7 @@ int BSSNSlice::get_refinement_level(int j, std::vector<int>& refinement_points)
     int level = 1;
     int k = 0;
 
-    while ( k < n_refinements && j >= refinement_points[k] - pow(2, k + 1))//check this difference -- meant to ensure we can use a stencil at points spaced by 2^(k + 1) safely at j
+    while ( k < n_refinements && j >= refinement_points[k] - pow(2, k + 2))//check this difference -- meant to ensure we can use a stencil at points spaced by 2^(k + 1) safely at j
     {
         level++;
         k++;
@@ -700,6 +700,8 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
     rhs.R = R;
     rhs.states.resize(n_gridpoints);
 
+    int max_ref = (refinement_levels.size() == 0 ) ? 1 : refinement_levels[refinement_levels.size() - 1]; //refinement level at outermost bdry
+
     for (int j = 0; j < n_gridpoints - 2; j++)
     {
         if (!active_points[j])//perform no calculations and skip on inactive points
@@ -733,6 +735,8 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
         d_z_phi_im =  d_z(v_phi_im,j);
         d_z_alpha =  d_z(v_alpha,j);
         d_z_beta = d_z(v_beta,j);
+        d_z_K = d_z(v_K,j);
+
 
         auxiliary_quantities_at_point(slice_ptr, j);
 
@@ -744,7 +748,7 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
         rhs.states[j].h_zz = beta * d_z_h_zz + 2. * h_zz * d_z_beta - 2. * h_zz * (d_z_beta + n * beta_z) / (D - 1.) - 2. * alpha * A_zz;
         rhs.states[j].h_ww = beta * d_z_h_ww - 2. * h_ww * (d_z_beta - beta_z) / (D - 1.) - 2. * alpha * A_ww;
 
-        rhs.states[j].K = beta * d_z(v_K,j) - chi * h_ZZ[j] * D_zz_alpha[j] + alpha * h_ZZ[j] * h_ZZ[j] * A_zz * A_zz + alpha * K * K / (D - 1.)
+        rhs.states[j].K = beta * d_z_K - chi * h_ZZ[j] * D_zz_alpha[j] + alpha * h_ZZ[j] * h_ZZ[j] * A_zz * A_zz + alpha * K * K / (D - 1.)
                         + n * h_WW[j] * (alpha * A_ww * A_ww / h_ww - chi * D_ww_alpha[j]) + 8. * M_PI * alpha * (S[j] + (D - 3.) * rho[j]) / n;
 
         rhs.states[j].A_zz = beta * d_z(v_A_zz, j) + 2. * A_zz * d_z_beta - 2. * A_zz * (d_z_beta + n * beta_z) / (D - 1.) + alpha * K * A_zz
@@ -753,7 +757,7 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
                             + chi * (alpha * R_ww_TF[j] - D_ww_alpha_TF[j] - 8. * M_PI * alpha * S_ww_TF[j]);
 
         rhs.states[j].c_chris_Z = beta * d_z(v_c_chris_Z,j) + 2. * c_chris_Z * (d_z_beta + n * beta_z) / (D - 1.) + h_ZZ[j] * d_zz(v_beta,j) - c_chris_Z * d_z_beta
-                                + (D - 3.) * h_ZZ[j] * d_zz(v_beta,j) / (D - 1.) - 2. * (D - 2.) * alpha * h_ZZ[j] * d_z(v_K,j) / (D - 1.)
+                                + (D - 3.) * h_ZZ[j] * d_zz(v_beta,j) / (D - 1.) - 2. * (D - 2.) * alpha * h_ZZ[j] * d_z_K / (D - 1.)
                                 - A_zz * h_ZZ[j] * h_ZZ[j] * ( (D - 1.) * alpha * d_z_chi / chi + 2 * d_z_alpha)
                                 + 2 * alpha * (chris_Zzz[j] * h_ZZ[j] * h_ZZ[j] * A_zz + n * chris_Zww[j] * h_WW[j] * h_WW[j] * A_ww)
                                 - sigma_BSSN * aux_constraint[j] - 16. * M_PI * alpha * j_z[j]* h_ZZ[j];
@@ -771,11 +775,11 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
         double d_phi_im_z = ((z <= min_z) ? d_zz(v_phi_im,j) : d_z_phi_im / z);
 
         //conformal 2nd  covariant derivatives of scalar field
-        double cD_zz_phi_re = d_zz(v_phi_re, j ) - chris_Zzz[j] * d_z(v_phi_re, j );
-        double cD_zz_phi_im = d_zz(v_phi_im, j ) - chris_Zzz[j] * d_z(v_phi_im, j );
+        double cD_zz_phi_re = d_zz(v_phi_re, j ) - chris_Zzz[j] * d_z_phi_re ;
+        double cD_zz_phi_im = d_zz(v_phi_im, j ) - chris_Zzz[j] * d_z_phi_im ;
 
-        double cD_ww_phi_re = d_phi_re_z - chris_Zww[j] * d_z(v_phi_re, j );
-        double cD_ww_phi_im = d_phi_im_z - chris_Zww[j] * d_z(v_phi_im, j );
+        double cD_ww_phi_re = d_phi_re_z - chris_Zww[j] * d_z_phi_re;
+        double cD_ww_phi_im = d_phi_im_z - chris_Zww[j] * d_z_phi_im;
 
 
         rhs.states[j].K_phi_re = beta * d_z(v_K_phi_re,j) + alpha * K * K_phi_re + 0.5 * alpha * phi_re * dV(mod_phi)
@@ -792,9 +796,11 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
 
         //add damping in away from edges for now; may need to add for edges-- we'll see
         //WARNING: damping + refinement not currently compatible
-        if (damping_factor != 0. && j < n_gridpoints - 3)
+        if (damping_factor != 0. && j < n_gridpoints - 3 * pow(2, max_ref - 1))
             {
-                vector<int> J = {j - 3, j - 2, j - 1, j, j + 1, j + 2, j + 3}; //indices at which to take stencil
+                int res_fac = pow(2, slice_ptr->get_refinement_level(j, refinement_points) - 1);
+
+                vector<int> J = {j - 3 * res_fac, j - 2 * res_fac, j - 1 * res_fac, j, j + 1 * res_fac, j + 2 * res_fac, j + 3 * res_fac}; //indices at which to take stencil
 
                 if (j < 3) //use symmetry across 0 to fill 7-point stencils
                 {
@@ -817,20 +823,10 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
                     }
                 }*/
 
-                double d_mult = damping_factor * (pow(dr, 5.) / 64. );
+                double d_mult = damping_factor * (pow(dr * res_fac, 5.) / 64. );
 
-                BSSNState damping_corr = d_mult * sevenPointDeriv(dr, 6, *sts[0], *sts[1], *sts[2], *sts[3],*sts[4], *sts[5], *sts[6]);
+                BSSNState damping_corr = d_mult * sevenPointDeriv(dr * res_fac, 6, *sts[0], *sts[1], *sts[2], *sts[3],*sts[4], *sts[5], *sts[6]);
                 //BSSNState damping_corr = d_mult * sevenPointDeriv(dr, 6, slice_ptr->states[J[0]], slice_ptr->states[J[1]], slice_ptr->states[J[2]], slice_ptr->states[J[3]], slice_ptr->states[J[4]], slice_ptr->states[J[5]], slice_ptr->states[J[6]]);
-
-                //account for odd symetry of beta + contracted christoffels across z = 0
-                /*if (j < 3)
-                {
-                    damping_corr.beta =  d_mult * sevenPointDeriv<double>(dr, 6,
-                    -slice_ptr->states[J[0]].beta, -&slice_ptr->states[J[1]].beta, -slice_ptr->states[J[2]].beta, slice_ptr->states[J[3]].beta, slice_ptr->states[J[4]].beta, slice_ptr->states[J[5]].beta, slice_ptr->states[J[6]].beta);
-
-                    damping_corr.c_chris_Z =  d_mult * sevenPointDeriv<double>(dr, 6,
-                    -slice_ptr->states[J[0]].c_chris_Z, -slice_ptr->states[J[1]].c_chris_Z, -slice_ptr->states[J[2]].c_chris_Z, slice_ptr->states[J[3]].c_chris_Z, slice_ptr->states[J[4]].c_chris_Z, slice_ptr->states[J[5]].c_chris_Z, slice_ptr->states[J[6]].c_chris_Z);
-                }*/
 
                 rhs.states[j] = rhs.states[j] + damping_corr;
             }
@@ -842,22 +838,15 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
     //BSSNState asymp_state{1., 1., 1., 0., 0., 0., 0., 0., 0., 0., 0.,1., 0.};
     //BSSNState asymp_deriv{0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.};
 
-
-    int max_ref = (refinement_levels.size() == 0 ) ? 1 : refinement_levels[refinement_levels.size() - 1]; //refinement level at outermost bdry
     int res_fac = pow(2, max_ref - 1); //number of points skipped per slot in stencil
 
     //asymptotic states and their derivatives where relevant (can ignore for matter values as they decay exponentially)
+    //TODO: switch to refinement-appropriate form
     BSSNState asymp_state{chi_asymp(R - dr * res_fac), 1., 1., 0., 0., 0., 0., 0., 0., 0., 0.,alpha_asymp(R - dr * res_fac), 0.};
     BSSNState asymp_deriv{d_chi_asymp(R - dr * res_fac), 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., d_alpha_asymp(R - dr * res_fac), 0.}; // r-derivative of asymptotic expansion
 
     //maybe adjust to account for purported 1/r^2 decay in K!
     BSSNState N{1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.};
-
-    /*BSSNState& s1= slice_ptr->states[n_gridpoints - 5 * max_ref];
-    BSSNState& s2= slice_ptr->states[n_gridpoints - 4 * max_ref];
-    BSSNState& s3= slice_ptr->states[n_gridpoints - 3 * max_ref];
-    BSSNState& s4= slice_ptr->states[n_gridpoints - 2 * max_ref];
-    BSSNState& s5= slice_ptr->states[n_gridpoints - 1 * max_ref];*/
 
     //outermost 5 active gridpoints
     BSSNState& s1= slice_ptr->states[last_active_j - 4 * res_fac];
@@ -874,7 +863,7 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
     asymp_state.chi = chi_asymp(R);  asymp_state.alpha = alpha_asymp(R);
     asymp_deriv.chi = d_chi_asymp(R);  asymp_deriv.alpha = d_alpha_asymp(R);
 
-    rhs.states[last_active_j] = (-1) * char_speeds * ( p5_stencil(dr, s1, s2, s3, s4, s5) + N * (s5 - asymp_state) / (dr * last_active_j) - asymp_deriv);
+    rhs.states[last_active_j] = (-1) * char_speeds * ( p5_stencil(dr * res_fac, s1, s2, s3, s4, s5) + N * (s5 - asymp_state) / (dr * last_active_j) - asymp_deriv);
 
     rhs.has_BH = slice_ptr->has_BH;
     rhs.refinement_points = slice_ptr->refinement_points;
@@ -975,7 +964,7 @@ void Spacetime:: compute_diagnostics (BSSNSlice* slice_ptr)
 
         //add contribution to L2 norms of Ham/ Mom constraints; z^2 factor for violation on sphere. Ad hoc cutoff radius to avoid
         //violation being dominated by non-propagating boundary noise.
-       if (z < R * 0.9) {Ham_L2 += dr * Ham[j] * Ham[j] * z * z  /* * pow(chi, -1.5)*/;
+       if (z < R * (only_BS_violation ? (r_99 / R) : 0.9)) {Ham_L2 += dr * Ham[j] * Ham[j] * z * z  /* * pow(chi, -1.5)*/;
         Mom_L2 += dr * Mom_Z[j] * Mom_Z[j]  * z * z * pow(chi, -1.5);}
 
     }
@@ -983,6 +972,33 @@ void Spacetime:: compute_diagnostics (BSSNSlice* slice_ptr)
     //take square root to get L^2 norms; normalize by 16 * pi * central energy density (probably not appropriate for mom...)
     Ham_L2 = sqrt(Ham_L2) / (16. * M_PI * rho0_init);
     Mom_L2 = sqrt(Mom_L2) / (16. * M_PI * rho0_init);
+}
+
+//writes diagnostic quantities to output file
+void Spacetime:: write_current_slice(std::string file_name)
+{
+    const BSSNSlice& s = *current_slice_ptr;
+    dr = R / (n_gridpoints - 1);
+
+    std::ofstream data_file{file_name};
+
+     if (!data_file)
+    {
+        cerr << "SliceData.dat could not be opened for writing!\n";
+        exit(1);
+    }
+
+
+    for (int j = 0; j < n_gridpoints; j++)
+    {
+        if (!active_points[j]) //perform no computations on inactive points
+            continue;
+
+        data_file <<  std::setprecision (16) << dr * j << "   " << s.states[j].chi << "    " << s.states[j].h_zz << "    " << s.states[j].h_ww  << "    " << s.states[j].A_zz
+        << "   " << s.states[j].A_ww << "    " << s.states[j].K << "    " << s.states[j].c_chris_Z  << "    " << s.states[j].phi_re << "    " << s.states[j].phi_im
+        << "   " << s.states[j].K_phi_re << "    " << s.states[j].K_phi_im << "    " << s.states[j].alpha << "    " << s.states[j].beta << endl;
+    }
+
 }
 
 //writes diagnostic quantities to output file
@@ -1015,7 +1031,8 @@ void Spacetime:: write_diagnostics()
 
         double A = sqrt(phi_re * phi_re + phi_im * phi_im);
 
-        data_file << std::setprecision (10) <<  dr * j << "   " << Ham[j] << "    " << Mom_Z[j]<< "    " << det_h[j]  << "    " << aux_test[j] << "    " << A << "    "  << d_zz(v_alpha, j) /*c_chris_Z +  (8.) / (2. * chi) * d_z(v_chi, j) * h_ZZ[j]*/    << endl;
+        data_file << std::setprecision (10) <<  dr * j << "   " << Ham[j] << "    " << Mom_Z[j]<< "    " << det_h[j]  << "    " << aux_test[j]
+        << "    " << A << "    "  << d_zz(v_chi, j) << "    "  << d_zz(v_alpha, j)  << "    " << d_z(v_phi_re,j) /*d_z_phi_re*/ /*c_chris_Z +  (8.) / (2. * chi) * d_z(v_chi, j) * h_ZZ[j]*/    << endl;
     }
 
     //cout << "Wrote diagnostics" << endl;
@@ -1054,6 +1071,7 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "checkpoint_time = ", checkpoint_time, quiet);
         fill_parameter(current_line, "read_thinshell = ", read_thinshell, quiet);
         fill_parameter(current_line, "cutoff_frac = ", cutoff_frac, quiet);
+        fill_parameter(current_line, "only_BS_violation = ", only_BS_violation, quiet);
 
         fill_param_array(current_line, "refinement_points = ", refinement_points, quiet);
 
@@ -1118,6 +1136,31 @@ void Spacetime::fill_refinement_levels()
     for (int j = 0; j < n_gridpoints; j++)
         refinement_levels[j] = slices[0].get_refinement_level(j, refinement_points);
 }
+//attempts to remove the noise that accumulates at refinement boundaries
+void Spacetime::kill_refinement_noise()
+{
+    int start_point = 0;
+    for (int level = 0; level < refinement_points.size(); level++)
+    {
+        int step = pow(2, level);
+
+        int j4 = start_point;
+        while (j4 + step < n_gridpoints && active_points[j4 + step])
+            j4 += step;
+
+        int j3 = j4 - step;
+        int j1 = j4 - 3 * step;
+
+        BSSNSlice& s1 = *current_slice_ptr;
+        s1.states[j1] = 0.5 * (s1.states[j1 - step] + s1.states[j1 + step]); //average at points that seem to produce noise to hopefully kill error
+        s1.states[j3] = 0.5 * (s1.states[j3 - step] + s1.states[j3 + step]);
+
+        start_point = j4;
+
+        //cout << "Success on level " << level << endl;
+
+    }
+}
 
 //read data from BosonStar to spacetime and construct initial time slice
 void Spacetime::initialize(BosonStar& boson_star)
@@ -1133,6 +1176,7 @@ void Spacetime::initialize(BosonStar& boson_star)
     omega = boson_star.omega;
     isotropic = boson_star.isotropic;
     M = boson_star.M;
+    r_99 = boson_star.r_99;
 
     D = SPACEDIM + 1.;
 
@@ -1292,6 +1336,8 @@ void Spacetime::evolve()
 
     cout <<" \n Will evolve with " << num_timesteps << " time steps \n" << endl;
 
+    int kill_steps = 50; //number of timesteps between executions of kill_refinement_noise
+
     //s_i are returned RHS's, t represents temporary RHS + current_slice quantities that must be stored so derivatives can be accessed
     BSSNSlice s1, s2, s3, s4, t1, t2, t3;
     for (int time_step = 0; time_step < num_timesteps; time_step++)
@@ -1349,9 +1395,13 @@ void Spacetime::evolve()
         for (BSSNState& s: slices[n + 1].states)
             {if (s.chi < min_chi) s.chi = min_chi; }
 
+        //if (time_step % kill_steps == 0 && time_step > 0)
+            //kill_refinement_noise();
+
         if (time_step % write_interval == 0)
         {
-            current_slice_ptr->write_slice();
+            //current_slice_ptr->write_slice();
+            write_current_slice();
             write_diagnostics();
         }
 
