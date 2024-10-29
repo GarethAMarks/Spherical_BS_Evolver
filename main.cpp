@@ -67,7 +67,7 @@ int main()
     //st.slices[0].smooth_lapse();
     st.write_diagnostics();
 
-    //st.evolve();
+    st.evolve();
     //st.fourier_transform_A0();
 
 
