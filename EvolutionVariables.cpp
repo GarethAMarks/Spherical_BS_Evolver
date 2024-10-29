@@ -737,6 +737,11 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
         d_z_beta = d_z(v_beta,j);
         d_z_K = d_z(v_K,j);
 
+        if (wave_mode)
+        {
+        /*fill me */
+        }
+
 
         auxiliary_quantities_at_point(slice_ptr, j);
 
@@ -896,7 +901,7 @@ void Spacetime::make_A_traceless(BSSNSlice* slice_ptr)
 double Spacetime::slice_mass(BSSNSlice* slice_ptr)
 {
 
-    const double& chi = slice_ptr->states[n_gridpoints - 1].chi;
+    //const double& chi = slice_ptr->states[n_gridpoints - 1].chi;
     //const double& h_zz = slice_ptr->states[n_gridpoints - 1].h_zz;
     //const double& h_ww = slice_ptr->states[n_gridpoints - 1].h_ww;
 
@@ -946,7 +951,7 @@ void Spacetime:: compute_diagnostics (BSSNSlice* slice_ptr)
         const double A_zz = slice_ptr->states[j].A_zz;
         const double A_ww = slice_ptr->states[j].A_ww;
         const double K = slice_ptr->states[j].K;
-        const double beta = slice_ptr->states[j].beta;
+        //const double beta = slice_ptr->states[j].beta;
 
         if (chi < min_chi)
             chi = min_chi;
@@ -1179,6 +1184,7 @@ void Spacetime::initialize(BosonStar& boson_star)
     r_99 = boson_star.r_99;
 
     D = SPACEDIM + 1.;
+    wave_mode = 0;
 
     refinement_points = {};
     read_parameters();
@@ -1336,7 +1342,7 @@ void Spacetime::evolve()
 
     cout <<" \n Will evolve with " << num_timesteps << " time steps \n" << endl;
 
-    int kill_steps = 50; //number of timesteps between executions of kill_refinement_noise
+    //int kill_steps = 50; //number of timesteps between executions of kill_refinement_noise
 
     //s_i are returned RHS's, t represents temporary RHS + current_slice quantities that must be stored so derivatives can be accessed
     BSSNSlice s1, s2, s3, s4, t1, t2, t3;
@@ -1425,7 +1431,7 @@ void Spacetime::evolve()
 
 }
 
-void Spacetime::fourier_transform_A0()
+void Spacetime::fourier_transform_A0() //really just copies central A data over time to a text file so a python script can do the FFT
 {
     std::ofstream ftransf_file{"ftransf.dat"};
 

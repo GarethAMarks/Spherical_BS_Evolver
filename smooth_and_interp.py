@@ -23,10 +23,14 @@ def find_float(filename, search_string):
 start_gap = 40
 end_gap = 100
 jump_thresh = 5
+skip_smoothing = 1
 
 #number of gridpoints and total radius
 n_gridpoints = int(find_float("BSParams.par", "n_gridpoints = "))
 R = find_float("BSParams.par", "R = ")
+thinshell_res_fac = int(find_float("BSParams.par", "thinshell_res_fac = "))
+
+n_gridpoints = thinshell_res_fac * n_gridpoints - thinshell_res_fac + 1
 
 #use this global variable to store the known matching location so smoothing can be done on variables with less detectable discontinuities
 gap_loc = -1
@@ -56,6 +60,7 @@ def smooth_data(input_file, output_file):
     if (gap_loc > -1):
         d_start = gap_loc - start_gap
         d_end = gap_loc + end_gap
+        print("Found discontinuity at r = ", gap_loc * R / (n_gridpoints - 1) )
         
 
     if (d_start == -1):
@@ -118,19 +123,25 @@ def uniform_grid_interp(input_file, output_file, R, n_gridpoints):
     np.savetxt(output_file, smoothed_line, delimiter='\t', comments='')
 
 
-smooth_data("Phi.dat", "Phi_smoothed.dat")
+if (skip_smoothing == 1):
+    uniform_grid_interp("A.dat", "unif_A.dat", R, n_gridpoints)
+    uniform_grid_interp("Phi.dat", "unif_Phi.dat", R, n_gridpoints)
+    uniform_grid_interp("thet.dat", "unif_thet.dat", R, n_gridpoints)
+    uniform_grid_interp("m.dat", "unif_m.dat", R, n_gridpoints)
+else:
+    smooth_data("Phi.dat", "Phi_smoothed.dat")
+    smooth_data("thet.dat", "thet_smoothed.dat")
 
-smooth_data("thet.dat", "thet_smoothed.dat")
+    start_gap = 10
+    end_gap = 20
+	
+    smooth_data("A.dat", "A_smoothed.dat")
+    smooth_data("m.dat", "m_smoothed.dat")
 
-start_gap = 10
-end_gap = 20
-
-smooth_data("A.dat", "A_smoothed.dat")
-smooth_data("m.dat", "m_smoothed.dat")
-
-uniform_grid_interp("A_smoothed.dat", "unif_A.dat", R, n_gridpoints)
-uniform_grid_interp("Phi_smoothed.dat", "unif_Phi.dat", R, n_gridpoints)
-uniform_grid_interp("thet_smoothed.dat", "unif_thet.dat", R, n_gridpoints)
-uniform_grid_interp("m_smoothed.dat", "unif_m.dat", R, n_gridpoints)
+    uniform_grid_interp("A_smoothed.dat", "unif_A.dat", R, n_gridpoints)
+    uniform_grid_interp("Phi_smoothed.dat", "unif_Phi.dat", R, n_gridpoints)
+    uniform_grid_interp("thet_smoothed.dat", "unif_thet.dat", R, n_gridpoints)
+    uniform_grid_interp("m_smoothed.dat", "unif_m.dat", R, n_gridpoints)
+    
 
 print ("Data smoothed and interpolated onto uniform grid with n_gridpoints =  ", n_gridpoints, " and R = ", R)

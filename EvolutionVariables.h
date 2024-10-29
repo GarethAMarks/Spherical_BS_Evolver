@@ -206,6 +206,7 @@ class Spacetime
         double cutoff_frac;
 
         bool make_tangherlini;
+        bool wave_mode; //testing purposes only, converts to wave eq'n solver
 
         void read_parameters(bool quiet = 0); //read auxiliary parameters
 

@@ -62,6 +62,7 @@ class BosonStar
         int blowup_point; //gridpoint at which the solution first blows up
         double freq_epsilon;//tolerance for the frequency finder
         bool uniform_data; //only relevant for reading thinshell files; determines whether to use uniformly spaced data files or interpolate from originals
+        int thinshell_res_fac; //must be power of 2. If >1, thinshell model will be brought in using resolution raised by this factor.
 
         int count_zero_crossings();
         long double find_frequency(bool quiet = 0);

@@ -1,7 +1,7 @@
 #BS params
 mu = 1.0
 lambda = 0
-solitonic = 0
+solitonic = 1
 G = 1.0
 sigma = 0.06
 eigen = 0
@@ -13,14 +13,14 @@ isotropic = 1
 r_match_fac = 0.75
 
 #grid params
-R = 300
-n_gridpoints = 6000
+R = 200
+n_gridpoints = 20000
 courant_factor = 0.4
 stop_time = 5000.08
 
 BS_resolution_factor = 16 #raise BS resolution in ID solver by this factor
 
-refinement_points = 3000 7500 15000 #after these points, effective resolution will be halved. Set first value as 0 or negative for no refinement
+refinement_points = -1 10000 #after these points, effective resolution will be halved. Set first value as 0 or negative for no refinement
 
 #evolution parameters
 min_chi = 0.0001
@@ -42,6 +42,9 @@ write_CN_interval = 2
 run_quietly = 0
 make_tangherlini = 0
 store_A0 = 1
-read_thinshell = 0 #if true will read outputs of Uli's thinshell code
+read_thinshell = 1 #if true will read outputs of Uli's thinshell code
+thinshell_res_fac = 1
 uniform_data = 1 #if true will expect data smoothed + interpolated onto uniform grid via smooth_and_interp.py
-cutoff_frac = 1.0
+cutoff_frac = 0.75
+
+

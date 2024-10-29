@@ -85,7 +85,7 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "n_gridpoints = ", n_gridpoints, quiet);
         fill_parameter(current_line, "stop_time = ", stop_time, quiet);
         fill_parameter(current_line, "uniform_data = ", uniform_data, quiet);
-
+        fill_parameter(current_line, "thinshell_res_fac = ", thinshell_res_fac, quiet);
     }
 }
 
@@ -770,28 +770,29 @@ bool BosonStar::solve_finding_A(long double freq, double A_guess, double A_range
 
 void BosonStar::fill_given_A(const long double freq)
 {
-    state.resize(n_gridpoints);
-    radius_array.resize(n_gridpoints);
+    //state.resize(n_gridpoints);
+    //radius_array.resize(n_gridpoints);
 
     //copy old A-values to use later in RK4 loop
-    vector<double> A_vals(n_gridpoints);
-    vector<double> eta_vals(n_gridpoints);
+    vector<double> A_vals(n_gridpoints * thinshell_res_fac - thinshell_res_fac + 1);
+    vector<double> eta_vals(n_gridpoints * thinshell_res_fac - thinshell_res_fac + 1);
+    vector<double> X_vals(n_gridpoints * thinshell_res_fac - thinshell_res_fac + 1);
+    vector<double> phi_vals(n_gridpoints * thinshell_res_fac - thinshell_res_fac + 1);
 
-    for (int j = 0; j < n_gridpoints; j++)
+    for (int j = 0; j < n_gridpoints * thinshell_res_fac - thinshell_res_fac + 1; j++)
         {A_vals[j] = state[j].A; eta_vals[j] = state[j].eta;}
 
-    blowup_point = n_gridpoints; //make this 1 larger than max possible value to start, in case solution does not break
+    blowup_point = n_gridpoints * thinshell_res_fac - thinshell_res_fac + 1; //make this 1 larger than max possible value to start, in case solution does not break
 
-    double dr = R / (n_gridpoints - 1);
+    double dr = R / (n_gridpoints * thinshell_res_fac - thinshell_res_fac);
 
     //inter-level state values for RK4 evolution
     FieldState s1, s2, s3, s4;
 
     //fill in grid using RK4 evolution
 
-    //TODO: maybe support higher-res solving for X, phi
-
-    for (int j = 0; j < n_gridpoints - 1; j++)
+    //fill out X and phi at higher resolution (by factor thinshell_res_fac)
+    for (int j = 0; j < n_gridpoints * thinshell_res_fac - thinshell_res_fac; j++)
     {
         double r = j * dr;
 
@@ -813,10 +814,13 @@ void BosonStar::fill_given_A(const long double freq)
         //update state variables and radius array
         state[j + 1] = state[j] + (dr / 6.) * (s1 + 2 * s2 + 2 * s3 + s4);
 
-        state[j + 1].A = A_vals[j + 1];
+        X_vals[j + 1] = state[j + 1].X;
+        phi_vals[j + 1] = state[j + 1].phi;
+
+        state[j + 1].A = A_vals[j + 1]; //use original A,eta. Maybe try using true/eta updates for mid-step stages?
         state[j + 1].eta = eta_vals[j + 1];
 
-        radius_array[j+1] = (j + 1) * dr;
+        radius_array[j + 1] = (j + 1) * dr;
 
 
         if (isnan(state[j].A) || isnan(state[j].X) || isnan(state[j].phi) || isnan(state[j].eta))
@@ -828,8 +832,21 @@ void BosonStar::fill_given_A(const long double freq)
         }
     }
 
-    for (int j = 0; j < n_gridpoints; j++)
-        {  state[j].A = A_vals[j]; state[j].eta = eta_vals[j];}
+    state.resize(n_gridpoints);
+    radius_array.resize(n_gridpoints);
+
+    cout << n_gridpoints << endl;
+
+    //return to original resolution
+    for (int j = 1; j < n_gridpoints; j++)
+    {
+        state[j].A = A_vals[j * thinshell_res_fac];
+        state[j].eta = eta_vals[j * thinshell_res_fac];
+        state[j].X = X_vals[j * thinshell_res_fac];
+        state[j].phi = phi_vals[j * thinshell_res_fac];
+    }
+
+    //may need to rescale lapse here
 
     //cout << "\n" << "Finished RK4 evolution" << endl;
 }
@@ -870,11 +887,16 @@ void BosonStar::read_thinshell()
     A_file.clear();
     A_file.seekg(0, ios::beg);
 
-    if (uniform_data)
-        n_gridpoints = line_count;
+    //if (uniform_data) //no longer needed with new python workflow
+        //n_gridpoints = line_count;
 
-    state.resize(n_gridpoints);
+    state.resize(n_gridpoints * thinshell_res_fac - thinshell_res_fac + 1);
     radius_array.resize(line_count);
+
+    if (state.size() != radius_array.size())
+        cout <<"WARNING: line count does not agree with state size; likely a problem with thinshell_res_fac (try making 1)" << endl;
+
+    //cout<< state.size() << endl;
 
     int j = 0;
 
@@ -947,7 +969,7 @@ void BosonStar::read_thinshell()
         }
     }
 
-    double dr = R / (n_gridpoints - 1);
+    double dr = R / (n_gridpoints * thinshell_res_fac - thinshell_res_fac);
     //interpolate to fill uniform grid with A, phi, eta
     for (int k = 0; k < n_gridpoints; k++)
     {
@@ -1002,8 +1024,6 @@ void BosonStar::read_thinshell()
             state[k].eta = lagrange_interp(k * dr, r, thet) * exp(-state[k].phi - phi_offset ) ;
             state[k].X = 1 /sqrt(1 - 2 * mass_val / (dr * k));
         }
-
-
     }
     state[0].X = 1; //interpolation for m seems to fail at r = 0, so just hardcode this as it's true by def'n
 

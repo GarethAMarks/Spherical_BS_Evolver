@@ -44,7 +44,7 @@ int main()
     boson_star.fill_isotropic_arrays();
     boson_star.write_isotropic();
     boson_star.write_field();
-    //boson_star.cycle_models(5000, 0.01, 0.001);
+    //boson_star.cycle_models(5000, 0.0002, 0.00001);
 
     //boson_star.A_central = 0.093;
     //boson_star.rk4_solve(0.83);
@@ -57,7 +57,6 @@ int main()
 
     Spacetime st{};
     st.initialize(boson_star);
-
     st.slices[0].write_slice();
 
 
@@ -68,7 +67,7 @@ int main()
     //st.slices[0].smooth_lapse();
     st.write_diagnostics();
 
-    st.evolve();
+    //st.evolve();
     //st.fourier_transform_A0();
 
 
