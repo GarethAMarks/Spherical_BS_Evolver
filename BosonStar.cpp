@@ -86,6 +86,9 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "stop_time = ", stop_time, quiet);
         fill_parameter(current_line, "uniform_data = ", uniform_data, quiet);
         fill_parameter(current_line, "thinshell_res_fac = ", thinshell_res_fac, quiet);
+        fill_parameter(current_line, "perturb = ", perturb, quiet);
+        fill_parameter(current_line, "perturb_amp = ", perturb_amp, quiet);
+        fill_parameter(current_line, "perturb_spread = ", perturb_spread, quiet);
     }
 }
 
@@ -773,43 +776,43 @@ void BosonStar::fill_given_A(const long double freq)
     //state.resize(n_gridpoints);
     //radius_array.resize(n_gridpoints);
 
-    //copy old A-values to use later in RK4 loop
-    vector<double> A_vals(n_gridpoints * thinshell_res_fac - thinshell_res_fac + 1);
-    vector<double> eta_vals(n_gridpoints * thinshell_res_fac - thinshell_res_fac + 1);
-    vector<double> X_vals(n_gridpoints * thinshell_res_fac - thinshell_res_fac + 1);
-    vector<double> phi_vals(n_gridpoints * thinshell_res_fac - thinshell_res_fac + 1);
+    int num_points = state.size();
 
-    for (int j = 0; j < n_gridpoints * thinshell_res_fac - thinshell_res_fac + 1; j++)
+    //copy old A-values to use later in RK4 loop
+    vector<double> A_vals(num_points);
+    vector<double> eta_vals(num_points);
+    vector<double> X_vals(num_points);
+    vector<double> phi_vals(num_points);
+
+    for (int j = 0; j < num_points; j++)
         {A_vals[j] = state[j].A; eta_vals[j] = state[j].eta;}
 
-    blowup_point = n_gridpoints * thinshell_res_fac - thinshell_res_fac + 1; //make this 1 larger than max possible value to start, in case solution does not break
+    blowup_point = num_points; //make this 1 larger than max possible value to start, in case solution does not break
 
-    double dr = R / (n_gridpoints * thinshell_res_fac - thinshell_res_fac);
+    double dr = R / (num_points - 1);
 
     //inter-level state values for RK4 evolution
     FieldState s1, s2, s3, s4;
 
-    //fill in grid using RK4 evolution
-
     //fill out X and phi at higher resolution (by factor thinshell_res_fac)
-    for (int j = 0; j < n_gridpoints * thinshell_res_fac - thinshell_res_fac; j++)
+    for (int j = 0; j < num_points - 1; j++)
     {
         double r = j * dr;
 
-        s1 = state_RHS(r, freq, state[j], 1, 1);
+        s1 = state_RHS(r, freq, state[j], 0, 0);
 
-        //state[j].A = A_vals[j];
+        state[j].A = A_vals[j];
 
-        state[j].A = 0.5 * (A_vals[j + 1] + A_vals[j]); //use linearly interpolated A-values for intermediate stages
-        state[j].eta = 0.5 * (eta_vals[j + 1] + eta_vals[j]);
+        //state[j].A = 0.5 * (A_vals[j + 1] + A_vals[j]); //use linearly interpolated A-values for intermediate stages: outdated as currently evolve A for intermediate steps
+        //state[j].eta = 0.5 * (eta_vals[j + 1] + eta_vals[j]);
 
-        s2 = state_RHS(r + dr / 2., freq, state[j] + 0.5 * dr * s1, 1, 1);
-        s3 = state_RHS(r + dr / 2., freq, state[j] + 0.5 * dr * s2, 1, 1);
+        s2 = state_RHS(r + dr / 2., freq, state[j] + 0.5 * dr * s1, 0, 0);
+        s3 = state_RHS(r + dr / 2., freq, state[j] + 0.5 * dr * s2, 0, 0);
 
-        state[j].A = A_vals[j + 1];
-        state[j].eta = eta_vals[j + 1];
+        //state[j].A = A_vals[j + 1];
+        //state[j].eta = eta_vals[j + 1];
 
-        s4 = state_RHS(r + dr, freq, state[j] + dr * s3, 1, 1);
+        s4 = state_RHS(r + dr, freq, state[j] + dr * s3, 0, 0);
 
         //update state variables and radius array
         state[j + 1] = state[j] + (dr / 6.) * (s1 + 2 * s2 + 2 * s3 + s4);
@@ -818,7 +821,7 @@ void BosonStar::fill_given_A(const long double freq)
         phi_vals[j + 1] = state[j + 1].phi;
 
         state[j + 1].A = A_vals[j + 1]; //use original A,eta. Maybe try using true/eta updates for mid-step stages?
-        state[j + 1].eta = eta_vals[j + 1];
+        //state[j + 1].eta = eta_vals[j + 1]; //fully evolve eta currently
 
         radius_array[j + 1] = (j + 1) * dr;
 
@@ -831,20 +834,10 @@ void BosonStar::fill_given_A(const long double freq)
             return;
         }
     }
-
-    state.resize(n_gridpoints);
-    radius_array.resize(n_gridpoints);
+    //state.resize(n_gridpoints);
+    //radius_array.resize(n_gridpoints);
 
     cout << n_gridpoints << endl;
-
-    //return to original resolution
-    for (int j = 1; j < n_gridpoints; j++)
-    {
-        state[j].A = A_vals[j * thinshell_res_fac];
-        state[j].eta = eta_vals[j * thinshell_res_fac];
-        state[j].X = X_vals[j * thinshell_res_fac];
-        state[j].phi = phi_vals[j * thinshell_res_fac];
-    }
 
     //may need to rescale lapse here
 
@@ -855,6 +848,14 @@ void BosonStar::fill_given_A(const long double freq)
 //reads in data files from Uli's thin shell code
 void BosonStar::read_thinshell()
 {
+
+
+    if ((thinshell_res_fac & (thinshell_res_fac - 1)) != 0 || thinshell_res_fac <= 0)
+        {
+            cerr << "ERROR: thinshell_res_fac must be a natural power of 2" << endl;
+            exit(1);
+        }
+
 
     string A_filename = "A.dat";
     string m_filename = "m.dat";
@@ -900,7 +901,7 @@ void BosonStar::read_thinshell()
 
     int j = 0;
 
-    radius_array.resize(n_gridpoints);
+    radius_array.resize(n_gridpoints * thinshell_res_fac - thinshell_res_fac + 1);
 
     //holds the A, phi, and r values from the nonuniform r-y hybrid grid. Needed for interpolation
     vector<double> A_vals(line_count);
@@ -971,39 +972,8 @@ void BosonStar::read_thinshell()
 
     double dr = R / (n_gridpoints * thinshell_res_fac - thinshell_res_fac);
     //interpolate to fill uniform grid with A, phi, eta
-    for (int k = 0; k < n_gridpoints; k++)
+    for (int k = 0; k < n_gridpoints * thinshell_res_fac - thinshell_res_fac + 1; k++)
     {
-
-        int l = 0;
-
-        while (r_vals[l] < k * dr) //finds nearest r-value to uniform grid point
-             l++;
-
-        //interpolation order; must be odd!
-        int interp_order = 3;
-
-        //if (k * dr > 1.5 * r_99 ) interp_order = 1; //switches to linear interpolation well outside BS; turns out to be bad :(
-
-        //extracts 4 surrounding grid points and their associated A, phi values
-        int l0 = bound(l - interp_order + 1, 0, n_gridpoints - interp_order - 1);
-        vector<int> L(interp_order + 1);
-        for (int i = 0; i < interp_order + 1; i++ )
-            L[i] = i;
-
-        vector<double> r(interp_order + 1);
-        vector<double> A(interp_order + 1);
-        vector<double> m(interp_order + 1);
-        vector<double> phi(interp_order + 1);
-        vector<double> thet(interp_order + 1);
-
-        for (int& index : L)
-        {
-            r[index] = r_vals[l0 + index];
-            phi[index] = phi_vals[l0 + index];
-            m[index] = m_vals[l0 + index];
-            A[index] = A_vals[l0 + index];
-            thet[index] = thet_vals[l0 + index];
-        }
 
         radius_array[k] = dr * k;
 
@@ -1017,7 +987,36 @@ void BosonStar::read_thinshell()
 
         else
         {
-             double mass_val = lagrange_interp(k * dr, r, m);
+            int l = 0;
+
+            while (r_vals[l] < k * dr) //finds nearest r-value to uniform grid point
+                 l++;
+
+            //interpolation order; must be odd!
+            int interp_order = 3;
+
+            //extracts 4 surrounding grid points and their associated A, phi values
+            int l0 = bound(l - interp_order + 1, 0, n_gridpoints - interp_order - 1);
+            vector<int> L(interp_order + 1);
+            for (int i = 0; i < interp_order + 1; i++ )
+                L[i] = i;
+
+            vector<double> r(interp_order + 1);
+            vector<double> A(interp_order + 1);
+            vector<double> m(interp_order + 1);
+            vector<double> phi(interp_order + 1);
+            vector<double> thet(interp_order + 1);
+
+            for (int& index : L)
+            {
+                r[index] = r_vals[l0 + index];
+                phi[index] = phi_vals[l0 + index];
+                m[index] = m_vals[l0 + index];
+                A[index] = A_vals[l0 + index];
+                thet[index] = thet_vals[l0 + index];
+            }
+
+            double mass_val = lagrange_interp(k * dr, r, m);
             state[k].phi = lagrange_interp(k * dr, r, phi);
 
             state[k].A = lagrange_interp(k * dr, r, A);
@@ -1028,10 +1027,47 @@ void BosonStar::read_thinshell()
     state[0].X = 1; //interpolation for m seems to fail at r = 0, so just hardcode this as it's true by def'n
 
     //write_field("BSdata1.dat");
-    //fill_given_A(omega);
+
+    if (perturb)
+        add_perturbation(perturb_amp, perturb_spread);
+    else
+        fill_given_A(omega);
+
+    //return to original resolution
+    vector<FieldState> hi_res_state = state;
+
+    state.resize(n_gridpoints);
+    radius_array.resize(n_gridpoints);
+    dr = R / (n_gridpoints - 1);
+
+    for (int j = 0; j < n_gridpoints; j++)
+    {
+        state[j] = hi_res_state[j * thinshell_res_fac];
+        radius_array[j] = dr * j;
+    }
+
+    cout << "Successfully read thinshell model with central amplitude A = " << A_central << ", mass M = " << M << ", and binding energy E = " << M - mu * get_noether_charge() << endl;
 }
 
-//TODO: resolving may need to only take place within [0,r_99]; add soft AMR support
+//adds a gaussian perturbation of the form a * exp (-r^2 / k ^2) to the BS.
+void BosonStar::add_perturbation(double a, double k)
+{
+    int num_points = state.size();
+    double dr = R / (num_points - 1);
+    double k2 = k*k;
+
+    //apply perturbation to A
+    for (int j = 0; j < num_points; j++)
+    {
+        double r = radius_array[j];
+        state[j].A += a * exp ( -r * r / k2);
+    }
+
+    //rerun constraint solver to fill out X, alpha
+    fill_given_A(omega);
+}
+
+//TODO: resolving may need to only take place within [0,r_99];
 void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
 {
     read_parameters(0);

@@ -27,6 +27,7 @@ skip_smoothing = 1
 
 #number of gridpoints and total radius
 n_gridpoints = int(find_float("BSParams.par", "n_gridpoints = "))
+n_gridpoints_original = n_gridpoints
 R = find_float("BSParams.par", "R = ")
 thinshell_res_fac = int(find_float("BSParams.par", "thinshell_res_fac = "))
 
@@ -144,4 +145,7 @@ else:
     uniform_grid_interp("m_smoothed.dat", "unif_m.dat", R, n_gridpoints)
     
 
-print ("Data smoothed and interpolated onto uniform grid with n_gridpoints =  ", n_gridpoints, " and R = ", R)
+print ("Data smoothed and interpolated onto uniform grid with n_gridpoints =  ", n_gridpoints_original, " and R = ", R)
+
+if (thinshell_res_fac > 1):
+    print("Used thinshell_res_fac = ", thinshell_res_fac)

@@ -115,7 +115,11 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
     double dr = R / (n_gridpoints - 1);
 
     int ref_level = get_refinement_level(index, refinement_points); //refinement level; starts at 1 for no refinement and halves every time.
+
     int res_fac = pow(2, ref_level - 1);
+
+    //if (pow(get_refinement_level(index + 2 * res_fac, refinement_points),2) > ref_level || pow(get_refinement_level(index + res_fac, refinement_points), 2) > ref_level )
+        //res_fac *= 2;
 
     //check index is valid and error out if not
    if (index < 0 || index >= n_gridpoints )
@@ -196,8 +200,24 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
             }
         }
 
-        bool parity_is_odd = ((var == v_c_chris_Z || var == v_beta)/*|| (has_BH && (var == v_chi || var == v_alpha))*/);
+        //cout << active_points[J[3]] << endl;
+        //extrapolate over refinement boundary where needed at quadratic order
+        /*for (int j  = 3; j < 5; j++)
+        {
 
+            if (J[j] < active_points.size() && !active_points[J[j]])
+            {
+                cout << "Survived with " << J[2] << endl;
+                vector<double> F_vals = {F[j - 3], F[j - 2], F[j - 1]};
+                vector<double> J_vals = {J[j - 3], J[j - 2], J[j - 1]};
+                F[j] = lagrange_interp(J[j], J_vals, F_vals);
+            }
+
+        }*/
+
+
+
+        bool parity_is_odd = ((var == v_c_chris_Z || var == v_beta)/*|| (has_BH && (var == v_chi || var == v_alpha))*/);
        //if (var == v_alpha) cout << parity_is_odd<< endl;
 
         //account for odd parity of contracted christoffel symbols and beta across z = 0
@@ -451,7 +471,7 @@ int BSSNSlice::get_refinement_level(int j, std::vector<int>& refinement_points)
     int level = 1;
     int k = 0;
 
-    while ( k < n_refinements && j >= refinement_points[k] - pow(2, k + 2))//check this difference -- meant to ensure we can use a stencil at points spaced by 2^(k + 1) safely at j
+    while ( k < n_refinements && j >= refinement_points[k] /*- pow(2, k + 1)*/)//check this difference -- meant to ensure we can use a stencil at points spaced by 2^(k + 1) safely at j
     {
         level++;
         k++;
@@ -698,6 +718,10 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
     //define return slice and size its states array appropriately
     BSSNSlice rhs;
     rhs.R = R;
+
+    rhs.has_BH = slice_ptr->has_BH;
+    rhs.refinement_points = slice_ptr->refinement_points;
+
     rhs.states.resize(n_gridpoints);
 
     int max_ref = (refinement_levels.size() == 0 ) ? 1 : refinement_levels[refinement_levels.size() - 1]; //refinement level at outermost bdry
@@ -727,6 +751,20 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
         const double alpha = slice_ptr->states[j].alpha;
         const double beta = slice_ptr->states[j].beta;
 
+
+        if (wave_mode) //converts to wave eq'n solver with beta the time derivative of phi_re for testing purposes
+        {
+            rhs.states[j] = (BSSNState){0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.};
+            rhs.states[j].phi_re = beta;
+            rhs.states[j].beta = d_zz(v_phi_re, j);
+
+            //cout << rhs.states[j].phi_re <<  "    " << rhs.states[j].beta << endl;
+
+            continue;
+
+            //return rhs;
+        }
+
         //store local variables for commonly-used derivatives to avoid unnecessary re-computation
         d_z_chi = d_z(v_chi,j);
         d_z_h_zz = d_z(v_h_zz,j);
@@ -736,12 +774,6 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
         d_z_alpha =  d_z(v_alpha,j);
         d_z_beta = d_z(v_beta,j);
         d_z_K = d_z(v_K,j);
-
-        if (wave_mode)
-        {
-        /*fill me */
-        }
-
 
         auxiliary_quantities_at_point(slice_ptr, j);
 
@@ -869,9 +901,6 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
     asymp_deriv.chi = d_chi_asymp(R);  asymp_deriv.alpha = d_alpha_asymp(R);
 
     rhs.states[last_active_j] = (-1) * char_speeds * ( p5_stencil(dr * res_fac, s1, s2, s3, s4, s5) + N * (s5 - asymp_state) / (dr * last_active_j) - asymp_deriv);
-
-    rhs.has_BH = slice_ptr->has_BH;
-    rhs.refinement_points = slice_ptr->refinement_points;
 
     return rhs;
 }
@@ -1167,9 +1196,39 @@ void Spacetime::kill_refinement_noise()
     }
 }
 
+//corrects the initial field momentum in such a way that constraints are satisfied. Must have filled in initial slice already.
+//seems to only work for negative initial perturbation, at least for early tests...
+void Spacetime::fix_initial_field_mom()
+{
+    compute_auxiliary_quantities(&slices[0], 0);
+    compute_diagnostics(&slices[0]);
+    bool failed = 0;
+
+   // vector<double> old_momenta(n_gridpoints);
+
+    for (int j = 0; j < n_gridpoints; j++)
+    {
+        //old_momenta[j] = slices[0].states[j].K_phi_im;
+        double correction_sq = slices[0].states[j].K_phi_im * slices[0].states[j].K_phi_im + Ham[j] / (32. * M_PI);
+
+        if (correction_sq < 0 && failed == 0)
+            {failed = 1; cout << "WARNING: trick to adjust initial field momentum may have failed starting on gridpoint " << j << endl;}
+
+
+        //cout << Ham[j] << endl;
+
+        slices[0].states[j].K_phi_im = - sqrt(abs(correction_sq));
+
+    }
+
+}
+
 //read data from BosonStar to spacetime and construct initial time slice
 void Spacetime::initialize(BosonStar& boson_star)
 {
+    wave_mode = 0; //make 1 for MR testing purposes only
+    D = SPACEDIM + 1.;
+
     //inherit parameters from BS
     n_gridpoints = boson_star.n_gridpoints;
     R = boson_star.R;
@@ -1182,9 +1241,7 @@ void Spacetime::initialize(BosonStar& boson_star)
     isotropic = boson_star.isotropic;
     M = boson_star.M;
     r_99 = boson_star.r_99;
-
-    D = SPACEDIM + 1.;
-    wave_mode = 0;
+    BS_perturbed = boson_star.perturb;
 
     refinement_points = {};
     read_parameters();
@@ -1202,6 +1259,11 @@ void Spacetime::initialize(BosonStar& boson_star)
             cerr << "ERROR: BS_resolution_factor must be a power of 2" << endl;
             exit(1);
         }
+
+    active_points.resize(n_gridpoints);
+    fill_active_points();
+    fill_refinement_levels();
+
 
     //solve BS at higher resolution and read in data to first slice
     if (BS_resolution_factor > 1 && start_time == 0 && !read_thinshell)
@@ -1223,21 +1285,28 @@ void Spacetime::initialize(BosonStar& boson_star)
     {
         boson_star.read_thinshell();
         boson_star.write_field();
-        boson_star.fill_isotropic_arrays();
-        boson_star.write_isotropic();
+
+        if (boson_star.isotropic){
+            boson_star.fill_isotropic_arrays();
+            boson_star.write_isotropic();
+        }
 
         R = boson_star.R;
         n_gridpoints = boson_star.n_gridpoints;
         omega = boson_star.omega;
 
+
+
         cout << "R = " << boson_star.R << endl;
     }
+
 
     dr = R / (n_gridpoints - 1);
     dt = courant_factor * dr;
     int num_timesteps = ceil(stop_time / dt);
 
     slices.resize(std::min(num_timesteps + 1, max_stored_slices));
+    slices[0].active_points = active_points;
     slices[0].refinement_points = refinement_points;
 
     if (start_time == 0)
@@ -1294,17 +1363,14 @@ void Spacetime::initialize(BosonStar& boson_star)
     Mom_Z.resize(n_gridpoints);
     det_h.resize(n_gridpoints);
 
-    active_points.resize(n_gridpoints);
-
-    fill_active_points();
-    fill_refinement_levels();
-
     last_active_j = n_gridpoints - 1; //find last active gridpoint
     while (!active_points[last_active_j])
         last_active_j--;
 
     //compute auxiliary/diagnostic quantities on initial slice
     current_slice_ptr = &slices[0];
+
+
 
     if (make_tangherlini)
         M = slices[0].make_tangherlini(1., min_chi);
@@ -1313,9 +1379,14 @@ void Spacetime::initialize(BosonStar& boson_star)
         slices[0].has_BH = 1;
     else slices[0].has_BH = 0;
 
+    if (BS_perturbed)
+        fix_initial_field_mom();
+
     compute_auxiliary_quantities(current_slice_ptr);
     rho0_init = make_tangherlini ? 1. : rho[0];
     compute_diagnostics(current_slice_ptr);
+
+
 }
 
 
@@ -1365,6 +1436,7 @@ void Spacetime::evolve()
         slices[n + 1].states.resize(n_gridpoints);
         slices[n + 1].R = R;
         slices[n + 1].refinement_points = refinement_points;
+        slices[n + 1].active_points = active_points;
 
         if (make_tangherlini || slices[n].states[0].chi < 10 * min_chi)
             slices[n + 1].has_BH = 1;

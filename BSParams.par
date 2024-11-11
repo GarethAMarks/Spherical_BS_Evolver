@@ -12,15 +12,20 @@ freq_epsilon = 1e-19
 isotropic = 1
 r_match_fac = 0.75
 
+#Perturbation params
+perturb = 1
+perturb_amp = -0.001
+perturb_spread = 5
+
 #grid params
-R = 200
-n_gridpoints = 20000
+R = 120
+n_gridpoints = 12000
 courant_factor = 0.4
 stop_time = 5000.08
 
 BS_resolution_factor = 16 #raise BS resolution in ID solver by this factor
 
-refinement_points = -1 10000 #after these points, effective resolution will be halved. Set first value as 0 or negative for no refinement
+refinement_points = -1 1000 #after these points, effective resolution will be halved. Set first value as 0 or negative for no refinement
 
 #evolution parameters
 min_chi = 0.0001
@@ -30,7 +35,7 @@ max_stored_slices = 50
 sigma_BSSN = 1.0
 eta = 1.0
 damping_factor = 0.0
-evolve_shift = 0
+evolve_shift = 1
 only_BS_violation = 1
 
 #output/checkpointing parameters
@@ -43,7 +48,7 @@ run_quietly = 0
 make_tangherlini = 0
 store_A0 = 1
 read_thinshell = 1 #if true will read outputs of Uli's thinshell code
-thinshell_res_fac = 1
+thinshell_res_fac = 128
 uniform_data = 1 #if true will expect data smoothed + interpolated onto uniform grid via smooth_and_interp.py
 cutoff_frac = 0.75
 

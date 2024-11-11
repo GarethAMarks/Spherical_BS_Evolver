@@ -64,6 +64,11 @@ class BosonStar
         bool uniform_data; //only relevant for reading thinshell files; determines whether to use uniformly spaced data files or interpolate from originals
         int thinshell_res_fac; //must be power of 2. If >1, thinshell model will be brought in using resolution raised by this factor.
 
+        //whether to perturb, and the height + "standard deviation" of the perturbation
+        bool perturb;
+        double perturb_amp;
+        double perturb_spread;
+
         int count_zero_crossings();
         long double find_frequency(bool quiet = 0);
         int find_last_minimum();
@@ -72,6 +77,8 @@ class BosonStar
         void rescale_lapse (double phi_shift);
         double f_RHS(double r, double f);
         double r_areal (int j_iso);
+
+
 
     public:
         double A_central; //central field modulus
@@ -95,10 +102,13 @@ class BosonStar
         bool solve_finding_A(long double freq, double A_guess, double A_range, bool quiet = 0);
         double get_noether_charge();
 
+
         void fill_isotropic_arrays();
         void write_isotropic();
 
         void fill_given_A( const long double freq);
+
+        void add_perturbation(double a, double k);
 
         void cycle_models(int n_stars, double A_0, double delta_A);
 

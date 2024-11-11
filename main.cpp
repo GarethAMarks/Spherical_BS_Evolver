@@ -44,6 +44,8 @@ int main()
     boson_star.fill_isotropic_arrays();
     boson_star.write_isotropic();
     boson_star.write_field();
+
+
     //boson_star.cycle_models(5000, 0.0002, 0.00001);
 
     //boson_star.A_central = 0.093;

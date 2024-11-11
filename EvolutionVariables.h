@@ -68,6 +68,7 @@ class BSSNSlice
         void write_slice( std::string file_name = "SliceData.dat");
 
         int get_refinement_level(int j, std::vector<int>& refinement_points);
+        std::vector<bool> active_points; //for now just give each slice a copy of the active_points array; can probably be optimized
 
         bool smooth_lapse();
 
@@ -205,6 +206,7 @@ class Spacetime
         bool read_thinshell;
         double cutoff_frac;
 
+        bool BS_perturbed;
         bool make_tangherlini;
         bool wave_mode; //testing purposes only, converts to wave eq'n solver
 
@@ -220,6 +222,7 @@ class Spacetime
         void compute_diagnostics(BSSNSlice* slice_ptr);
         double slice_mass(BSSNSlice* slice_ptr);
         void update_outer_boundary(double time_step);
+        void fix_initial_field_mom();
 
         void fill_active_points();
         void fill_refinement_levels();
