@@ -68,6 +68,7 @@ class BosonStar
         bool perturb;
         double perturb_amp;
         double perturb_spread;
+        double perturb_center;
 
         int count_zero_crossings();
         long double find_frequency(bool quiet = 0);
@@ -108,11 +109,9 @@ class BosonStar
 
         void fill_given_A( const long double freq);
 
-        void add_perturbation(double a, double k, bool conserve_noether_charge = 0);
+        void add_perturbation(double a, double k, double center, bool conserve_noether_charge = 0);
 
         void cycle_models(int n_stars, double A_0, double delta_A);
-
-
 
 
 

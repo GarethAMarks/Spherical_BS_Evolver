@@ -1319,8 +1319,6 @@ void Spacetime::initialize(BosonStar& boson_star)
         n_gridpoints = boson_star.n_gridpoints;
         omega = boson_star.omega;
 
-
-
         cout << "R = " << boson_star.R << endl;
     }
 
@@ -1393,8 +1391,6 @@ void Spacetime::initialize(BosonStar& boson_star)
 
     //compute auxiliary/diagnostic quantities on initial slice
     current_slice_ptr = &slices[0];
-
-
 
     if (make_tangherlini)
         M = slices[0].make_tangherlini(1., min_chi);

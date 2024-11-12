@@ -89,6 +89,7 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "perturb = ", perturb, quiet);
         fill_parameter(current_line, "perturb_amp = ", perturb_amp, quiet);
         fill_parameter(current_line, "perturb_spread = ", perturb_spread, quiet);
+        fill_parameter(current_line, "perturb_center = ", perturb_center, quiet);
     }
 }
 
@@ -801,7 +802,7 @@ void BosonStar::fill_given_A(const long double freq)
 
         s1 = state_RHS(r, freq, state[j], 0, 0);
 
-        state[j].A = A_vals[j];
+
 
         //state[j].A = 0.5 * (A_vals[j + 1] + A_vals[j]); //use linearly interpolated A-values for intermediate stages: outdated as currently evolve A for intermediate steps
         //state[j].eta = 0.5 * (eta_vals[j + 1] + eta_vals[j]);
@@ -820,8 +821,8 @@ void BosonStar::fill_given_A(const long double freq)
         X_vals[j + 1] = state[j + 1].X;
         phi_vals[j + 1] = state[j + 1].phi;
 
-        state[j + 1].A = A_vals[j + 1]; //use original A,eta. Maybe try using true/eta updates for mid-step stages?
-        //state[j + 1].eta = eta_vals[j + 1]; //fully evolve eta currently
+        state[j + 1].A = A_vals[j + 1]; //replace original A,eta, allowing for "natural" evolutions at mid-step stages
+        state[j + 1].eta = eta_vals[j + 1];
 
         radius_array[j + 1] = (j + 1) * dr;
 
@@ -1029,7 +1030,7 @@ void BosonStar::read_thinshell()
     //write_field("BSdata1.dat");
 
     if (perturb)
-        add_perturbation(perturb_amp, perturb_spread);
+        add_perturbation(perturb_amp, perturb_spread, perturb_center);
     else
         fill_given_A(omega);
 
@@ -1049,8 +1050,8 @@ void BosonStar::read_thinshell()
     cout << "Successfully read thinshell model with central amplitude A = " << A_central << ", mass M = " << M << ", and binding energy E = " << M - mu * get_noether_charge() << endl;
 }
 
-//adds a gaussian perturbation of the form a * exp (-r^2 / k ^2) to the BS.
-void BosonStar::add_perturbation(double a, double k, bool conserve_noether_charge)
+//adds a gaussian perturbation of the form a * exp (-(r - center)^2 / k ^2) to the BS.
+void BosonStar::add_perturbation(double a, double k, double center, bool conserve_noether_charge)
 {
     int num_points = state.size();
     double dr = R / (num_points - 1);
@@ -1069,7 +1070,7 @@ void BosonStar::add_perturbation(double a, double k, bool conserve_noether_charg
     for (int j = 0; j < num_points; j++)
     {
         double r = radius_array[j];
-        state[j].A += a * exp ( -r * r / k2);
+        state[j].A += a * exp ( -pow (r - center, 2.) / k2);
     }
 
     //rerun constraint solver to fill out X, alpha

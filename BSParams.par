@@ -16,10 +16,11 @@ r_match_fac = 0.75
 perturb = 1
 perturb_amp = -0.001
 perturb_spread = 5
+perturb_center = 25
 
 #grid params
 R = 120
-n_gridpoints = 12000
+n_gridpoints = 4000
 courant_factor = 0.4
 stop_time = 5000.08
 
@@ -35,7 +36,7 @@ max_stored_slices = 50
 sigma_BSSN = 1.0
 eta = 1.0
 damping_factor = 0.0
-evolve_shift = 1
+evolve_shift = 0
 only_BS_violation = 1
 
 #output/checkpointing parameters
