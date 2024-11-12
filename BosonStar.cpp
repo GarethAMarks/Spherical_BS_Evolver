@@ -1050,11 +1050,20 @@ void BosonStar::read_thinshell()
 }
 
 //adds a gaussian perturbation of the form a * exp (-r^2 / k ^2) to the BS.
-void BosonStar::add_perturbation(double a, double k)
+void BosonStar::add_perturbation(double a, double k, bool conserve_noether_charge)
 {
     int num_points = state.size();
     double dr = R / (num_points - 1);
     double k2 = k*k;
+
+    vector<double> noether_numerators; // old values of X * A^2 * r^2 in the numerator, i.e. the integrand of the noether charge.
+
+    /*if (conserve_noether_charge)
+    {
+        noether_numerators.resize(num_points);
+        for (int j = 0; j < num_points; j++)
+            noether_numerators[j] = radius_array[j] * radius_array[j] * state[j].A * state[j].A * state[j].X;
+    }*/
 
     //apply perturbation to A
     for (int j = 0; j < num_points; j++)
@@ -1065,6 +1074,17 @@ void BosonStar::add_perturbation(double a, double k)
 
     //rerun constraint solver to fill out X, alpha
     fill_given_A(omega);
+
+    //rescale lapse so the noether charge is the same as before
+    /*if (conserve_noether_charge)
+    {
+        for (int j = 0; j < num_points; j++)
+        {
+
+        }
+    }*/
+
+    cout << "\nAdded Gaussian perturbation with central value " << a << " and effective radius " << k << endl;
 }
 
 //TODO: resolving may need to only take place within [0,r_99];

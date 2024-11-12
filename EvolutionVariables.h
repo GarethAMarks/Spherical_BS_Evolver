@@ -221,6 +221,7 @@ class Spacetime
         void make_A_traceless(BSSNSlice* slice_ptr);
         void compute_diagnostics(BSSNSlice* slice_ptr);
         double slice_mass(BSSNSlice* slice_ptr);
+        double slice_charge(BSSNSlice* slice_ptr);
         void update_outer_boundary(double time_step);
         void fix_initial_field_mom();
 

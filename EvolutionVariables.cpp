@@ -926,7 +926,7 @@ void Spacetime::make_A_traceless(BSSNSlice* slice_ptr)
     }
 }
 
-//TODO: make compatible with refinement
+//TODO: make these work for D =/= 4, and MR if this gets working
 double Spacetime::slice_mass(BSSNSlice* slice_ptr)
 {
 
@@ -956,6 +956,30 @@ double Spacetime::slice_mass(BSSNSlice* slice_ptr)
     }
     return mass;
 }
+
+
+double Spacetime::slice_charge(BSSNSlice* slice_ptr)
+{
+    const double n = D - 2;
+    double charge = 0;
+    for (int j = 0; j <  0.95 * n_gridpoints - 1; j++)
+    {
+        if (!active_points[j]) //perform no computations on inactive points
+            continue;
+
+        double z = dr * j;
+
+        const double& chi = slice_ptr->states[j].chi;
+        const double& phi_re = slice_ptr->states[j].phi_re;
+        const double& phi_im = slice_ptr->states[j].phi_im;
+        const double& K_phi_re = slice_ptr->states[j].K_phi_re;
+        const double& K_phi_im = slice_ptr->states[j].K_phi_im;
+
+        charge += -8 * M_PI  * dr * (phi_re * K_phi_im - phi_im * K_phi_re) * z * z * pow(chi, 0.5 * (1. - D));
+    }
+    return charge;
+}
+
 
 //computes hamiltonian and momentum constraints and conformal metric determinant
 void Spacetime:: compute_diagnostics (BSSNSlice* slice_ptr)
@@ -1431,7 +1455,8 @@ void Spacetime::evolve()
         if (phase_diff < 0.) phase_diff += M_PI;
 
         if (time_step % write_CN_interval == 0)
-            constraints_file << std::setprecision (10) << start_time + dt * time_step << "   " << Ham_L2  << "   " << Mom_L2 <<  "   " << slices[n].states[0].chi << "   " << test_ctr << "   "  << phase_diff   << "   " <<  slice_mass(current_slice_ptr) << endl;
+            constraints_file << std::setprecision (10) << start_time + dt * time_step << "   " << Ham_L2  << "   " << Mom_L2 <<  "   " << slices[n].states[0].chi << "   "
+            << test_ctr << "   "  << phase_diff   << "   " <<  slice_mass(current_slice_ptr) << "   "  << slice_charge(current_slice_ptr)  <<  endl;
 
         slices[n + 1].states.resize(n_gridpoints);
         slices[n + 1].R = R;

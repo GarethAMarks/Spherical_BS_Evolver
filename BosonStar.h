@@ -108,7 +108,7 @@ class BosonStar
 
         void fill_given_A( const long double freq);
 
-        void add_perturbation(double a, double k);
+        void add_perturbation(double a, double k, bool conserve_noether_charge = 0);
 
         void cycle_models(int n_stars, double A_0, double delta_A);
 
