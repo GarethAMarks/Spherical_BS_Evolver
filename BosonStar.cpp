@@ -786,7 +786,7 @@ void BosonStar::fill_given_A(const long double freq)
     vector<double> phi_vals(num_points);
 
     for (int j = 0; j < num_points; j++)
-        {A_vals[j] = state[j].A; eta_vals[j] = state[j].eta;}
+        {A_vals[j] = state[j].A; eta_vals[j] = state[j].eta; phi_vals[j] = state[j].phi;  }
 
     blowup_point = num_points; //make this 1 larger than max possible value to start, in case solution does not break
 
@@ -819,12 +819,13 @@ void BosonStar::fill_given_A(const long double freq)
         state[j + 1] = state[j] + (dr / 6.) * (s1 + 2 * s2 + 2 * s3 + s4);
 
         X_vals[j + 1] = state[j + 1].X;
-        phi_vals[j + 1] = state[j + 1].phi;
+        //phi_vals[j + 1] = state[j + 1].phi;
 
-        state[j + 1].A = A_vals[j + 1]; //replace original A,eta, allowing for "natural" evolutions at mid-step stages
+        state[j + 1].A = A_vals[j + 1]; //replace original A,eta, allowing for "natural" evolutions at mid-step stages. We also use the old lapse
         state[j + 1].eta = eta_vals[j + 1];
 
         radius_array[j + 1] = (j + 1) * dr;
+        state[j + 1].phi = phi_vals[j + 1];
 
 
         if (isnan(state[j].A) || isnan(state[j].X) || isnan(state[j].phi) || isnan(state[j].eta))
