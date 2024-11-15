@@ -170,6 +170,7 @@ class Spacetime
         //L2 norms of hamiltonian/momentum constraints
         double Ham_L2;
         double Mom_L2;
+        double dtK_L2;
         bool only_BS_violation; // if true, only counts violation inside BS radius r_99 towards Ham/Mom norms
 
         int max_stored_slices; //will only hold this many previous slices in memory
@@ -202,6 +203,7 @@ class Spacetime
         int write_CN_interval;
         double min_z; //minimum z-value below which z-> regularizations will be used
         bool evolve_shift; //if false, shift is forced to be zero
+        bool try_K_fix; //if true, will attempt to manipulate initial field momenta to satisfy Hamiltonian constraint
         bool run_quietly;
         bool read_thinshell;
         double cutoff_frac;
@@ -228,6 +230,7 @@ class Spacetime
         void fill_active_points();
         void fill_refinement_levels();
         void kill_refinement_noise();
+        void compute_dtK(int time_index);
 
         double V(const double A);
         double dV(const double A);

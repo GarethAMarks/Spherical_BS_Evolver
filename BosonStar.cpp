@@ -786,7 +786,7 @@ void BosonStar::fill_given_A(const long double freq)
     vector<double> phi_vals(num_points);
 
     for (int j = 0; j < num_points; j++)
-        {A_vals[j] = state[j].A; eta_vals[j] = state[j].eta; phi_vals[j] = state[j].phi;  }
+        {A_vals[j] = state[j].A; X_vals[j] = state[j].X; eta_vals[j] = state[j].eta; phi_vals[j] = state[j].phi;  }
 
     blowup_point = num_points; //make this 1 larger than max possible value to start, in case solution does not break
 
@@ -802,8 +802,6 @@ void BosonStar::fill_given_A(const long double freq)
 
         s1 = state_RHS(r, freq, state[j], 0, 0);
 
-
-
         //state[j].A = 0.5 * (A_vals[j + 1] + A_vals[j]); //use linearly interpolated A-values for intermediate stages: outdated as currently evolve A for intermediate steps
         //state[j].eta = 0.5 * (eta_vals[j + 1] + eta_vals[j]);
 
@@ -818,15 +816,14 @@ void BosonStar::fill_given_A(const long double freq)
         //update state variables and radius array
         state[j + 1] = state[j] + (dr / 6.) * (s1 + 2 * s2 + 2 * s3 + s4);
 
-        X_vals[j + 1] = state[j + 1].X;
-        //phi_vals[j + 1] = state[j + 1].phi;
-
         state[j + 1].A = A_vals[j + 1]; //replace original A,eta, allowing for "natural" evolutions at mid-step stages. We also use the old lapse
-        state[j + 1].eta = eta_vals[j + 1];
+        state[j + 1].eta = eta_vals[j + 1] * X_vals[ j + 1] / state[j + 1].X; //correct factor of X in eta at each stage
+        //state[j + 1].phi = phi_vals[j + 1];
+
+        X_vals[j + 1] = state[j + 1].X;
+        phi_vals[j + 1] = state[j + 1].phi;
 
         radius_array[j + 1] = (j + 1) * dr;
-        state[j + 1].phi = phi_vals[j + 1];
-
 
         if (isnan(state[j].A) || isnan(state[j].X) || isnan(state[j].phi) || isnan(state[j].eta))
         {
@@ -835,6 +832,7 @@ void BosonStar::fill_given_A(const long double freq)
             cout << "WARNING: obtained nan's during fill_given_A routine." << endl;
             return;
         }
+
     }
     //state.resize(n_gridpoints);
     //radius_array.resize(n_gridpoints);
@@ -843,7 +841,12 @@ void BosonStar::fill_given_A(const long double freq)
 
     //may need to rescale lapse here
 
-    //cout << "\n" << "Finished RK4 evolution" << endl;
+    double phi_shift = -log(state[num_points - 1].X) - state[num_points - 1].phi;
+    omega_pre_rescale = omega;
+    rescale_lapse (phi_shift);
+
+    cout << "Omega discrepency is " << omega - omega_pre_rescale << endl;
+
 }
 
 
@@ -1058,33 +1061,24 @@ void BosonStar::add_perturbation(double a, double k, double center, bool conserv
     double dr = R / (num_points - 1);
     double k2 = k*k;
 
-    vector<double> noether_numerators; // old values of X * A^2 * r^2 in the numerator, i.e. the integrand of the noether charge.
-
-    /*if (conserve_noether_charge)
-    {
-        noether_numerators.resize(num_points);
-        for (int j = 0; j < num_points; j++)
-            noether_numerators[j] = radius_array[j] * radius_array[j] * state[j].A * state[j].A * state[j].X;
-    }*/
+    vector<double> phi_vals(num_points);
+    for (int j = 0; j < num_points; j++)
+        phi_vals[j] = state[j].phi;
 
     //apply perturbation to A
     for (int j = 0; j < num_points; j++)
     {
         double r = radius_array[j];
         state[j].A += a * exp ( -pow (r - center, 2.) / k2);
+        state[j].eta += -2. * a * (r - center) * exp ( -pow (r - center, 2.) / k2) / (k2 * state[j].X);
     }
 
     //rerun constraint solver to fill out X, alpha
     fill_given_A(omega);
 
-    //rescale lapse so the noether charge is the same as before
-    /*if (conserve_noether_charge)
-    {
-        for (int j = 0; j < num_points; j++)
-        {
-
-        }
-    }*/
+    //replace original lapse
+    //for (int j = 0; j < num_points; j++)
+        //state[j].phi = phi_vals[j];
 
     cout << "\nAdded Gaussian perturbation with central value " << a << " and effective radius " << k << endl;
 }

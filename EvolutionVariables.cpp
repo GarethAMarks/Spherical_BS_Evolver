@@ -1022,8 +1022,11 @@ void Spacetime:: compute_diagnostics (BSSNSlice* slice_ptr)
 
         //add contribution to L2 norms of Ham/ Mom constraints; z^2 factor for violation on sphere. Ad hoc cutoff radius to avoid
         //violation being dominated by non-propagating boundary noise.
-       if (z < R * (only_BS_violation ? (r_99 / R) : 0.9)) {Ham_L2 += dr * Ham[j] * Ham[j] * z * z  /* * pow(chi, -1.5)*/;
-        Mom_L2 += dr * Mom_Z[j] * Mom_Z[j]  * z * z * pow(chi, -1.5);}
+       if (z < R * (only_BS_violation ? (r_99 / R) : 0.9))
+        {
+            Ham_L2 += dr * Ham[j] * Ham[j] * z * z   * pow(chi, -1.5);
+            Mom_L2 += dr * Mom_Z[j] * Mom_Z[j]  * z * z * pow(chi, -1.5);
+        }
 
     }
 
@@ -1235,16 +1238,43 @@ void Spacetime::fix_initial_field_mom()
         //old_momenta[j] = slices[0].states[j].K_phi_im;
         double correction_sq = slices[0].states[j].K_phi_im * slices[0].states[j].K_phi_im + Ham[j] / (32. * M_PI);
 
-        if (correction_sq < 0 && failed == 0)
-            {failed = 1; cout << "WARNING: trick to adjust initial field momentum may have failed starting on gridpoint " << j << endl;}
+        if (correction_sq < 0. && failed == 0)
+            {
+                failed = 1;
+                cout << "WARNING: trick to adjust initial field momentum may have failed starting on gridpoint " << j << endl;
+            }
 
+        if (correction_sq >= 0.)
+             slices[0].states[j].K_phi_im = - sqrt(correction_sq);
 
-        //cout << Ham[j] << endl;
-
-        slices[0].states[j].K_phi_im = - sqrt(abs(correction_sq));
 
     }
 
+}
+
+void Spacetime::compute_dtK(int time_index)
+{
+    if (time_index == 0)
+    {
+        cout<< "WARNING: called compute_dtK on timestep 0" << endl;
+        return;
+    }
+
+    BSSNSlice& slice_current = slices[time_index];
+    BSSNSlice& slice_last = slices[time_index - 1];
+
+    for (int j = 0; j < n_gridpoints; j++)
+    {
+        double z = dr * j;
+
+        if (z < R * (only_BS_violation ? (r_99 / R) : 0.9))
+        {
+            double local_dtK =  (slice_current.states[j].K - slice_last.states[j].K ) / dt;
+            dtK_L2 += dr * local_dtK * local_dtK * z * z   * pow(slice_current.states[j].chi, -1.5);
+        }
+    }
+
+    dtK_L2 = sqrt(dtK_L2);
 }
 
 //read data from BosonStar to spacetime and construct initial time slice
@@ -1385,6 +1415,8 @@ void Spacetime::initialize(BosonStar& boson_star)
     Mom_Z.resize(n_gridpoints);
     det_h.resize(n_gridpoints);
 
+    dtK_L2 = 0;
+
     last_active_j = n_gridpoints - 1; //find last active gridpoint
     while (!active_points[last_active_j])
         last_active_j--;
@@ -1405,6 +1437,7 @@ void Spacetime::initialize(BosonStar& boson_star)
     compute_auxiliary_quantities(current_slice_ptr);
     rho0_init = make_tangherlini ? 1. : rho[0];
     compute_diagnostics(current_slice_ptr);
+    dtK_L2 = 0;
 }
 
 
@@ -1448,9 +1481,11 @@ void Spacetime::evolve()
         double phase_diff= std::arg( std::complex<double>(slices[n].states[0].phi_re, slices[n].states[0].phi_im)) - std::fmod(omega * dt * time_step, M_PI );
         if (phase_diff < 0.) phase_diff += M_PI;
 
-        if (time_step % write_CN_interval == 0)
+        if (n > 0) compute_dtK(n);
+
+        if (time_step % write_CN_interval == 0) //write time-dependent diagnostics to constraint_norms.dat
             constraints_file << std::setprecision (10) << start_time + dt * time_step << "   " << Ham_L2  << "   " << Mom_L2 <<  "   " << slices[n].states[0].chi << "   "
-            << test_ctr << "   "  << phase_diff   << "   " <<  slice_mass(current_slice_ptr) << "   "  << slice_charge(current_slice_ptr)  <<  endl;
+            << test_ctr << "   "  << phase_diff   << "   " <<  slice_mass(current_slice_ptr) << "   "  << slice_charge(current_slice_ptr)  << "   " << dtK_L2 <<  endl;
 
         slices[n + 1].states.resize(n_gridpoints);
         slices[n + 1].R = R;
