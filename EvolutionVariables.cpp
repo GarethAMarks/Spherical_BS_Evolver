@@ -471,7 +471,7 @@ int BSSNSlice::get_refinement_level(int j, std::vector<int>& refinement_points)
     int level = 1;
     int k = 0;
 
-    while ( k < n_refinements && j >= refinement_points[k] - pow(2, k + 1))//check this difference -- meant to ensure we can use a stencil at points spaced by 2^(k + 1) safely at j
+    while ( k < n_refinements && j >= refinement_points[k] - pow(2, k))//check this difference -- meant to ensure we can use a stencil at points spaced by 2^(k + 1) safely at j
     {
         level++;
         k++;
