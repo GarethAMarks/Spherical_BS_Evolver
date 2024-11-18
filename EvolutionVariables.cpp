@@ -471,7 +471,7 @@ int BSSNSlice::get_refinement_level(int j, std::vector<int>& refinement_points)
     int level = 1;
     int k = 0;
 
-    while ( k < n_refinements && j >= refinement_points[k] /*- pow(2, k + 1)*/)//check this difference -- meant to ensure we can use a stencil at points spaced by 2^(k + 1) safely at j
+    while ( k < n_refinements && j >= refinement_points[k] - pow(2, k + 1))//check this difference -- meant to ensure we can use a stencil at points spaced by 2^(k + 1) safely at j
     {
         level++;
         k++;
@@ -827,7 +827,7 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
                                - 0.5 * chi * (h_ZZ[j] * d_z_alpha * d_z_phi_im + alpha * (h_ZZ[j] * cD_zz_phi_im + n * h_WW[j] * cD_ww_phi_im) )
                                + 0.25 * alpha * h_ZZ[j] * d_z_chi * d_z_phi_im;
 
-        //Gauge variable update using moving puncture evolution, unless evolve_shift is off in which case do not update
+        //Gauge variable update using moving puncture evolution, unless evolve_shift is off in which case do not update beta
         rhs.states[j].alpha = beta * d_z_alpha - 2. * pow(alpha, 1.) * K;
         rhs.states[j].beta =  (evolve_shift)? (beta * d_z_beta + 0.75 * c_chris_Z - eta * beta): 0.;
 
@@ -848,7 +848,7 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
                 //pointers to state information at stencil location
                 vector<BSSNState*> sts = {&slice_ptr->states[J[0]], &slice_ptr->states[J[1]], &slice_ptr->states[J[2]], &slice_ptr->states[J[3]], &slice_ptr->states[J[4]], &slice_ptr->states[J[5]], &slice_ptr->states[J[6]]};
 
-                //account for odd parity of beta and contracted christoffels-- seems bad?? check for d_z!
+                //account for odd parity of beta and contracted christoffels-- seems bad though?
                 /*if (j < 3)
                 {
                     for (int k = 0; k < 3 - j; k++)
@@ -1280,7 +1280,7 @@ void Spacetime::compute_dtK(int time_index)
 //read data from BosonStar to spacetime and construct initial time slice
 void Spacetime::initialize(BosonStar& boson_star)
 {
-    wave_mode = 0; //make 1 for MR testing purposes only
+    wave_mode = 1; //make 1 for MR testing purposes only
     D = SPACEDIM + 1.;
 
     //inherit parameters from BS
@@ -1521,6 +1521,7 @@ void Spacetime::evolve()
 
         //enforce that A is traceless
         current_slice_ptr = &slices[n + 1];
+        kill_refinement_noise();
         make_A_traceless(current_slice_ptr);
 
         //enforce minimum chi
