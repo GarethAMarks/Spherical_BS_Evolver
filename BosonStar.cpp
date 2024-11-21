@@ -596,6 +596,8 @@ void BosonStar::fill_isotropic_arrays()
 {
     double dr = R / (n_gridpoints - 1);
 
+
+
     double f1, f2, f3, f4; //, g1, g2, g3, g4; //intermediate rk4 values
 
     //local array to store values of f, the ratio between isotropic and areal radii; assumed = 1 at the origin for now and later to be rescaled
@@ -611,6 +613,19 @@ void BosonStar::fill_isotropic_arrays()
     psi_iso_array.resize(n_gridpoints);
     phi_iso_array.resize(n_gridpoints);
     A_iso_array.resize(n_gridpoints);
+
+    if (perturb)
+    { pert_iso_array.resize(n_gridpoints);
+      pert_array.resize(n_gridpoints);
+
+      for (int j = 0; j < n_gridpoints; j++)
+        pert_array[j] = perturb_amp * exp ( -pow (j * dr - perturb_center, 2.) / (perturb_spread * perturb_spread));
+
+    }
+
+
+
+
 
     r_iso_array[0] = 0;
 
@@ -663,14 +678,8 @@ void BosonStar::fill_isotropic_arrays()
             //cubic spline interpolation for all but boundaries of domain
             int j0 = bound(j_areal_low - 1, 0, n_gridpoints - 4);
 
-            /*double r = r_areal_array[j];
-
-            vector<double> phi_vals(4);
-            vector<double> A_vals(4);
-            vector<double> f_vals(4);*/
-
-
             phi_iso_array[j] = cubic_interp(r_areal_array[j], state[j0].phi, state[j0 + 1].phi, state[j0 + 2].phi, state[j0 + 3].phi, j0, dr );
+            pert_iso_array[j] = cubic_interp(r_areal_array[j], pert_array[j0], pert_array[j0 + 1], pert_array[j0 + 2], pert_array[j0 + 3], j0, dr );
             A_iso_array[j] = cubic_interp(r_areal_array[j], state[j0].A, state[j0 + 1].A, state[j0 + 2].A, state[j0 + 3].A, j0, dr );
             f = cubic_interp(r_areal_array[j], f_array[j0], f_array[j0 + 1], f_array[j0 + 2], f_array[j0 + 3], j0, dr );
         }
@@ -678,7 +687,9 @@ void BosonStar::fill_isotropic_arrays()
 
         else //extrapolation case; will kick in near boundary
         {
+
             phi_iso_array[j] = state[n_gridpoints - 1].phi  + (r_areal_array[j] - R) * (state[n_gridpoints - 1].phi - state[n_gridpoints - 2].phi ) / dr;
+            pert_iso_array[j] = pert_array[n_gridpoints - 1]  + (r_areal_array[j] - R) * (pert_array[n_gridpoints - 1] - pert_array[n_gridpoints - 2] ) / dr;
             A_iso_array[j] = state[n_gridpoints - 1].A  + (r_areal_array[j] - R) * (state[n_gridpoints - 1].A - state[n_gridpoints - 2].A ) / dr;
             f = f_array[n_gridpoints - 1]  + (r_areal_array[j] - R) * (f_array[n_gridpoints - 1] - f_array[n_gridpoints - 2] ) / dr;
             //f = cubic_interp(r_areal_array[j], f_array[n_gridpoints - 4], f_array[n_gridpoints - 3], f_array[n_gridpoints - 2], f_array[n_gridpoints - 1], n_gridpoints - 4, dr );
@@ -800,18 +811,24 @@ void BosonStar::fill_given_A(const long double freq)
     {
         double r = j * dr;
 
-        s1 = state_RHS(r, freq, state[j], 0, 0);
+        double freq_correction = 0; //frequency correction due to perturbation
+
+        //if (perturb && state[j].A != 0.)
+           // freq_correction +=  2. * pert_array[j] / state[j].A;
+
+
+        s1 = state_RHS(r, freq + freq_correction, state[j], 0, 0);
 
         //state[j].A = 0.5 * (A_vals[j + 1] + A_vals[j]); //use linearly interpolated A-values for intermediate stages: outdated as currently evolve A for intermediate steps
         //state[j].eta = 0.5 * (eta_vals[j + 1] + eta_vals[j]);
 
-        s2 = state_RHS(r + dr / 2., freq, state[j] + 0.5 * dr * s1, 0, 0);
-        s3 = state_RHS(r + dr / 2., freq, state[j] + 0.5 * dr * s2, 0, 0);
+        s2 = state_RHS(r + dr / 2., freq + freq_correction, state[j] + 0.5 * dr * s1, 0, 0);
+        s3 = state_RHS(r + dr / 2., freq + freq_correction, state[j] + 0.5 * dr * s2, 0, 0);
 
         //state[j].A = A_vals[j + 1];
         //state[j].eta = eta_vals[j + 1];
 
-        s4 = state_RHS(r + dr, freq, state[j] + dr * s3, 0, 0);
+        s4 = state_RHS(r + dr, freq + freq_correction, state[j] + dr * s3, 0, 0);
 
         //update state variables and radius array
         state[j + 1] = state[j] + (dr / 6.) * (s1 + 2 * s2 + 2 * s3 + s4);
@@ -853,7 +870,6 @@ void BosonStar::fill_given_A(const long double freq)
 //reads in data files from Uli's thin shell code
 void BosonStar::read_thinshell()
 {
-
 
     if ((thinshell_res_fac & (thinshell_res_fac - 1)) != 0 || thinshell_res_fac <= 0)
         {
@@ -1057,20 +1073,27 @@ void BosonStar::read_thinshell()
 //adds a gaussian perturbation of the form a * exp (-(r - center)^2 / k ^2) to the BS.
 void BosonStar::add_perturbation(double a, double k, double center, bool conserve_noether_charge)
 {
+
     int num_points = state.size();
     double dr = R / (num_points - 1);
     double k2 = k*k;
+    pert_array.resize(num_points);
+
+
 
     vector<double> phi_vals(num_points);
     for (int j = 0; j < num_points; j++)
         phi_vals[j] = state[j].phi;
 
+
     //apply perturbation to A
     for (int j = 0; j < num_points; j++)
     {
         double r = radius_array[j];
-        state[j].A += a * exp ( -pow (r - center, 2.) / k2);
+        pert_array[j] = a * exp ( -pow (r - center, 2.) / k2);
+        state[j].A += pert_array[j];
         state[j].eta += -2. * a * (r - center) * exp ( -pow (r - center, 2.) / k2) / (k2 * state[j].X);
+
     }
 
     //rerun constraint solver to fill out X, alpha

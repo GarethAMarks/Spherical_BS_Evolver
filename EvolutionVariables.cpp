@@ -382,7 +382,8 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
 
         //starting BS real means its momentum is imaginary (with 0 starting shift)
         states[j].K_phi_re = 0.;
-        states[j].K_phi_im = - boson_star.omega * states[j].phi_re / (2. * states[j].alpha);
+        double pert_correction = (boson_star.omega / states[j].alpha) *( (isotropic) ? boson_star.pert_iso_array[J] : boson_star.pert_array[J]); //conserves Noether charge at 1st order
+        states[j].K_phi_im = - boson_star.omega * states[j].phi_re / (2. * states[j].alpha) + pert_correction;
 
     }
 
@@ -526,6 +527,7 @@ double Spacetime::d_zz(bssn_var var, int index)
     return current_slice_ptr->d_zz(var, index);
 }
 
+//replace with f'n of A^2 maybe?
 double Spacetime::V(const double A)
 {
     if (!solitonic)
@@ -574,6 +576,97 @@ double Spacetime::d_alpha_asymp(double r)
         return (M / (R * R)) / sqrt(1 - 2. * M / r);
 }
 
+
+ // returns RHS as {chi, eta} where eta is the radial derivative of chi
+ vector<double> Spacetime::ham_init_rhs(double r, double chi, double eta)
+ {
+
+    int k = floor(r / dr) - 1;
+    while (k * dr < r)
+        k++;
+
+    const BSSNSlice& s = slices[0]; //initial slice
+    current_slice_ptr = &slices[0];
+
+    int j0 = bound(k - 1, 0, n_gridpoints - 4);
+
+    //cubic interpolation to get state values off gridpoints (for midstep solving)
+    //double chi0 = cubic_interp(r, s.states[j0].chi, s.states[j0 + 1].chi, s.states[j0 + 2].chi, , s.states[j0 + 3].chi, dr);
+    double phi_re = cubic_interp(r, s.states[j0].phi_re, s.states[j0 + 1].phi_re, s.states[j0 + 2].phi_re, s.states[j0 + 3].phi_re, j0, dr);
+    double phi_im = cubic_interp(r, s.states[j0].phi_im, s.states[j0 + 1].phi_im, s.states[j0 + 2].phi_im,s.states[j0 + 3].phi_im, j0, dr);
+    double K_phi_re = cubic_interp(r, s.states[j0].K_phi_re, s.states[j0 + 1].K_phi_re, s.states[j0 + 2].K_phi_re, s.states[j0 + 3].K_phi_re,j0, dr);
+    double K_phi_im = cubic_interp(r, s.states[j0].K_phi_im, s.states[j0 + 1].K_phi_im, s.states[j0 + 2].K_phi_im, s.states[j0 + 3].K_phi_im,j0, dr);
+
+    //WARNING: these are very similarly named to Spacetime member variables introduced to avoid re-computing derivatives during evolution; do not confuse!
+    double dz_phi_re = cubic_interp(r, d_z(v_phi_re, j0), d_z(v_phi_re, j0 + 1), d_z(v_phi_re, j0 + 2), d_z(v_phi_re, j0 + 3),j0,  dr);
+    double dz_phi_im = cubic_interp(r, d_z(v_phi_im, j0), d_z(v_phi_im, j0 + 1), d_z(v_phi_im, j0 + 2), d_z(v_phi_im, j0 + 3),j0,  dr);
+
+    double mod_phi = sqrt(phi_re * phi_re + phi_im + phi_im);
+    double rho0 = 2. * (K_phi_im * K_phi_im + K_phi_re * K_phi_re) +  0.5 * chi * (pow(dz_phi_re,2) + pow(dz_phi_im,2)) + 0.5 * V(mod_phi);
+
+    double chi_rhs = eta;
+    double eta_rhs = 5. * eta * eta / (4. * chi) + 8. * M_PI * rho0;
+
+    if (r > 0.) eta_rhs -= 2 * eta / r;
+
+    //(r == 0.) ? (16. * M_PI * rho0): (eta * (13. * r * eta - 24. * chi) / (12. * r * chi) - 16. * M_PI * rho0 );
+
+    //cout << k * dr << " " << r << endl;
+
+    vector<double> rhs = {chi_rhs, eta_rhs};
+    return rhs;
+
+ }
+
+//TODO: try inwards, compare!
+ void Spacetime::solve_initial_ham()
+ {
+    if (!isotropic)
+    {
+        cout << "WARNING: Spacetime Hamiltonian solver called in non-isotropic coordinates; aborting request" << endl;
+        return;
+    }
+
+    BSSNSlice& s = slices[0]; //initial slice
+    double c1, c2, c3, c4, e1, e2, e3, e4;
+    double eta = 0;
+
+
+    //s.states[n_gridpoints - 1].chi = chi_asymp(R);
+    //eta = d_chi_asymp(R);
+
+    cout << "\n Starting initial Spacetime Hamiltonian constraint solver..." << endl;
+
+   for (int j = 0; j < n_gridpoints - 1; j++) //for (int j = n_gridpoints - 1; j > 0; j--)
+    {
+        double r = j * dr;
+
+        //RK4 solver for Ham. constraint
+        //pretty inefficient but OK for now
+        c1 = ham_init_rhs(r, s.states[j].chi, eta)[0];
+        e1 = ham_init_rhs(r, s.states[j].chi, eta)[1];
+
+        c2 = ham_init_rhs(r + dr / 2., s.states[j].chi + 0.5 * dr * c1, eta + 0.5 * dr * e1)[0];
+        e2 = ham_init_rhs(r + dr / 2., s.states[j].chi + 0.5 * dr * c1, eta + 0.5 * dr * e1)[1];
+
+        c3 = ham_init_rhs(r + dr / 2., s.states[j].chi + 0.5 * dr * c2, eta + 0.5 * dr * e2)[0];
+        e3 = ham_init_rhs(r + dr / 2., s.states[j].chi + 0.5 * dr * c2, eta + 0.5 * dr * e2)[1];
+
+        c4 = ham_init_rhs(r + dr, s.states[j].chi + dr * c3, eta + dr * e3)[0];
+        e4 = ham_init_rhs(r + dr, s.states[j].chi + dr * c3, eta + dr * e3)[1];
+
+        s.states[j + 1].chi = s.states[j].chi + (dr / 6.) * (c1 + 2 * c2 + 2 * c3 + c4);
+        eta = eta + (dr / 6.) * (e1 + 2 * e2 + 2 * e3 + e4);
+
+        if (isnan(s.states[j + 1].chi))
+        {
+            cout << "ERROR: constraint solver produced nan's on step " << j  << endl;
+            exit(1);
+        }
+    }
+    cout << "Successfully ran constraint solver" << endl;
+ }
+
 //compute auxiliary quantities at jth point
 void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
 {
@@ -617,8 +710,6 @@ void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
     double d_alpha_z = ((z <= min_z) ? d_zz(v_alpha,j) : (d_z_alpha / z)); //d_z(alpha) / z replaced with 2nd deriv at 0
 
     D_zz_alpha[j] = d_zz(v_alpha, j) - chris_Zzz[j] * d_z_alpha + d_z_chi * d_z_alpha / (2. * chi);
-    //D_ww_alpha[j] = 0.5 * h_ZZ[j] * d_z_h_ww * d_z_alpha + h_ww * h_ZZ[j] * (d_alpha_z - d_z_chi * d_z_alpha / (2. * chi) ); //can probably optimize this one quite a bit
-
     D_ww_alpha[j] = d_alpha_z - (chris_Zww[j] + 0.5 * h_ww * h_ZZ[j] * d_z_chi / chi ) * d_z_alpha;
 
     D_zz_alpha_TF[j] = n * (D_zz_alpha[j] - h_zz * h_WW[j] * D_ww_alpha[j])  / (D - 1.);
@@ -634,7 +725,7 @@ void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
     //conformal + chi parts of the Ricci tensor components
     double R_zz_chi = n * ( cD_zz_chi + (0.5 * h_WW[j] * d_z_h_ww * d_z_chi + d_chi_z ) - d_z_chi * d_z_chi / chi   ) / (2. * chi);
 
-    double R_ww_chi = h_ww * h_ZZ[j] * (cD_zz_chi + (2. * D - 5.) * (0.5 * h_WW[j] * d_z_h_ww * d_z_chi + d_chi_z) - (D - 1.) * d_z_chi * d_z_chi / (2 * chi) ) / (2. * chi);
+    double R_ww_chi = h_ww * h_ZZ[j] * (cD_zz_chi + (2. * D - 5.) * (0.5 * h_WW[j] * d_z_h_ww * d_z_chi + d_chi_z) - (D - 1.) * d_z_chi * d_z_chi / (2. * chi) ) / (2. * chi);
 
     double R_zz_c_t1 = ((z <= min_z) ?  ( -0.5 * d_zz(v_h_ww,j) ): ((h_zz - h_ww) / (z * z) - 0.5 * d_z_h_zz / z)  ); // first bracketed term in R_zz_c
     double h_zw_diff = ((z <= min_z) ?  ( 0.5 * (d_zz(v_h_zz,j) - d_zz(v_h_ww,j) )) : ((h_zz - h_ww) / (z * z)) ); // (h_zz -h_ww) / z^2 replaced by half 2nd deriv difference at z = 0
@@ -647,7 +738,7 @@ void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
     double R_zz_c = n * h_WW[j] * (R_zz_c_t1 + chris_Wwz * chris_wwz + 2 * chris_Wwz * chris_zww)
                         - 0.5 * h_ZZ[j] * d_zz(v_h_zz,j) + h_zz * d_z(v_c_chris_Z,j) + c_chris_Z * chris_zzz + 3. * h_ZZ[j] * chris_zzz * chris_Zzz[j];
 
-        /*double R_ww_c = -0.5 * h_ZZ[j] * d_zz(v_h_ww,j) + 0.5 * h_WW[j] * h_ZZ[j] * d_z(v_h_ww, j) * d_z(v_h_ww, j) - 0.5 * n * h_WW[j] * d_h_ww_z
+   /* double R_ww_c = -0.5 * h_ZZ[j] * d_zz(v_h_ww,j) + 0.5 * h_WW[j] * h_ZZ[j] * d_z(v_h_ww, j) * d_z(v_h_ww, j) - 0.5 * n * h_WW[j] * d_h_ww_z
                         + h_ww * c_chris_Z_overz + 0.5 * c_chris_Z * d_z_h_ww - h_ZZ[j] * h_zw_diff;*/
 
     double R_ww_c = -0.5 * h_ZZ[j] * d_zz(v_h_ww,j) + 3 * h_ZZ[j] * chris_Wwz * chris_wwz - 0.5 * n * h_WW[j] * d_h_ww_z
@@ -677,10 +768,10 @@ void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
     if (D == 4.)
         S[j] = 8. * (K_phi_im * K_phi_im + K_phi_re * K_phi_re) - V(mod_phi) - rho[j];
     else
-        S[j] = 0.5 * (3. - D) * h_ZZ[j] * chi * (pow(d_z_phi_re,2) + pow(d_z_phi_im,2))  - 0.5 * (D - 1.) * (  V(mod_phi) - 4. * (K_phi_im * K_phi_im + K_phi_re * K_phi_re));
+        S[j] = 0.5 * (3. - D) * h_ZZ[j]  * chi * (pow(d_z_phi_re,2) + pow(d_z_phi_im,2))  - 0.5 * (D - 1.) * (  V(mod_phi) - 4. * (K_phi_im * K_phi_im + K_phi_re * K_phi_re));
 
     S_zz_TF[j] = S_zz[j] - S[j] * h_zz /( chi * (D - 1.));
-    S_ww_TF[j] = S_ww[j] - S[j] * h_ww/ (chi * (D - 1.));
+    S_ww_TF[j] = S_ww[j] - S[j] * h_ww/ ( chi * (D - 1.));
     //try removing chi...
 
 }
@@ -1024,8 +1115,8 @@ void Spacetime:: compute_diagnostics (BSSNSlice* slice_ptr)
         //violation being dominated by non-propagating boundary noise.
        if (z < R * (only_BS_violation ? (r_99 / R) : 0.9))
         {
-            Ham_L2 += dr * Ham[j] * Ham[j] * z * z   * pow(chi, -1.5);
-            Mom_L2 += dr * Mom_Z[j] * Mom_Z[j]  * z * z * pow(chi, -1.5);
+            Ham_L2 += dr * Ham[j] * Ham[j] * z * z   * pow(chi, -1.5) ;
+            Mom_L2 += dr * Mom_Z[j] * Mom_Z[j]  * z * z  * pow(chi, -1.5) ;
         }
 
     }
@@ -1133,6 +1224,7 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "read_thinshell = ", read_thinshell, quiet);
         fill_parameter(current_line, "cutoff_frac = ", cutoff_frac, quiet);
         fill_parameter(current_line, "only_BS_violation = ", only_BS_violation, quiet);
+        fill_parameter(current_line, "run_spacetime_solver = ", run_spacetime_solver, quiet);
 
         fill_param_array(current_line, "refinement_points = ", refinement_points, quiet);
 
@@ -1280,7 +1372,7 @@ void Spacetime::compute_dtK(int time_index)
 //read data from BosonStar to spacetime and construct initial time slice
 void Spacetime::initialize(BosonStar& boson_star)
 {
-    wave_mode = 1; //make 1 for MR testing purposes only
+    wave_mode = 0; //make 1 for MR testing purposes only
     D = SPACEDIM + 1.;
 
     //inherit parameters from BS
@@ -1299,6 +1391,8 @@ void Spacetime::initialize(BosonStar& boson_star)
 
     refinement_points = {};
     read_parameters();
+
+
 
     //cout << refinement_points.size() << endl;
 
@@ -1335,6 +1429,8 @@ void Spacetime::initialize(BosonStar& boson_star)
         omega = boson_star.omega;
     }
 
+
+
     if (read_thinshell)
     {
         boson_star.read_thinshell();
@@ -1366,6 +1462,9 @@ void Spacetime::initialize(BosonStar& boson_star)
 
     cout << "Read BS data" << endl;
 
+    if (run_spacetime_solver && start_time == 0)
+        solve_initial_ham();
+
     //cut off outermost 2 gripoints, where the christoffel symbols will be generally polluted by garbage due to not having data to take derivatives there. Temporary solution; might be better to just extrapolate long term.
     n_gridpoints -= 2 ;
 
@@ -1384,8 +1483,6 @@ void Spacetime::initialize(BosonStar& boson_star)
         slices[0].read_checkpoint(start_time, n_gridpoints);
 
     //n_gridpoints should not change after this point!!!
-
-    //cout << n_gridpoints << endl;
 
     //resize all auxiliary/diagnostic arrays as appropriate
     h_ZZ.resize(n_gridpoints);

@@ -45,14 +45,16 @@ class BosonStar
         std::vector<double> phi_iso_array; // log(lapse) in isotropic coords
         std::vector<double> psi_iso_array; // conformal factor in isotropic coords
         std::vector<double> A_iso_array; // field amplitude in isotropic coords
+        std::vector<double> pert_iso_array; // field amplitude of perturbation in isotropic coords
+        std::vector<double> pert_array; // field amplitude of perturbation in isotropic coords
 
-         std::vector<double> r_iso_array; // isotropic radii given in terms of areal indices
+        std::vector<double> r_iso_array; // isotropic radii given in terms of areal indices
 
 
         double V (const double p);
         double dV (const double p);
 
-        FieldState state_RHS(const double radius, const long double frequency, FieldState  s, bool asymptotic_region, bool given_A = 0);
+        FieldState state_RHS(const double radius, long double frequency, FieldState  s, bool asymptotic_region, bool given_A = 0);
 
 
         double R; //max radius of computational domain

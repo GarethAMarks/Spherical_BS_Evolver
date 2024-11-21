@@ -208,6 +208,7 @@ class Spacetime
         bool read_thinshell;
         double cutoff_frac;
 
+        bool run_spacetime_solver;
         bool BS_perturbed;
         bool make_tangherlini;
         bool wave_mode; //testing purposes only, converts to wave eq'n solver
@@ -226,6 +227,8 @@ class Spacetime
         double slice_charge(BSSNSlice* slice_ptr);
         void update_outer_boundary(double time_step);
         void fix_initial_field_mom();
+        std::vector<double> ham_init_rhs(double r, double chi, double eta);
+        void solve_initial_ham();
 
         void fill_active_points();
         void fill_refinement_levels();

@@ -39,8 +39,13 @@ int main()
 
     //boson_star.solve_finding_A(0.91, 0.042, 0.01, 1);
 
+
+
     //boson_star.read_thinshell();
     boson_star.solve();
+
+
+
     boson_star.fill_isotropic_arrays();
     boson_star.write_isotropic();
     boson_star.write_field();
@@ -55,7 +60,6 @@ int main()
 
 
     //boson_star.convergence_test();
-
 
     Spacetime st{};
     st.initialize(boson_star);
