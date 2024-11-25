@@ -382,7 +382,11 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
 
         //starting BS real means its momentum is imaginary (with 0 starting shift)
         states[j].K_phi_re = 0.;
-        double pert_correction = (boson_star.omega / states[j].alpha) *( (isotropic) ? boson_star.pert_iso_array[J] : boson_star.pert_array[J]); //conserves Noether charge at 1st order
+
+        double pert_correction = 0.;
+        if (boson_star.perturb)
+            pert_correction = (boson_star.omega / states[j].alpha) *( (isotropic) ? boson_star.pert_iso_array[J] : boson_star.pert_array[J]); //conserves Noether charge at 1st order in perturbation
+
         states[j].K_phi_im = - boson_star.omega * states[j].phi_re / (2. * states[j].alpha) + pert_correction;
 
     }
@@ -1115,8 +1119,8 @@ void Spacetime:: compute_diagnostics (BSSNSlice* slice_ptr)
         //violation being dominated by non-propagating boundary noise.
        if (z < R * (only_BS_violation ? (r_99 / R) : 0.9))
         {
-            Ham_L2 += dr * Ham[j] * Ham[j] * z * z   * pow(chi, -1.5) ;
-            Mom_L2 += dr * Mom_Z[j] * Mom_Z[j]  * z * z  * pow(chi, -1.5) ;
+            Ham_L2 += dr * Ham[j] * Ham[j] * z * z /*  * pow(chi, -1.5)*/ ;
+            Mom_L2 += dr * Mom_Z[j] * Mom_Z[j]  * z * z /* * pow(chi, -1.5)*/ ;
         }
 
     }
@@ -1531,10 +1535,12 @@ void Spacetime::initialize(BosonStar& boson_star)
     //if (BS_perturbed)
         //fix_initial_field_mom();
 
+
     compute_auxiliary_quantities(current_slice_ptr);
     rho0_init = make_tangherlini ? 1. : rho[0];
     compute_diagnostics(current_slice_ptr);
     dtK_L2 = 0;
+    cout << "Dynamical Noether charge is " << slice_charge(&slices[0]) << endl;
 }
 
 

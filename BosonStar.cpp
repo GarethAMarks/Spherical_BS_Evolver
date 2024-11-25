@@ -679,9 +679,10 @@ void BosonStar::fill_isotropic_arrays()
             int j0 = bound(j_areal_low - 1, 0, n_gridpoints - 4);
 
             phi_iso_array[j] = cubic_interp(r_areal_array[j], state[j0].phi, state[j0 + 1].phi, state[j0 + 2].phi, state[j0 + 3].phi, j0, dr );
-            pert_iso_array[j] = cubic_interp(r_areal_array[j], pert_array[j0], pert_array[j0 + 1], pert_array[j0 + 2], pert_array[j0 + 3], j0, dr );
             A_iso_array[j] = cubic_interp(r_areal_array[j], state[j0].A, state[j0 + 1].A, state[j0 + 2].A, state[j0 + 3].A, j0, dr );
             f = cubic_interp(r_areal_array[j], f_array[j0], f_array[j0 + 1], f_array[j0 + 2], f_array[j0 + 3], j0, dr );
+
+            if (perturb) pert_iso_array[j] = cubic_interp(r_areal_array[j], pert_array[j0], pert_array[j0 + 1], pert_array[j0 + 2], pert_array[j0 + 3], j0, dr );
         }
 
 
@@ -689,9 +690,10 @@ void BosonStar::fill_isotropic_arrays()
         {
 
             phi_iso_array[j] = state[n_gridpoints - 1].phi  + (r_areal_array[j] - R) * (state[n_gridpoints - 1].phi - state[n_gridpoints - 2].phi ) / dr;
-            pert_iso_array[j] = pert_array[n_gridpoints - 1]  + (r_areal_array[j] - R) * (pert_array[n_gridpoints - 1] - pert_array[n_gridpoints - 2] ) / dr;
             A_iso_array[j] = state[n_gridpoints - 1].A  + (r_areal_array[j] - R) * (state[n_gridpoints - 1].A - state[n_gridpoints - 2].A ) / dr;
             f = f_array[n_gridpoints - 1]  + (r_areal_array[j] - R) * (f_array[n_gridpoints - 1] - f_array[n_gridpoints - 2] ) / dr;
+
+            if (perturb) pert_iso_array[j] = pert_array[n_gridpoints - 1]  + (r_areal_array[j] - R) * (pert_array[n_gridpoints - 1] - pert_array[n_gridpoints - 2] ) / dr;
             //f = cubic_interp(r_areal_array[j], f_array[n_gridpoints - 4], f_array[n_gridpoints - 3], f_array[n_gridpoints - 2], f_array[n_gridpoints - 1], n_gridpoints - 4, dr );
             //f = pow((1 + M / (2 * dr * j)), -2.);
         }
@@ -1067,7 +1069,9 @@ void BosonStar::read_thinshell()
         radius_array[j] = dr * j;
     }
 
-    cout << "Successfully read thinshell model with central amplitude A = " << A_central << ", mass M = " << M << ", and binding energy E = " << M - mu * get_noether_charge() << endl;
+    noether_charge = get_noether_charge();
+    binding_energy = M - mu * get_noether_charge();
+    cout << "Successfully read thinshell model with central amplitude A = " << A_central << ", mass M = " << M << ", noether charge N = " << noether_charge <<  ", and binding energy E = " << binding_energy << endl;
 }
 
 //adds a gaussian perturbation of the form a * exp (-(r - center)^2 / k ^2) to the BS.
