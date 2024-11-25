@@ -64,7 +64,7 @@ BSSNSlice operator+(const BSSNSlice& slice1, const BSSNSlice& slice2)
 {
     BSSNSlice return_slice;
 
-    int length = slice1.states.size();
+    unsigned int length = slice1.states.size();
 
 
     if (length != slice2.states.size() || slice1.R != slice2.R)
@@ -78,7 +78,7 @@ BSSNSlice operator+(const BSSNSlice& slice1, const BSSNSlice& slice2)
     return_slice.has_BH = slice1.has_BH;
     return_slice.refinement_points = slice1.refinement_points;
 
-    for (unsigned int j = 0; j < length; j++)
+    for (int j = 0; j < length; j++)
     {
         return_slice.states[j] = slice1.states[j] + slice2.states[j];
     }
@@ -97,7 +97,7 @@ BSSNSlice operator*(double c, const BSSNSlice& slice)
     return_slice.has_BH = slice.has_BH;
     return_slice.refinement_points = slice.refinement_points;
 
-    for (unsigned int j = 0; j < length; j++)
+    for (int j = 0; j < length; j++)
     {
         return_slice.states[j] = c * slice.states[j];
     }
@@ -298,7 +298,7 @@ double BSSNSlice::make_tangherlini (double m, double min_chi)
     //cout << psi_power << endl;
 
     //for now use areal-radius gauge, meaning that conformally rescaled metric is NOT Euclidean-- may need to/help to switch to isotropic
-    for (unsigned int j = 0; j < n_gridpoints; j++)
+    for (int j = 0; j < n_gridpoints; j++)
     {
         double r = (j == 0) ? 0.000001 : (j * dr);
 
@@ -427,7 +427,7 @@ void BSSNSlice::write_slice(std::string file_name)
     }
 
 
-    for (unsigned int j = 0; j < length; j++)
+    for (int j = 0; j < length; j++)
     {
         //if (!active_points[j]) //perform no computations on inactive points
             //continue;
@@ -785,7 +785,7 @@ void Spacetime::compute_auxiliary_quantities(BSSNSlice* slice_ptr, bool derivati
 {
     //current_slice_ptr = &slices[time_step]; //update current slice pointer first
 
-    double n = D - 2.;
+    //double n = D - 2.;
     dr = R / (n_gridpoints - 1);
 
     for (int j = 0; j < n_gridpoints; j++)
@@ -1055,7 +1055,7 @@ double Spacetime::slice_mass(BSSNSlice* slice_ptr)
 
 double Spacetime::slice_charge(BSSNSlice* slice_ptr)
 {
-    const double n = D - 2;
+    //const double n = D - 2;
     double charge = 0;
     for (int j = 0; j <  0.95 * n_gridpoints - 1; j++)
     {
@@ -1269,7 +1269,7 @@ void Spacetime::fill_active_points()
         active_points[j] = 0;
 
     int step_size = 1; //amount we step forward by in activating points
-    int refinement_layers_crossed = 0;
+    unsigned int refinement_layers_crossed = 0;
 
     //now fill in points, halving the number of points filled in every time we pass a refinement layer
     for (int k = 0; k < n_gridpoints; k += step_size)
@@ -1297,7 +1297,7 @@ void Spacetime::fill_refinement_levels()
 void Spacetime::kill_refinement_noise()
 {
     int start_point = 0;
-    for (int level = 0; level < refinement_points.size(); level++)
+    for (unsigned int level = 0; level < refinement_points.size(); level++)
     {
         int step = pow(2, level);
 
@@ -1671,7 +1671,7 @@ void Spacetime::fourier_transform_A0() //really just copies central A data over 
         exit(1);
     }
 
-    for (int k = 0; k < A0_values.size();  k++)
+    for (unsigned int k = 0; k < A0_values.size();  k++)
     {
         ftransf_file << k * dt << "    " << A0_values[k] << endl;
     }
