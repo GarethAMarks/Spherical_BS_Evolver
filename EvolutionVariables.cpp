@@ -78,7 +78,7 @@ BSSNSlice operator+(const BSSNSlice& slice1, const BSSNSlice& slice2)
     return_slice.has_BH = slice1.has_BH;
     return_slice.refinement_points = slice1.refinement_points;
 
-    for (int j = 0; j < length; j++)
+    for (unsigned int j = 0; j < length; j++)
     {
         return_slice.states[j] = slice1.states[j] + slice2.states[j];
     }
@@ -97,7 +97,7 @@ BSSNSlice operator*(double c, const BSSNSlice& slice)
     return_slice.has_BH = slice.has_BH;
     return_slice.refinement_points = slice.refinement_points;
 
-    for (int j = 0; j < length; j++)
+    for (unsigned int j = 0; j < length; j++)
     {
         return_slice.states[j] = c * slice.states[j];
     }
@@ -242,7 +242,7 @@ bool BSSNSlice::smooth_lapse()
     int d_start, d_end; //beginning and end of the discontinuities
 
     double dr = R / (states.size() - 1);
-    for (int j = 2; j < states.size() - 4; j++ )
+    for (unsigned int j = 2; j < states.size() - 4; j++ )
     {
         if ( abs(d_zz(v_alpha, j) - d_zz(v_alpha, j - 1)) > 5. * abs(d_zz(v_alpha, j - 1) - d_zz(v_alpha, j - 2))  ) //look for discontinuities. far from perfect solution
         {
@@ -298,7 +298,7 @@ double BSSNSlice::make_tangherlini (double m, double min_chi)
     //cout << psi_power << endl;
 
     //for now use areal-radius gauge, meaning that conformally rescaled metric is NOT Euclidean-- may need to/help to switch to isotropic
-    for (int j = 0; j < n_gridpoints; j++)
+    for (unsigned int j = 0; j < n_gridpoints; j++)
     {
         double r = (j == 0) ? 0.000001 : (j * dr);
 
@@ -427,7 +427,7 @@ void BSSNSlice::write_slice(std::string file_name)
     }
 
 
-    for (int j = 0; j < length; j++)
+    for (unsigned int j = 0; j < length; j++)
     {
         //if (!active_points[j]) //perform no computations on inactive points
             //continue;
@@ -512,7 +512,7 @@ void slice_convergence_test (BSSNSlice& sl, BSSNSlice& sm, BSSNSlice& sh)
     }
 
     //write change in A between med/low and high/med resolution to file.
-    for (int j = 0; j < sl.states.size(); j++)
+    for (unsigned int j = 0; j < sl.states.size(); j++)
     {
         conv_file << j * sl.R /(sl.states.size() - 1) << "   " << sm.states[2*j].phi_re -  sl.states[j].phi_re  << "    " << 8.*(sh.states[4*j].phi_re  -  sm.states[2*j].phi_re ) << endl;
     }
