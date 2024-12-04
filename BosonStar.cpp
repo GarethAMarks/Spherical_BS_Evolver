@@ -90,6 +90,9 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "perturb_amp = ", perturb_amp, quiet);
         fill_parameter(current_line, "perturb_spread = ", perturb_spread, quiet);
         fill_parameter(current_line, "perturb_center = ", perturb_center, quiet);
+        fill_parameter(current_line, "mirror_gaussian = ", mirror_gaussian, quiet);
+        fill_parameter(current_line, "gaussian_start = ", gaussian_start, quiet);
+        fill_parameter(current_line, "enforced_freq = ", enforced_freq, quiet);
     }
 }
 
@@ -114,6 +117,8 @@ FieldState BosonStar::state_RHS(const double radius, const long double frequency
 
     double dPhi = T1 + F1 * (T2 - V(s.A));
 
+    double eta_corr = (radius == 0) ? (1. / 3.) : 1.;
+
     //in the asymptotic region, evolve phi and X normally but do not update A, eta (these will be hard-coded to asymptotic expressions)
     if (asymptotic_region)
     {
@@ -123,7 +128,7 @@ FieldState BosonStar::state_RHS(const double radius, const long double frequency
     {
         //return RHS of field state variables outside of asymptotic region, A excepted
         return  (FieldState) {0, s.X * ( F1 * (T2 + V(s.A)) - T1 ), dPhi,
-        -2. * T3 - s.eta * dPhi + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi))};
+        eta_corr *(-2. * T3 - s.eta * dPhi + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi))) };
     }
 
     else
@@ -605,10 +610,6 @@ void BosonStar::fill_isotropic_arrays()
     vector<double> r_areal_array(n_gridpoints);
     f_array[0] = 1.;
 
-    //g is just f on a grid uniform in isotropic rather than areal radius. Used to avoid need to apply grid inversion to find r_areal(r_iso), which adds to error.
-    //vector<double> g_array(n_gridpoints);
-    //g_array[0] = 1.;
-
     r_iso_array.resize(n_gridpoints);
     psi_iso_array.resize(n_gridpoints);
     phi_iso_array.resize(n_gridpoints);
@@ -619,11 +620,9 @@ void BosonStar::fill_isotropic_arrays()
       pert_array.resize(n_gridpoints);
 
       for (int j = 0; j < n_gridpoints; j++)
-        pert_array[j] = perturb_amp * exp ( -pow (j * dr - perturb_center, 2.) / (perturb_spread * perturb_spread));
-
+        pert_array[j] = perturb_amp * exp ( -pow (j * dr - perturb_center, 2.) / (perturb_spread * perturb_spread))
+                        -mirror_gaussian * perturb_amp * exp ( -pow (j * dr - perturb_center - 2. * perturb_spread, 2.) / (perturb_spread * perturb_spread));
     }
-
-
 
 
 
@@ -860,6 +859,7 @@ void BosonStar::fill_given_A(const long double freq)
 
     //may need to rescale lapse here
 
+
     double phi_shift = -log(state[num_points - 1].X) - state[num_points - 1].phi;
     omega_pre_rescale = omega;
     rescale_lapse (phi_shift);
@@ -1074,8 +1074,26 @@ void BosonStar::read_thinshell()
     cout << "Successfully read thinshell model with central amplitude A = " << A_central << ", mass M = " << M << ", noether charge N = " << noether_charge <<  ", and binding energy E = " << binding_energy << endl;
 }
 
+//ensures all field arrays are zero
+void BosonStar::clear_BS()
+{
+    for (int j = 0; j < n_gridpoints; j++)
+    {
+        //state[j] = (FieldState) {0., 0., 0., 0.};
+        //phi_iso_array[j] = 0.;
+        //psi_iso_array[j] = 0.;
+        A_iso_array[j] = 0.;
+        state[j].A = 0;
+        state[j].eta = 0.;
+        state[j].X = 1.;
+
+        omega = 1;
+    }
+}
+
+
 //adds a gaussian perturbation of the form a * exp (-(r - center)^2 / k ^2) to the BS.
-void BosonStar::add_perturbation(double a, double k, double center, bool conserve_noether_charge)
+void BosonStar::add_perturbation(double a, double k, double center)
 {
 
     int num_points = state.size();
@@ -1094,9 +1112,10 @@ void BosonStar::add_perturbation(double a, double k, double center, bool conserv
     for (int j = 0; j < num_points; j++)
     {
         double r = radius_array[j];
-        pert_array[j] = a * exp ( -pow (r - center, 2.) / k2);
+        pert_array[j] = a * exp ( -pow (r - center, 2.) / k2) - mirror_gaussian * a *  exp ( -pow (r - center - 2. * k, 2.) / k2);
         state[j].A += pert_array[j];
-        state[j].eta += -2. * a * (r - center) * exp ( -pow (r - center, 2.) / k2) / (k2 * state[j].X);
+        state[j].eta += -2. * a * (r - center) * exp ( -pow (r - center, 2.) / k2) / (k2 * state[j].X)
+                        + mirror_gaussian * 2. * a * (r - center - 2. * k) * exp ( -pow (r - center - 2. * k, 2.) / k2) / (k2 * state[j].X);
 
     }
 
@@ -1126,7 +1145,7 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
     // mini BS: {0.3, 0.375, 0.425, 0.475, 0.525, 0.575, 0.62, 0.66, 0.7, 0.73} is good with n_gridpoints = 2000 from patams file
     //sigma = 0.2: {0.25,0.325,0.375, 0.425, 0.475, 0.525, 0.575};
     //sigma = 0.1: {0.05, 0.15, 0.2, 0.25,0.325,0.375, 0.425, 0.475, 0.525, 0.575};
-    vector<double> refine_thresholds{0.05, 0.2, 0.25,0.325,0.375, 0.425, 0.475, 0.525, 0.575};
+    vector<double> refine_thresholds{0.25,0.325,0.375, 0.425, 0.475, 0.525, 0.575};
     //bool passed_last_threshold; //set to 1 after last threshold reached
 
     //frequency from previous guess for use in update

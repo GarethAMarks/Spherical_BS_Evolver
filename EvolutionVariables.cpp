@@ -385,7 +385,7 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
 
         double pert_correction = 0.;
         if (boson_star.perturb)
-            pert_correction = (boson_star.omega / states[j].alpha) *( (isotropic) ? boson_star.pert_iso_array[J] : boson_star.pert_array[J]); //conserves Noether charge at 1st order in perturbation
+            pert_correction = 1. * (boson_star.omega / states[j].alpha) *( (isotropic) ? boson_star.pert_iso_array[J] : boson_star.pert_array[J]); //conserves Noether charge at 1st order in perturbation
 
         states[j].K_phi_im = - boson_star.omega * states[j].phi_re / (2. * states[j].alpha) + pert_correction;
 
@@ -605,6 +605,19 @@ double Spacetime::d_alpha_asymp(double r)
     double dz_phi_re = cubic_interp(r, d_z(v_phi_re, j0), d_z(v_phi_re, j0 + 1), d_z(v_phi_re, j0 + 2), d_z(v_phi_re, j0 + 3),j0,  dr);
     double dz_phi_im = cubic_interp(r, d_z(v_phi_im, j0), d_z(v_phi_im, j0 + 1), d_z(v_phi_im, j0 + 2), d_z(v_phi_im, j0 + 3),j0,  dr);
 
+   /* if (j0 == 0)
+    {
+        phi_re = s.states[0].phi_re * (dr - r) / dr + s.states[1].phi_re * r / dr;
+        phi_im = s.states[0].phi_im * (dr - r) / dr + s.states[1].phi_im * r / dr;
+
+        K_phi_re = s.states[0].K_phi_re * (dr - r) / dr + s.states[1].K_phi_re * r / dr;
+        K_phi_im = s.states[0].K_phi_im * (dr - r) / dr + s.states[1].K_phi_im * r / dr;
+
+        dz_phi_re = d_z(v_phi_re, 0) * (dr - r) / dr + d_z(v_phi_re, 1) * r / dr;
+        dz_phi_im = d_z(v_phi_im, 0) * (dr - r) / dr + d_z(v_phi_im, 1) * r / dr;
+    }*/
+
+
     double mod_phi = sqrt(phi_re * phi_re + phi_im + phi_im);
     double rho0 = 2. * (K_phi_im * K_phi_im + K_phi_re * K_phi_re) +  0.5 * chi * (pow(dz_phi_re,2) + pow(dz_phi_im,2)) + 0.5 * V(mod_phi);
 
@@ -612,7 +625,7 @@ double Spacetime::d_alpha_asymp(double r)
     double eta_rhs = 5. * eta * eta / (4. * chi) + 8. * M_PI * rho0;
 
     if (r > 0.) eta_rhs -= 2 * eta / r;
-
+    else eta_rhs /= 3.; // in the limit r -> 0, eta / r is replaced by d_r(eta), so net effect is to divide the usual RHS by 3!
     //(r == 0.) ? (16. * M_PI * rho0): (eta * (13. * r * eta - 24. * chi) / (12. * r * chi) - 16. * M_PI * rho0 );
 
     //cout << k * dr << " " << r << endl;
@@ -641,6 +654,8 @@ double Spacetime::d_alpha_asymp(double r)
 
     cout << "\n Starting initial Spacetime Hamiltonian constraint solver..." << endl;
 
+    //s.states[0].chi = 22.1;
+
    for (int j = 0; j < n_gridpoints - 1; j++) //for (int j = n_gridpoints - 1; j > 0; j--)
     {
         double r = j * dr;
@@ -665,10 +680,11 @@ double Spacetime::d_alpha_asymp(double r)
         if (isnan(s.states[j + 1].chi))
         {
             cout << "ERROR: constraint solver produced nan's on step " << j  << endl;
-            exit(1);
+            //exit(1); //should probably make a param about whether this fails
         }
     }
     cout << "Successfully ran constraint solver" << endl;
+
  }
 
 //compute auxiliary quantities at jth point
@@ -924,10 +940,10 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
 
         //Gauge variable update using moving puncture evolution, unless evolve_shift is off in which case do not update beta
         rhs.states[j].alpha = beta * d_z_alpha - 2. * pow(alpha, 1.) * K;
-        rhs.states[j].beta =  (evolve_shift)? (beta * d_z_beta + 0.75 * c_chris_Z - eta * beta): 0.;
+        rhs.states[j].beta =  (evolve_shift)? (beta * d_z_beta + gamma_fac * c_chris_Z - eta * beta): 0.;
 
         //add damping in away from edges for now; may need to add for edges-- we'll see
-        //WARNING: damping + refinement not currently compatible
+        //WARNING: damping + refinement not currently fully compatible
         if (damping_factor != 0. && j < n_gridpoints - 3 * pow(2, max_ref - 1))
             {
                 int res_fac = pow(2, slice_ptr->get_refinement_level(j, refinement_points) - 1);
@@ -1229,6 +1245,7 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "cutoff_frac = ", cutoff_frac, quiet);
         fill_parameter(current_line, "only_BS_violation = ", only_BS_violation, quiet);
         fill_parameter(current_line, "run_spacetime_solver = ", run_spacetime_solver, quiet);
+        fill_parameter(current_line, "gamma_fac = ", gamma_fac, quiet);
 
         fill_param_array(current_line, "refinement_points = ", refinement_points, quiet);
 
@@ -1342,10 +1359,7 @@ void Spacetime::fix_initial_field_mom()
 
         if (correction_sq >= 0.)
              slices[0].states[j].K_phi_im = - sqrt(correction_sq);
-
-
     }
-
 }
 
 void Spacetime::compute_dtK(int time_index)
@@ -1369,9 +1383,16 @@ void Spacetime::compute_dtK(int time_index)
             dtK_L2 += dr * local_dtK * local_dtK * z * z   * pow(slice_current.states[j].chi, -1.5);
         }
     }
-
     dtK_L2 = sqrt(dtK_L2);
 }
+
+void Spacetime::prepare_ham_solve()  //EXPERIMENTAL: try to return to pure isotropic coords + solve Ham constraint mid-run
+{
+
+}
+
+
+
 
 //read data from BosonStar to spacetime and construct initial time slice
 void Spacetime::initialize(BosonStar& boson_star)
@@ -1392,6 +1413,8 @@ void Spacetime::initialize(BosonStar& boson_star)
     M = boson_star.M;
     r_99 = boson_star.r_99;
     BS_perturbed = boson_star.perturb;
+
+    gamma_fac = 0.75; // initialize to 3/4 by default for backwards compatibility w/ older params files
 
     refinement_points = {};
     read_parameters();
@@ -1432,8 +1455,6 @@ void Spacetime::initialize(BosonStar& boson_star)
         //not sure if helpful yet!
         omega = boson_star.omega;
     }
-
-
 
     if (read_thinshell)
     {
@@ -1540,7 +1561,14 @@ void Spacetime::initialize(BosonStar& boson_star)
     rho0_init = make_tangherlini ? 1. : rho[0];
     compute_diagnostics(current_slice_ptr);
     dtK_L2 = 0;
-    cout << "Dynamical Noether charge is " << slice_charge(&slices[0]) << endl;
+
+    double mass0 = slice_mass(&slices[0]);
+    double charge0 = slice_charge(&slices[0]);
+    M = mass0;
+
+    std::ofstream dynamical_file{"dynamical_constants.dat"};
+    dynamical_file << mass0 << "    " << charge0 << "    " << mass0 - mu * charge0;
+    cout << "Dynamical N =" << charge0 << ", M = "  << mass0 << " and binding energy is " << mass0 - mu * charge0  << endl;
 }
 
 
@@ -1580,15 +1608,24 @@ void Spacetime::evolve()
         if(store_A0)
             A0_values[time_step] = test_ctr;
 
-        //difference between actual and expected phase
-        double phase_diff= std::arg( std::complex<double>(slices[n].states[0].phi_re, slices[n].states[0].phi_im)) - std::fmod(omega * dt * time_step, M_PI );
+        double phase_ctr, phase_last;
+        if (time_step > 0) phase_last = phase_ctr;
+        phase_ctr = std::arg( std::complex<double>(slices[n].states[0].phi_re, slices[n].states[0].phi_im));
+
+
+        double omega_approx = (phase_ctr - phase_last) / dt;
+
+        if (omega_approx < -M_PI / dt) omega_approx += 2 * M_PI / dt; //corrects jumps due to branch cuts
+
+        double phase_diff= phase_ctr - std::fmod(omega * dt * time_step, M_PI ); //difference between actual and expected phase at center of BS
         if (phase_diff < 0.) phase_diff += M_PI;
 
         if (n > 0) compute_dtK(n);
+        M = slice_mass(current_slice_ptr); // maybe remove if causes bad bdry oscillaltions?
 
         if (time_step % write_CN_interval == 0) //write time-dependent diagnostics to constraint_norms.dat
             constraints_file << std::setprecision (10) << start_time + dt * time_step << "   " << Ham_L2  << "   " << Mom_L2 <<  "   " << slices[n].states[0].chi << "   "
-            << test_ctr << "   "  << phase_diff   << "   " <<  slice_mass(current_slice_ptr) << "   "  << slice_charge(current_slice_ptr)  << "   " << dtK_L2 <<  endl;
+            << test_ctr << "   "  << phase_diff   << "   " <<  /*slice_mass(current_slice_ptr)*/ M << "   "  << slice_charge(current_slice_ptr)  << "   " << dtK_L2 << "   " << omega_approx <<  endl;
 
         slices[n + 1].states.resize(n_gridpoints);
         slices[n + 1].R = R;

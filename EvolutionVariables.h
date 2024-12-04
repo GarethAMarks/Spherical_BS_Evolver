@@ -99,6 +99,9 @@ class Spacetime
         void halve_resolution();
         void fourier_transform_A0();
 
+        double slice_mass(BSSNSlice* slice_ptr);
+        double slice_charge(BSSNSlice* slice_ptr);
+
 //auxiliary variables held on a particular time slice-- CONVENTION: upper/lowercase r,w denote upstairs/downstairs indices where relevent
     private:
 
@@ -198,6 +201,7 @@ class Spacetime
 
         double sigma_BSSN; //multiplier of constraint term in the gamma evolution equation
         double eta; //gamma driver condition parameter
+        double gamma_fac; //factor on gamma in the gamma-driver condition; usually 0.75
         double damping_factor; //multiplier for kreiss-oliger damping
         int write_interval;
         int write_CN_interval;
@@ -223,12 +227,11 @@ class Spacetime
         BSSNSlice slice_rhs(BSSNSlice* slice_ptr);
         void make_A_traceless(BSSNSlice* slice_ptr);
         void compute_diagnostics(BSSNSlice* slice_ptr);
-        double slice_mass(BSSNSlice* slice_ptr);
-        double slice_charge(BSSNSlice* slice_ptr);
         void update_outer_boundary(double time_step);
         void fix_initial_field_mom();
         std::vector<double> ham_init_rhs(double r, double chi, double eta);
         void solve_initial_ham();
+        void prepare_ham_solve(); //EXPERIMENTAL: try to return to pure isotropic coords + solve Ham constraint mid-run
 
         void fill_active_points();
         void fill_refinement_levels();
@@ -247,8 +250,6 @@ class Spacetime
 
         double d_z(bssn_var var, int index, int order); //just syntactic sugar to call d_z, d_zz on current slice
         double d_zz(bssn_var var, int index);
-
-
 
         double test_ctr;
 

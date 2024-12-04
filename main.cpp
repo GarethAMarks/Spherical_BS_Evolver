@@ -22,7 +22,6 @@ enum evolution_system
 };
 
 
-
 int main()
 {
     //enum evolution_system system = BSSN;
@@ -43,19 +42,43 @@ int main()
 
     //boson_star.read_thinshell();
     boson_star.solve();
-
-
-
     boson_star.fill_isotropic_arrays();
     boson_star.write_isotropic();
     boson_star.write_field();
 
+    //boson_star.cycle_models(5000, 0.001, 0.001);
 
-    //boson_star.cycle_models(5000, 0.0002, 0.00001);
+    std::ofstream nm_file{"mass_charge.dat"};
+    //perturbation-only stuff below:
+    if (boson_star.gaussian_start)
+    {
+        int num_gaussians = 1; //change this to produce a gaussian model cycle to explore 1-parameter families
+        double step = 0.0001;
 
-    //boson_star.A_central = 0.093;
-    //boson_star.rk4_solve(0.83);
-    //boson_star.write_field();
+        double& step_var = boson_star.perturb_amp;
+
+        for (int k = 0; k < num_gaussians; k++)
+        {
+            boson_star.clear_BS();
+            boson_star.omega = boson_star.enforced_freq;
+            boson_star.add_perturbation(boson_star.perturb_amp, boson_star.perturb_spread, 0.);
+            boson_star.fill_given_A(boson_star.omega);
+            boson_star.fill_isotropic_arrays();
+            boson_star.write_isotropic();
+            boson_star.write_field();
+
+            Spacetime st_gauss{};
+            st_gauss.initialize(boson_star);
+            st_gauss.slices[0].write_slice();
+            st_gauss.write_diagnostics();
+
+            nm_file <<st_gauss.slice_mass(&st_gauss.slices[0]) << "    " << st_gauss.slice_charge(&st_gauss.slices[0]) <<  "    " <<  step_var << endl;
+
+            step_var += step;
+        }
+    }
+
+
 
 
 
@@ -64,16 +87,10 @@ int main()
     Spacetime st{};
     st.initialize(boson_star);
     st.slices[0].write_slice();
-
-
-    //in principle can use this to push discontinuity to boundary and then chop, but would like better approach...
-    //for (int j = 0; j < 500; j++)
-         //cout << st.slices[0].smooth_lapse() << endl;
-
-    //st.slices[0].smooth_lapse();
     st.write_diagnostics();
 
     st.evolve();
+
     //st.fourier_transform_A0();
 
 

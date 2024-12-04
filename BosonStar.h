@@ -67,10 +67,7 @@ class BosonStar
         int thinshell_res_fac; //must be power of 2. If >1, thinshell model will be brought in using resolution raised by this factor.
 
         //whether to perturb, and the height + "standard deviation" of the perturbation
-        bool perturb;
-        double perturb_amp;
-        double perturb_spread;
-        double perturb_center;
+
 
         int count_zero_crossings();
         long double find_frequency(bool quiet = 0);
@@ -92,6 +89,13 @@ class BosonStar
         double noether_charge;
         double compactness;
         double r_99; //solved radius containing 99% of mass
+        bool gaussian_start;
+        bool perturb;
+        double perturb_amp; //amplitude, center and st. dev. of gaussian perturbation
+        double perturb_spread;
+        double perturb_center;
+        bool mirror_gaussian; //if true, add an equal and opposite gaussian 2 standard deviations outside the original.
+        double enforced_freq; //enforced frequency for arbitrary scalar cloud starts
 
         BosonStar() = default;
         //BosonStar(const BosonStar& boson_star); //copy constructor(don't seem to need for now)
@@ -110,8 +114,9 @@ class BosonStar
         void write_isotropic();
 
         void fill_given_A( const long double freq);
+        void clear_BS();
 
-        void add_perturbation(double a, double k, double center, bool conserve_noether_charge = 0);
+        void add_perturbation(double a, double k, double center);
 
         void cycle_models(int n_stars, double A_0, double delta_A);
 
