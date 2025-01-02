@@ -729,7 +729,8 @@ void BosonStar::write_isotropic()
 
     for (int j = 1; j < n_gridpoints - 1; j++)
     {
-        data_file << std::setprecision (10) << radius_array[j] << "   " << r_iso_array[j] << "    " << r_areal(j) << "    " << psi_iso_array[j]  <<  "    " << A_iso_array[j]  <<  "    " << (-2. * psi_iso_array[j] + psi_iso_array[j - 1] + psi_iso_array[j + 1] ) / (dr * dr) << endl;
+        data_file << std::setprecision (10) << radius_array[j] << "   " << r_iso_array[j] << "    " << r_areal(j) << "    " << psi_iso_array[j]  <<  "    " << A_iso_array[j]  <<  "    "
+        << (-2. * A_iso_array[j] + A_iso_array[j - 1] + A_iso_array[j + 1] ) / (dr * dr) << endl;
     }
 }
 
@@ -783,8 +784,8 @@ bool BosonStar::solve_finding_A(long double freq, double A_guess, double A_range
 
 }
 
-
-void BosonStar::fill_given_A(const long double freq)
+//attempts to solve for X and alpha given a profile in A and eta. Returns 0 if failed, 1 if successful
+bool BosonStar::fill_given_A(const long double freq, bool fully_fixed)
 {
     //state.resize(n_gridpoints);
     //radius_array.resize(n_gridpoints);
@@ -818,18 +819,18 @@ void BosonStar::fill_given_A(const long double freq)
            // freq_correction +=  2. * pert_array[j] / state[j].A;
 
 
-        s1 = state_RHS(r, freq + freq_correction, state[j], 0, 0);
+        s1 = state_RHS(r, freq + freq_correction, state[j], fully_fixed, 0);
 
         //state[j].A = 0.5 * (A_vals[j + 1] + A_vals[j]); //use linearly interpolated A-values for intermediate stages: outdated as currently evolve A for intermediate steps
         //state[j].eta = 0.5 * (eta_vals[j + 1] + eta_vals[j]);
 
-        s2 = state_RHS(r + dr / 2., freq + freq_correction, state[j] + 0.5 * dr * s1, 0, 0);
-        s3 = state_RHS(r + dr / 2., freq + freq_correction, state[j] + 0.5 * dr * s2, 0, 0);
+        s2 = state_RHS(r + dr / 2., freq + freq_correction, state[j] + 0.5 * dr * s1, fully_fixed, 0);
+        s3 = state_RHS(r + dr / 2., freq + freq_correction, state[j] + 0.5 * dr * s2, fully_fixed, 0);
 
         //state[j].A = A_vals[j + 1];
         //state[j].eta = eta_vals[j + 1];
 
-        s4 = state_RHS(r + dr, freq + freq_correction, state[j] + dr * s3, 0, 0);
+        s4 = state_RHS(r + dr, freq + freq_correction, state[j] + dr * s3, fully_fixed, 0);
 
         //update state variables and radius array
         state[j + 1] = state[j] + (dr / 6.) * (s1 + 2 * s2 + 2 * s3 + s4);
@@ -838,8 +839,8 @@ void BosonStar::fill_given_A(const long double freq)
         state[j + 1].eta = eta_vals[j + 1] * X_vals[ j + 1] / state[j + 1].X; //correct factor of X in eta at each stage
         //state[j + 1].phi = phi_vals[j + 1];
 
-        X_vals[j + 1] = state[j + 1].X;
-        phi_vals[j + 1] = state[j + 1].phi;
+        //X_vals[j + 1] = state[j + 1].X;
+        //phi_vals[j + 1] = state[j + 1].phi;
 
         radius_array[j + 1] = (j + 1) * dr;
 
@@ -847,10 +848,13 @@ void BosonStar::fill_given_A(const long double freq)
         {
             //cerr << "State values have become nan on step " << j << endl;
             blowup_point = j;
-            cout << "WARNING: obtained nan's during fill_given_A routine." << endl;
-            return;
-        }
+            cout << "WARNING: obtained nan's during fill_given_A routine on step " << j << ". Will return to original alpha + X " << endl;
 
+            for (int j = 0; j < num_points; j++)
+                {state[j].X = X_vals[j]; state[j].phi = phi_vals[j]; state[j].A = A_vals[j]; state[j].eta = eta_vals[j];  }
+
+            return 0;
+        }
     }
     //state.resize(n_gridpoints);
     //radius_array.resize(n_gridpoints);
@@ -865,6 +869,8 @@ void BosonStar::fill_given_A(const long double freq)
     rescale_lapse (phi_shift);
 
     cout << "Omega discrepency is " << omega - omega_pre_rescale << endl;
+
+    return 1;
 
 }
 
@@ -920,7 +926,7 @@ void BosonStar::read_thinshell()
     if (state.size() != radius_array.size())
         cout <<"WARNING: line count does not agree with state size; likely a problem with thinshell_res_fac (try making 1)" << endl;
 
-    //cout<< state.size() << endl;
+    cout<< state.size() << endl;
 
     int j = 0;
 
@@ -1053,8 +1059,8 @@ void BosonStar::read_thinshell()
 
     if (perturb)
         add_perturbation(perturb_amp, perturb_spread, perturb_center);
-    else
-        fill_given_A(omega);
+
+    fill_given_A(omega);
 
     //return to original resolution
     vector<FieldState> hi_res_state = state;
@@ -1074,20 +1080,89 @@ void BosonStar::read_thinshell()
     cout << "Successfully read thinshell model with central amplitude A = " << A_central << ", mass M = " << M << ", noether charge N = " << noether_charge <<  ", and binding energy E = " << binding_energy << endl;
 }
 
+
+
+
+
+void BosonStar::read_isotropic_data()
+{
+    string A_filename = "urA.dat";
+    string X_filename = "urX.dat";
+    string phi_filename = "urPhi.dat";
+
+    ifstream A_file(A_filename);
+    ifstream X_file(X_filename);
+    ifstream phi_file(phi_filename);
+
+    if (!A_file.is_open() ||!phi_file.is_open() || !X_file.is_open())
+    {
+        cerr << "Error reading ur*.dat files! Maybe get rid of read_isotropic_data()?" << endl;
+        exit(1);
+    }
+
+    int line_count = 0;
+    string line1, lineA, linePhi, lineX;
+
+    while (std::getline(A_file, line1))
+        ++line_count;
+
+    n_gridpoints = line_count;
+    A_iso_array.resize(n_gridpoints);
+    phi_iso_array.resize(n_gridpoints);
+    psi_iso_array.resize(n_gridpoints);
+    radius_array.resize(n_gridpoints);
+
+    int j = 0;
+    double junk;
+
+    while (std::getline(A_file, lineA))
+    {
+        std::istringstream iss(lineA);
+        if(iss >> radius_array[j] >> A_iso_array[j])
+            j++;
+    }
+
+    j = 0;
+
+    while (std::getline(X_file, lineX))
+    {
+        std::istringstream iss(lineX);
+        if(iss >> radius_array[j] >> psi_iso_array[j])
+            j++;
+    }
+
+    j = 0;
+
+    while (std::getline(phi_file, linePhi))
+    {
+        std::istringstream iss(linePhi);
+        if(iss >> radius_array[j] >> phi_iso_array[j])
+            j++;
+    }
+}
+
+
 //ensures all field arrays are zero
 void BosonStar::clear_BS()
 {
     for (int j = 0; j < n_gridpoints; j++)
     {
-        //state[j] = (FieldState) {0., 0., 0., 0.};
-        //phi_iso_array[j] = 0.;
-        //psi_iso_array[j] = 0.;
         A_iso_array[j] = 0.;
         state[j].A = 0;
         state[j].eta = 0.;
-        state[j].X = 1.;
+    }
+}
 
-        omega = 1;
+//sets lapse and X to 1 uniformly
+void BosonStar::default_metric_vars()
+{
+    for (int j = 0; j < n_gridpoints; j++)
+    {
+        state[j].X = 1.;
+        state[j].phi = 0.;
+
+        psi_iso_array[j] = 1.;
+        phi_iso_array[j] = 0.;
     }
 }
 
@@ -1103,9 +1178,9 @@ void BosonStar::add_perturbation(double a, double k, double center)
 
 
 
-    vector<double> phi_vals(num_points);
-    for (int j = 0; j < num_points; j++)
-        phi_vals[j] = state[j].phi;
+   // vector<double> phi_vals(num_points);
+    //for (int j = 0; j < num_points; j++)
+        //phi_vals[j] = state[j].phi;
 
 
     //apply perturbation to A
@@ -1116,11 +1191,10 @@ void BosonStar::add_perturbation(double a, double k, double center)
         state[j].A += pert_array[j];
         state[j].eta += -2. * a * (r - center) * exp ( -pow (r - center, 2.) / k2) / (k2 * state[j].X)
                         + mirror_gaussian * 2. * a * (r - center - 2. * k) * exp ( -pow (r - center - 2. * k, 2.) / k2) / (k2 * state[j].X);
-
     }
 
     //rerun constraint solver to fill out X, alpha
-    fill_given_A(omega);
+    //fill_given_A(omega);
 
     //replace original lapse
     //for (int j = 0; j < num_points; j++)

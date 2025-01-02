@@ -14,6 +14,7 @@
 using namespace std;
 
 void slice_convergence_test (BSSNSlice& sl, BSSNSlice& sm, BSSNSlice& sh);
+void gauss_initialize(BosonStar& boson_star);
 
 enum evolution_system
 {
@@ -33,12 +34,8 @@ int main()
     //cout << boson_star.solve() << endl;
     //boson_star.rk4_solve(50.0);
     //boson_star.write_field();
-    //boson_star.fill_isotropic_arrays();
+    //boson_star.fill_isotropic_arrays();a
     //boson_star.write_isotropic();
-
-    //boson_star.solve_finding_A(0.91, 0.042, 0.01, 1);
-
-
 
     //boson_star.read_thinshell();
     boson_star.solve();
@@ -48,39 +45,8 @@ int main()
 
     //boson_star.cycle_models(5000, 0.001, 0.001);
 
-    std::ofstream nm_file{"mass_charge.dat"};
-    //perturbation-only stuff below:
     if (boson_star.gaussian_start)
-    {
-        int num_gaussians = 1; //change this to produce a gaussian model cycle to explore 1-parameter families
-        double step = 0.0001;
-
-        double& step_var = boson_star.perturb_amp;
-
-        for (int k = 0; k < num_gaussians; k++)
-        {
-            boson_star.clear_BS();
-            boson_star.omega = boson_star.enforced_freq;
-            boson_star.add_perturbation(boson_star.perturb_amp, boson_star.perturb_spread, 0.);
-            boson_star.fill_given_A(boson_star.omega);
-            boson_star.fill_isotropic_arrays();
-            boson_star.write_isotropic();
-            boson_star.write_field();
-
-            Spacetime st_gauss{};
-            st_gauss.initialize(boson_star);
-            st_gauss.slices[0].write_slice();
-            st_gauss.write_diagnostics();
-
-            nm_file <<st_gauss.slice_mass(&st_gauss.slices[0]) << "    " << st_gauss.slice_charge(&st_gauss.slices[0]) <<  "    " <<  step_var << endl;
-
-            step_var += step;
-        }
-    }
-
-
-
-
+        gauss_initialize(boson_star);
 
     //boson_star.convergence_test();
 
@@ -93,20 +59,54 @@ int main()
 
     //st.fourier_transform_A0();
 
-
     //st.slices[st.slices.size() - 1].write_slice();
-
-    /*BSSNSlice slice{};
-    slice.read_BS_data(boson_star);
-    slice.write_slice();*/
-
-
 
     cout << "Ending..."  << endl;
 
     return 0;
 }
 
+void gauss_initialize(BosonStar& boson_star)
+{
+
+    //TODO NEXT: add proper logic for when to add perturbations + maybe start with random mini BS model chi + alpha or similar
+
+    std::ofstream nm_file{"mass_charge.dat"};
+
+    int num_gaussians = 1; //change this to produce a gaussian model cycle to explore 1-parameter families
+    double step = 0.0001;
+
+    double& step_var = boson_star.perturb_amp;
+
+    for (int k = 0; k < num_gaussians; k++)
+    {
+        boson_star.clear_BS();
+        boson_star.omega = boson_star.enforced_freq;
+        boson_star.add_perturbation(boson_star.perturb_amp, boson_star.perturb_spread, 0.);
+
+        if (!boson_star.fill_given_A(boson_star.omega, 0) )
+        {
+            //boson_star.solitonic = 0;
+            //boson_star.solve();
+           //boson_star
+
+           boson_star.default_metric_vars();
+        }
+        boson_star.fill_isotropic_arrays();
+        boson_star.write_isotropic();
+        boson_star.write_field();
+
+        Spacetime st_gauss{};
+        st_gauss.initialize(boson_star);
+        st_gauss.slices[0].write_slice();
+        st_gauss.write_diagnostics();
+
+        nm_file << st_gauss.slice_mass(&st_gauss.slices[0]) << "    " << st_gauss.slice_charge(&st_gauss.slices[0]) <<  "    " <<  step_var << endl;
+
+        step_var += step;
+        }
+
+}
 
 /*BSSNSlice sl{}; BSSNSlice sm{}; BSSNSlice sh{};
     sl.read_BS_data(boson_star);

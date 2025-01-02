@@ -3,10 +3,10 @@ mu = 1.0
 lambda = 0
 solitonic = 1
 G = 1.0
-sigma = 0.1
+sigma = 0.06
 eigen = 0
 alpha_central = 0.5
-A_central = 0.05
+A_central = 0.01
 frequency_guess = 1.2
 freq_epsilon = 1e-19
 isotropic = 1
@@ -14,16 +14,16 @@ r_match_fac = 0.75
 
 #Perturbation params
 perturb = 0
-perturb_amp = 0.1
-perturb_spread = 4.8
+perturb_amp = 0.07
+perturb_spread = 4.2
 perturb_center = 0
 mirror_gaussian = 0
 gaussian_start = 1
-enforced_freq = 0.45
+enforced_freq = 5.0
 
 #grid params
-R = 120
-n_gridpoints = 1200
+R = 2000
+n_gridpoints = 30000
 courant_factor = 0.4
 stop_time = 100000.08
 
@@ -54,7 +54,7 @@ run_quietly = 0
 make_tangherlini = 0
 store_A0 = 1
 read_thinshell = 0 #if true will read outputs of Uli's thinshell code
-thinshell_res_fac = 16
+thinshell_res_fac = 1
 uniform_data = 1 #if true will expect data smoothed + interpolated onto uniform grid via smooth_and_interp.py
 cutoff_frac = 0.75
 

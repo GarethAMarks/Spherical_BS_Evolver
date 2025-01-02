@@ -95,6 +95,7 @@ class Spacetime
         void write_diagnostics();
         void evolve();
         void write_current_slice( std::string file_name = "SliceData.dat");
+        //void read_isotropic_data();
 
         void halve_resolution();
         void fourier_transform_A0();
@@ -232,6 +233,8 @@ class Spacetime
         std::vector<double> ham_init_rhs(double r, double chi, double eta);
         void solve_initial_ham();
         void prepare_ham_solve(); //EXPERIMENTAL: try to return to pure isotropic coords + solve Ham constraint mid-run
+        void resize_temp_arrays();
+        void add_spacetime_pert(double a, double k, double center);
 
         void fill_active_points();
         void fill_refinement_levels();

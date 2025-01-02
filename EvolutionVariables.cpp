@@ -363,7 +363,6 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
             states[j].h_ww = pow(boson_star.state[J].X, -2. / (D - 1.));
         }
 
-
         //for time-independent static, spherically symmetric boson stars K_ij = 0-- may need to do more work when we consider perturbations.
         states[j].A_zz = 0.;
         states[j].A_ww = 0.;
@@ -595,7 +594,6 @@ double Spacetime::d_alpha_asymp(double r)
     int j0 = bound(k - 1, 0, n_gridpoints - 4);
 
     //cubic interpolation to get state values off gridpoints (for midstep solving)
-    //double chi0 = cubic_interp(r, s.states[j0].chi, s.states[j0 + 1].chi, s.states[j0 + 2].chi, , s.states[j0 + 3].chi, dr);
     double phi_re = cubic_interp(r, s.states[j0].phi_re, s.states[j0 + 1].phi_re, s.states[j0 + 2].phi_re, s.states[j0 + 3].phi_re, j0, dr);
     double phi_im = cubic_interp(r, s.states[j0].phi_im, s.states[j0 + 1].phi_im, s.states[j0 + 2].phi_im,s.states[j0 + 3].phi_im, j0, dr);
     double K_phi_re = cubic_interp(r, s.states[j0].K_phi_re, s.states[j0 + 1].K_phi_re, s.states[j0 + 2].K_phi_re, s.states[j0 + 3].K_phi_re,j0, dr);
@@ -617,7 +615,6 @@ double Spacetime::d_alpha_asymp(double r)
         dz_phi_im = d_z(v_phi_im, 0) * (dr - r) / dr + d_z(v_phi_im, 1) * r / dr;
     }*/
 
-
     double mod_phi = sqrt(phi_re * phi_re + phi_im + phi_im);
     double rho0 = 2. * (K_phi_im * K_phi_im + K_phi_re * K_phi_re) +  0.5 * chi * (pow(dz_phi_re,2) + pow(dz_phi_im,2)) + 0.5 * V(mod_phi);
 
@@ -626,7 +623,7 @@ double Spacetime::d_alpha_asymp(double r)
 
     if (r > 0.) eta_rhs -= 2 * eta / r;
     else eta_rhs /= 3.; // in the limit r -> 0, eta / r is replaced by d_r(eta), so net effect is to divide the usual RHS by 3!
-    //(r == 0.) ? (16. * M_PI * rho0): (eta * (13. * r * eta - 24. * chi) / (12. * r * chi) - 16. * M_PI * rho0 );
+
 
     //cout << k * dr << " " << r << endl;
 
@@ -648,13 +645,13 @@ double Spacetime::d_alpha_asymp(double r)
     double c1, c2, c3, c4, e1, e2, e3, e4;
     double eta = 0;
 
-
     //s.states[n_gridpoints - 1].chi = chi_asymp(R);
     //eta = d_chi_asymp(R);
 
     cout << "\n Starting initial Spacetime Hamiltonian constraint solver..." << endl;
 
-    //s.states[0].chi = 22.1;
+
+    //s.states[0].chi = 0.9;
 
    for (int j = 0; j < n_gridpoints - 1; j++) //for (int j = n_gridpoints - 1; j > 0; j--)
     {
@@ -680,9 +677,15 @@ double Spacetime::d_alpha_asymp(double r)
         if (isnan(s.states[j + 1].chi))
         {
             cout << "ERROR: constraint solver produced nan's on step " << j  << endl;
-            //exit(1); //should probably make a param about whether this fails
+            return; //exit(1); //should probably make a param about whether this fails
         }
     }
+
+    //initializes alpha = sqrt(chi)-- mostly for formation runs where static lapse solver may have failed.
+    for (int j = 0; j < n_gridpoints; j++)
+        s.states[j].alpha = sqrt(s.states[j].chi);
+
+
     cout << "Successfully ran constraint solver" << endl;
 
  }
@@ -1173,6 +1176,12 @@ void Spacetime:: write_current_slice(std::string file_name)
 
 }
 
+/*
+void Spacetime::read_isotropic_data()
+{
+
+}*/
+
 //writes diagnostic quantities to output file
 void Spacetime:: write_diagnostics()
 {
@@ -1383,7 +1392,7 @@ void Spacetime::compute_dtK(int time_index)
             dtK_L2 += dr * local_dtK * local_dtK * z * z   * pow(slice_current.states[j].chi, -1.5);
         }
     }
-    dtK_L2 = sqrt(dtK_L2);
+    dtK_L2 = sqrt(abs(dtK_L2 - 1));
 }
 
 void Spacetime::prepare_ham_solve()  //EXPERIMENTAL: try to return to pure isotropic coords + solve Ham constraint mid-run
@@ -1391,125 +1400,9 @@ void Spacetime::prepare_ham_solve()  //EXPERIMENTAL: try to return to pure isotr
 
 }
 
-
-
-
-//read data from BosonStar to spacetime and construct initial time slice
-void Spacetime::initialize(BosonStar& boson_star)
+//helper function to set all temp array sizes to n_gridpoints and initialize some necessary variables
+void Spacetime::resize_temp_arrays()
 {
-    wave_mode = 0; //make 1 for MR testing purposes only
-    D = SPACEDIM + 1.;
-
-    //inherit parameters from BS
-    n_gridpoints = boson_star.n_gridpoints;
-    R = boson_star.R;
-    courant_factor = boson_star.courant_factor;
-    stop_time = boson_star.stop_time;
-    mu = boson_star.mu;
-    sigma = boson_star.sigma;
-    solitonic = boson_star.solitonic;
-    omega = boson_star.omega;
-    isotropic = boson_star.isotropic;
-    M = boson_star.M;
-    r_99 = boson_star.r_99;
-    BS_perturbed = boson_star.perturb;
-
-    gamma_fac = 0.75; // initialize to 3/4 by default for backwards compatibility w/ older params files
-
-    refinement_points = {};
-    read_parameters();
-
-
-
-    //cout << refinement_points.size() << endl;
-
-    if (refinement_points[0] <= 0) //signal to disable any refinement and use all points
-         refinement_points.clear();//refinement_points = {};
-
-    if (read_thinshell)
-        BS_resolution_factor = 1;
-
-    if ((BS_resolution_factor & (BS_resolution_factor - 1)) != 0 || BS_resolution_factor <= 0)
-        {
-            cerr << "ERROR: BS_resolution_factor must be a power of 2" << endl;
-            exit(1);
-        }
-
-    active_points.resize(n_gridpoints);
-    fill_active_points();
-    fill_refinement_levels();
-
-
-    //solve BS at higher resolution and read in data to first slice
-    if (BS_resolution_factor > 1 && start_time == 0 && !read_thinshell)
-    {
-        boson_star.n_gridpoints = boson_star.n_gridpoints * BS_resolution_factor - BS_resolution_factor + 1;
-
-        cout << " \nRe-solving BS at higher resolution with " << boson_star.n_gridpoints <<  endl;
-
-        boson_star.solve();
-        boson_star.write_field();
-        boson_star.fill_isotropic_arrays();
-        boson_star.write_isotropic();
-
-        //not sure if helpful yet!
-        omega = boson_star.omega;
-    }
-
-    if (read_thinshell)
-    {
-        boson_star.read_thinshell();
-        boson_star.write_field();
-
-        if (boson_star.isotropic){
-            boson_star.fill_isotropic_arrays();
-            boson_star.write_isotropic();
-        }
-
-        R = boson_star.R;
-        n_gridpoints = boson_star.n_gridpoints;
-        omega = boson_star.omega;
-
-        cout << "R = " << boson_star.R << endl;
-    }
-
-
-    dr = R / (n_gridpoints - 1);
-    dt = courant_factor * dr;
-    int num_timesteps = ceil(stop_time / dt);
-
-    slices.resize(std::min(num_timesteps + 1, max_stored_slices));
-    slices[0].active_points = active_points;
-    slices[0].refinement_points = refinement_points;
-
-    if (start_time == 0)
-        slices[0].read_BS_data(boson_star, BS_resolution_factor, isotropic);
-
-    cout << "Read BS data" << endl;
-
-    if (run_spacetime_solver && start_time == 0)
-        solve_initial_ham();
-
-    //cut off outermost 2 gripoints, where the christoffel symbols will be generally polluted by garbage due to not having data to take derivatives there. Temporary solution; might be better to just extrapolate long term.
-    n_gridpoints -= 2 ;
-
-    R *= (n_gridpoints - 1.) / (n_gridpoints + 1.); //also need to rescale R to avoid stretching solution
-    slices[0].R = R;
-
-
-    int n_old = n_gridpoints;
-    n_gridpoints = round(cutoff_frac * n_gridpoints); //shrink domain by cutoff_frac, ideally to remove detritus in H
-    R = (R * (n_gridpoints - 1.)) / (n_old - 1.);
-
-    slices[0].states.resize(n_gridpoints);
-    slices[0].R = R;
-
-    if (start_time > 0)
-        slices[0].read_checkpoint(start_time, n_gridpoints);
-
-    //n_gridpoints should not change after this point!!!
-
-    //resize all auxiliary/diagnostic arrays as appropriate
     h_ZZ.resize(n_gridpoints);
     h_WW.resize(n_gridpoints);
 
@@ -1542,6 +1435,149 @@ void Spacetime::initialize(BosonStar& boson_star)
     last_active_j = n_gridpoints - 1; //find last active gridpoint
     while (!active_points[last_active_j])
         last_active_j--;
+}
+
+//add perturbation directly to spacetime field profile, thus skipping BS step
+void Spacetime::add_spacetime_pert(double a, double k, double center)
+{
+    BSSNSlice& s = *current_slice_ptr;
+    double k2 = k * k;
+    double dr = R / (n_gridpoints - 1);
+
+    for (int j = 0; j < n_gridpoints; j++)
+    {
+        double phase = std::arg( std::complex<double>(s.states[j].phi_re, s.states[j].phi_im));
+        double K_phase = std::arg( std::complex<double>(s.states[j].K_phi_re, s.states[j].K_phi_im));
+        double r = j * dr;
+
+        s.states[j].phi_re += cos(phase) * a * exp ( -pow (r - center, 2.) / k2);
+        s.states[j].phi_im += sin(phase) * a * exp ( -pow (r - center, 2.) / k2);
+        s.states[j].K_phi_re += 0.5 * sin(phase) * omega * a * exp ( -pow (r - center, 2.) / k2) / (2. * s.states[j].alpha);
+        s.states[j].K_phi_im -= 0.5 * cos(phase) * omega * a * exp ( -pow (r - center, 2.) / k2) / (2. * s.states[j].alpha);
+    }
+
+    solve_initial_ham();
+}
+
+//read data from BosonStar to spacetime and construct initial time slice
+void Spacetime::initialize(BosonStar& boson_star)
+{
+    wave_mode = 0; //make 1 for MR testing purposes only
+    D = SPACEDIM + 1.;
+
+    //inherit parameters from BS
+    n_gridpoints = boson_star.n_gridpoints;
+    R = boson_star.R;
+    courant_factor = boson_star.courant_factor;
+    stop_time = boson_star.stop_time;
+    mu = boson_star.mu;
+    sigma = boson_star.sigma;
+    solitonic = boson_star.solitonic;
+    omega = boson_star.omega;
+    isotropic = boson_star.isotropic;
+    M = boson_star.M;
+    r_99 = boson_star.r_99;
+    BS_perturbed = boson_star.perturb;
+
+    gamma_fac = 0.75; // initialize to 3/4 by default (before params read) for backwards compatibility w/ older params files
+
+    refinement_points = {};
+    read_parameters();
+
+    //cout << refinement_points.size() << endl;
+
+    if (refinement_points[0] <= 0) //signal to disable any refinement and use all points
+         refinement_points.clear();//refinement_points = {};
+
+    if (read_thinshell)
+        BS_resolution_factor = 1;
+
+    if ((BS_resolution_factor & (BS_resolution_factor - 1)) != 0 || BS_resolution_factor <= 0)
+        {
+            cerr << "ERROR: BS_resolution_factor must be a power of 2" << endl;
+            exit(1);
+        }
+
+    active_points.resize(n_gridpoints);
+    fill_active_points();
+    fill_refinement_levels();
+
+    //solve BS at higher resolution and read in data to first slice, if not starting in other mode (checkpoint / thinshell read / gaussian start)
+    if (BS_resolution_factor > 1 && start_time == 0 && !read_thinshell && !boson_star.gaussian_start)
+    {
+        boson_star.n_gridpoints = boson_star.n_gridpoints * BS_resolution_factor - BS_resolution_factor + 1;
+
+        cout << " \nRe-solving BS at higher resolution with " << boson_star.n_gridpoints <<  endl;
+
+        boson_star.solve();
+        boson_star.write_field();
+        boson_star.fill_isotropic_arrays();
+        boson_star.write_isotropic();
+
+        //using higher-res omega seems like an improvement
+        omega = boson_star.omega;
+    }
+
+    if (read_thinshell && start_time == 0)
+    {
+        boson_star.read_thinshell();
+        boson_star.write_field();
+
+        if (boson_star.isotropic){
+            boson_star.fill_isotropic_arrays();
+            boson_star.write_isotropic();
+        }
+
+        R = boson_star.R;
+        n_gridpoints = boson_star.n_gridpoints;
+        omega = boson_star.omega;
+
+        cout << "R = " << boson_star.R << endl;
+    }
+
+    //add perturbation to "standard" BS
+    if (!read_thinshell && !boson_star.gaussian_start && boson_star.perturb)
+    {
+       // boson_star.add_perturbation(boson_star.perturb_amp, boson_star.perturb_spread, boson_star.perturb_center);
+        //boson_star.fill_given_A(omega);
+    }
+
+    dr = R / (n_gridpoints - 1);
+    dt = courant_factor * dr;
+    int num_timesteps = ceil(stop_time / dt);
+
+    slices.resize(std::min(num_timesteps + 1, max_stored_slices));
+    slices[0].active_points = active_points;
+    slices[0].refinement_points = refinement_points;
+
+    if (start_time == 0)
+        slices[0].read_BS_data(boson_star, BS_resolution_factor, isotropic);
+
+    cout << "Read BS data" << endl;
+
+    if (run_spacetime_solver && start_time == 0)
+        solve_initial_ham();
+
+    //cut off outermost 2 gripoints, where the christoffel symbols will be generally polluted by garbage due to not having data to take derivatives there. Might be better to just extrapolate long term.
+    n_gridpoints -= 2 ;
+
+    R *= (n_gridpoints - 1.) / (n_gridpoints + 1.); //also need to rescale R to avoid stretching solution
+    slices[0].R = R;
+
+    int n_old = n_gridpoints;
+    n_gridpoints = round(cutoff_frac * n_gridpoints); //shrink domain by cutoff_frac, ideally to remove detritus in H
+    R = (R * (n_gridpoints - 1.)) / (n_old - 1.);
+
+    slices[0].states.resize(n_gridpoints);
+    slices[0].R = R;
+
+    if (start_time > 0)
+        slices[0].read_checkpoint(start_time, n_gridpoints);
+
+    //n_gridpoints and R should not change after this point!!!
+
+    //resize all auxiliary/diagnostic arrays as appropriate
+    resize_temp_arrays();
 
     //compute auxiliary/diagnostic quantities on initial slice
     current_slice_ptr = &slices[0];
@@ -1555,7 +1591,6 @@ void Spacetime::initialize(BosonStar& boson_star)
 
     //if (BS_perturbed)
         //fix_initial_field_mom();
-
 
     compute_auxiliary_quantities(current_slice_ptr);
     rho0_init = make_tangherlini ? 1. : rho[0];
@@ -1582,8 +1617,7 @@ void Spacetime::evolve()
     int num_timesteps = ceil(stop_time / dt);
     int last_checkpoint_time = 0;
 
-    if(store_A0)
-        A0_values.resize(num_timesteps);
+    if(store_A0) A0_values.resize(num_timesteps);
 
     //write constraint norms at each timestep to file
     std::ofstream constraints_file{"constraint_norms.dat"};
@@ -1594,8 +1628,6 @@ void Spacetime::evolve()
     }
 
     cout <<" \n Will evolve with " << num_timesteps << " time steps \n" << endl;
-
-    //int kill_steps = 50; //number of timesteps between executions of kill_refinement_noise
 
     //s_i are returned RHS's, t represents temporary RHS + current_slice quantities that must be stored so derivatives can be accessed
     BSSNSlice s1, s2, s3, s4, t1, t2, t3;
@@ -1611,7 +1643,6 @@ void Spacetime::evolve()
         double phase_ctr, phase_last;
         if (time_step > 0) phase_last = phase_ctr;
         phase_ctr = std::arg( std::complex<double>(slices[n].states[0].phi_re, slices[n].states[0].phi_im));
-
 
         double omega_approx = (phase_ctr - phase_last) / dt;
 
@@ -1637,15 +1668,13 @@ void Spacetime::evolve()
 
         //evaluate intermediate RK4 quantities
         current_slice_ptr = &slices[n];
-        //compute_diagnostics(current_slice_ptr);
 
         s1 = slice_rhs(current_slice_ptr);
         t1 = slices[n]  + (0.5 * dt) * s1;
 
         compute_diagnostics(current_slice_ptr);
-        //cout << "computed t1" << endl;
 
-        current_slice_ptr = &t1; //must update current_slice_ptr before calling slice_rhs or derivatives will not work properly! Should look for better approach...
+        current_slice_ptr = &t1; //must update current_slice_ptr before calling slice_rhs or derivatives will not work properly! Should consider better approach...
         s2 = slice_rhs(current_slice_ptr);
         t2 = slices[n] + (0.5 * dt) * s2;
 
@@ -1661,15 +1690,12 @@ void Spacetime::evolve()
 
         //enforce that A is traceless
         current_slice_ptr = &slices[n + 1];
-        kill_refinement_noise();
+        kill_refinement_noise(); //running this on every timestep appears to be best approach...
         make_A_traceless(current_slice_ptr);
 
         //enforce minimum chi
         for (BSSNState& s: slices[n + 1].states)
             {if (s.chi < min_chi) s.chi = min_chi; }
-
-        //if (time_step % kill_steps == 0 && time_step > 0)
-            //kill_refinement_noise();
 
         if (time_step % write_interval == 0)
         {
@@ -1692,8 +1718,13 @@ void Spacetime::evolve()
         if (time_step >= max_stored_slices - 2)
             rotate(slices.begin(), slices.begin() + 1, slices.end());
 
-
         if ((time_step + 1) % 10 == 0 && !run_quietly) cout << "Time step " << time_step + 1 << " complete! t = " << t << endl;
+
+        if (isnan(slices[n + 1].states[0].chi))
+        {
+            cout << "Central chi became nan on step " << time_step << endl;
+            exit(1);
+        }
     }
 
 }

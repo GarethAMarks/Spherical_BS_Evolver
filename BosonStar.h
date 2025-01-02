@@ -110,11 +110,13 @@ class BosonStar
         double get_noether_charge();
 
 
+        void read_isotropic_data();
         void fill_isotropic_arrays();
         void write_isotropic();
 
-        void fill_given_A( const long double freq);
+        bool fill_given_A( const long double freq, bool fully_fixed = 0);
         void clear_BS();
+        void default_metric_vars();
 
         void add_perturbation(double a, double k, double center);
 
