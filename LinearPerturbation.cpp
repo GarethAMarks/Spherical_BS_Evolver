@@ -43,7 +43,9 @@ PertState LinearPerturbation::pert_rhs(double r, PertState s, double chi_sq, dou
 
     double A0, X0, alpha0, Ap0; //background values of A, X, alpha, and A' (via BS eta) at r
 
-    if ( abs(j * dr - r) < 0.1 * dr ) // detect mid-gridpoint r-values and use linear interpolation of bg quantities where needed.
+
+    // detect mid-gridpoint r-values and use linear interpolation of bg quantities where needed.
+    if ( abs(j * dr - r) < 0.1 * dr )
         {A0 = bg->state[j].A; X0 = bg->state[j].X; alpha0 = exp(bg->state[j].phi); Ap0 = X0 * (bg->state[j].eta);}
     else if (abs((j + 1) * dr - r) < 0.1 * dr )
         {A0 = bg->state[j + 1].A; X0 = bg->state[j + 1].X; alpha0 = exp(bg->state[j + 1].phi); Ap0 = X0 * (bg->state[j + 1].eta);}
@@ -69,6 +71,9 @@ PertState LinearPerturbation::pert_rhs(double r, PertState s, double chi_sq, dou
 
     double Xpp1 = lagrange_interp(r - dr, radii, XPP); double Xpp2 = lagrange_interp(r, radii, XPP); double Xpp3 = lagrange_interp(r + dr, radii, XPP);
     double Xpp0 = (Xpp1 + Xpp3 - 2. * Xpp2) / (dr * dr);
+
+    //TODO: replace with an actual 5-point stencil
+
     //cout << Xpp0 << endl;
 
     const double& F = s.F;
@@ -128,6 +133,23 @@ void LinearPerturbation::rk4_solve(double chi_sq, double gamma)
 
 }
 
+//returns number of zero crossings in L
+int LinearPerturbation::count_zero_crossings()
+{
+    int zero_crossings = 0;
+
+    //check for zero crossings up to blowup point (neglecting one extra point as we sometimes get spurious zero crossings on explosion)
+    for (int j = 1; j < blowup_point - 1; j++)
+    {
+        if ((pert[j].L == 0.) || (pert[j].L > 0. && pert[j - 1].L < 0.) || (pert[j].L < 0. && pert[j - 1].L > 0.) )
+            {zero_crossings++;}
+    }
+
+    //cout << "\n" << zero_crossings << " zero crossings found" << endl;
+
+    return zero_crossings;
+}
+
 // given chi_sq, attempts to use interval bisection to find the gamma-value minimizing L at bdry.
 double LinearPerturbation::get_best_gamma(double chi_sq, bool quiet)
 {
@@ -181,6 +203,8 @@ double LinearPerturbation::get_best_gamma(double chi_sq, bool quiet)
 
     }
     if (!quiet) cout << " \nBest gamma with chi_sq = " << chi_sq  << " is gamma =" << lower_guess << " with noether_pert = " << get_noether_perturbation() << endl;
+
+    solved_gamma = lower_guess;
     return lower_guess;
 }
 
@@ -189,34 +213,37 @@ double LinearPerturbation::get_chi_sq()
 {
     double epsilon = 0.000001;//sqrt(bg->freq_epsilon);
 
-    double chi_prev = chi_sq0; //chi to be used to evaluate noether_perturbation on next step
-    get_best_gamma(chi_prev);
-    double noether_prev = abs(get_noether_perturbation());
+    double lower_guess = chi_sq0;
+    double upper_guess = chi_sq0 + 0.1;
 
-    double d_chi = 0.000001;
-    double noether_next  = 2. * get_noether_perturbation();
+    get_best_gamma(lower_guess, 1);
+    if (count_zero_crossings() > 0) cout << "WARNING: lower guess too high!" << endl;
+
+    get_best_gamma(upper_guess, 1);
+    if (count_zero_crossings() == 0) cout << "WARNING: upper guess too low!" << endl;
+
     int counter = 0;
 
-    while (abs(noether_prev) > epsilon && counter < 15 )
+    long double midpoint = 0.5 * (upper_guess + lower_guess);
+
+    while (upper_guess - lower_guess > epsilon && counter < 15 )
     {
-        if(counter > 0) get_best_gamma(chi_prev);
-        noether_prev = get_noether_perturbation();
+        midpoint = 0.5 * (upper_guess + lower_guess);
+        get_best_gamma(midpoint, 1);
 
-        get_best_gamma(chi_prev + d_chi);
-        double d_noether_prev = get_noether_perturbation() - noether_prev;
+        if (count_zero_crossings() > 0)
+            upper_guess = midpoint;
+        else
+            lower_guess = midpoint;
 
-        if (d_noether_prev == 0) cout << "WARNING: derivative zero in get_chi_sq()" << endl;
-
-        chi_prev = chi_prev - noether_prev * d_chi / d_noether_prev;
-
-        //d_chi = 0.0001 * abs(noether_prev * d_chi / d_noether_prev);
-        cout << (fabs(noether_prev) - epsilon > 0) << endl;
         counter++;
     }
 
 
-    cout << "Obtained chi_sq = " << chi_prev << endl;
-    return chi_prev;
+    cout << "Obtained chi_sq = " << lower_guess << " with noether_pert = " << noether_perturbation << endl;
+
+    solved_chi_sq = lower_guess;
+    return lower_guess;
 
 }
 
@@ -226,13 +253,15 @@ double LinearPerturbation::get_noether_perturbation()
 
     FieldState& s = bg->state[n_gridpoints - 1];
 
-    //both terms included as F generically grows exponentially
+    //both terms included as F generically grows exponentially (indeed 1st term usually dominates)
     noether_perturbation = 8. * M_PI * exp(s.phi) * s.A * s.eta * R * R * pert[n_gridpoints - 1].F / omega
                                 - exp(s.phi) * R * pert[n_gridpoints - 1].L / (omega * s.phi );
     return noether_perturbation;
 }
 
 void LinearPerturbation::write_pert(string filename)
+
+
 {
 
     std::ofstream data_file{filename};
@@ -249,6 +278,37 @@ void LinearPerturbation::write_pert(string filename)
     {
         data_file << std::setprecision (10) <<j * dr << "   " << pert[j].F << "    " << pert[j].Fp << "    " << pert[j].L << "    " << pert[j].Lp << "    " << "toby" << endl;
     }
+}
+
+void LinearPerturbation::pert_cycle(double A0, double dA, int n_stars)
+{
+    bg->A_central = A0;
+
+    ofstream data_file{"chi.dat"};
+
+    double chi_prev, gamma_prev;
+
+    for (int j = 0; j < n_stars; j++)
+    {
+        bg->solve(1);
+        omega = bg->omega;
+        A_central = bg-> A_central;
+
+        if (j > 0)
+        {
+            chi_prev = solved_chi_sq;
+            gamma_prev = solved_gamma;
+
+            gamma0 = solved_gamma - 0.01;
+        }
+
+        get_chi_sq();
+
+
+        data_file << std::setprecision (10) <<  bg->A_central << "     " << solved_chi_sq << "     " << solved_gamma << "     "    << get_noether_perturbation() << endl;
+        bg->A_central += dA;
+    }
+
 }
 
 #endif /* LINEARPERTURBATION_CPP_ */

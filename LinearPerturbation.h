@@ -36,11 +36,16 @@ class LinearPerturbation
 
         double chi_sq0; // initial guess for characteristic frequency of radial oscillations
         double gamma0; //initial guess for undetermined constant affecting central initial values
+
+        double solved_chi_sq;
+        double solved_gamma;
+
         int blowup_point;
 
         double noether_perturbation;
 
         PertState pert_rhs (double r, PertState s, double chi_sq, double gamma); //returns rhs of the radial ODEs that F, L satisfy
+        int count_zero_crossings();
 
 
     public:
@@ -55,6 +60,7 @@ class LinearPerturbation
         double get_chi_sq();
         double get_noether_perturbation(); //returns the perturbation to the Noether charge associated with the computed perturbation
         void write_pert(string filename = "pert.dat");
+        void pert_cycle(double A0, double dA, int n_stars);
 
 };
 
