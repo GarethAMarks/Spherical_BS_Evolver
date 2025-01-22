@@ -36,6 +36,8 @@ class LinearPerturbation
 
         double chi_sq0; // initial guess for characteristic frequency of radial oscillations
         double gamma0; //initial guess for undetermined constant affecting central initial values
+        double chi_epsilon;
+        double chi_range;
 
         double solved_chi_sq;
         double solved_gamma;
@@ -51,8 +53,9 @@ class LinearPerturbation
     public:
         BosonStar* bg; //pointer to the background boson star
 
-        LinearPerturbation(BosonStar* bg, double given_chi_sq0, double given_gamma0) //constructor takes a pointer to BosonStar and autofills inherited params
-        :bg{bg}, chi_sq0{given_chi_sq0}, gamma0{given_gamma0}, n_gridpoints{bg->n_gridpoints}, R{bg->R}, sigma{bg->sigma}, solitonic{bg->solitonic}, omega{bg->omega}, A_central{bg->A_central}, dr{R/(n_gridpoints - 1)}
+        LinearPerturbation(BosonStar* bg, double given_chi_sq0, double given_gamma0, double given_chi_range) //constructor takes a pointer to BosonStar and autofills inherited params
+        :bg{bg}, chi_sq0{given_chi_sq0}, gamma0{given_gamma0}, n_gridpoints{bg->n_gridpoints}, R{bg->R}, sigma{bg->sigma}, chi_range{given_chi_range},
+        solitonic{bg->solitonic}, omega{bg->omega}, A_central{bg->A_central}, dr{R/(n_gridpoints - 1)}, chi_epsilon{0.000001}
         {}
 
         void rk4_solve(double chi_sq, double gamma); //runs RK4 solver on F, L using given chi, gamma
@@ -61,6 +64,7 @@ class LinearPerturbation
         double get_noether_perturbation(); //returns the perturbation to the Noether charge associated with the computed perturbation
         void write_pert(string filename = "pert.dat");
         void pert_cycle(double A0, double dA, int n_stars);
+        void write_chi_results();
 
 };
 

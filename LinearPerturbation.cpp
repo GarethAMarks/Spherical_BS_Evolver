@@ -56,9 +56,15 @@ PertState LinearPerturbation::pert_rhs(double r, PertState s, double chi_sq, dou
             //cout << r/dr -  j  << ",  " << abs(j * dr - r) << endl;
         }
 
+    double X0_sq = X0 * X0;
+    double A0_sq = A0 * A0;
+    double omega_sq = omega * omega;
+    double alpha0_sq = alpha0 * alpha0;
+    double sigma_sq = sigma * sigma;
+
     //now compute background derivatives using respective bg ODEs (or: better to just obtain numerically?)
-    double Xp0 = X0 * ( 0.5 * (1 - X0 * X0) / r + 2. * M_PI * r * X0 * X0 * ( (Ap0 * Ap0) / (X0 * X0) + pow(omega * A0 / alpha0, 2) + bg->V(A0)  ));
-    double alphap0 = alpha0 * ( 0.5 * (-1 + X0 * X0) / r + 2. * M_PI * r * X0 * X0 * ( (Ap0 * Ap0) / (X0 * X0) + pow(omega * A0 / alpha0, 2) - bg->V(A0)  ));
+    double Xp0 = X0 * ( 0.5 * (1 - X0_sq) / r + 2. * M_PI * r * X0_sq * ( (Ap0 * Ap0) / (X0_sq) + pow(omega * A0 / alpha0, 2) + bg->V(A0)  ));
+    double alphap0 = alpha0 * ( 0.5 * (-1 + X0_sq) / r + 2. * M_PI * r * X0_sq * ( (Ap0 * Ap0) / (X0_sq) + pow(omega * A0 / alpha0, 2) - bg->V(A0)  ));
 
 
     //for now: interpolate 3 points using cubic legendre + use 2nd order approx. to get X''. Can certainly do better!!!
@@ -82,19 +88,19 @@ PertState LinearPerturbation::pert_rhs(double r, PertState s, double chi_sq, dou
     const double& Lp = s.Lp;
 
     //the actual pulsation equations
-    double Fpp = ((2. + ( 2. * omega * omega - chi_sq ) / (alpha0 * alpha0) + 8 * A0 * Ap0 * r * M_PI  + 8. * solitonic * A0 * A0
-               *(r * A0 * Ap0 * M_PI * (12. * A0 * A0 - 8. * sigma * sigma) + 9. * A0 * A0 - 4 * sigma * sigma) / pow(sigma, 4)  ) * X0 * X0 + 2. * pow(Ap0 / A0, 2 )) * F
-               + ((1 - omega * omega / (alpha0 * alpha0) + solitonic * (12. * pow(A0 / sigma, 4) - 8. *  pow(A0 / sigma, 2) )   ) * X0 * X0
-               - 1. / (4. * M_PI * pow(r * A0, 2))  -  pow(Ap0 / A0, 2) - Ap0 / (A0 * r)- Ap0 * alphap0 / (A0 * alpha0) + Xp0 * (Ap0 + 1./(2. * M_PI * r * A0)) / (A0 * X0)) * L
-               + ( -alphap0 / alpha0 + Xp0 / X0 - 2. / r) * Fp - Lp / (4. * M_PI * r * A0 * A0);
+    double Fpp = ((2. + ( 2. * omega_sq - chi_sq ) / alpha0_sq + 8. * A0 * Ap0 * r * M_PI  + 8. * solitonic * A0_sq
+               *(r * A0 * Ap0 * M_PI * (12. * A0_sq - 8. * sigma_sq) + 9. * A0_sq - 4 * sigma_sq) / pow(sigma_sq, 2)  ) * X0_sq + 2. * pow(Ap0 / A0, 2 )) * F
+               + ((1 - omega_sq / (alpha0_sq) + solitonic * (12. * pow(A0_sq / sigma_sq, 2) - 8. *  A0_sq / sigma_sq)) * X0_sq
+               - 1. / (4. * M_PI * pow(r * A0, 2))  -  pow(Ap0 / A0, 2) - Ap0 / (A0 * r) - Ap0 * alphap0 / (A0 * alpha0) + Xp0 * (Ap0 + 1./(2. * M_PI * r * A0)) / (A0 * X0)) * L
+               + ( -alphap0 / alpha0 + Xp0 / X0 - 2. / r) * Fp - Lp / (4. * M_PI * r * A0_sq);
 
 
-    double Lpp = 32. * ( (M_PI * r * A0 * Ap0 + M_PI * r * alphap0 * A0 * A0 / alpha0 + 4. * pow(A0, 3)* M_PI * r * solitonic
-               * (3. * pow(A0,3) * alphap0 + 9. * A0 * A0 * Ap0 * alpha0 - 2. * A0 * alphap0 * sigma * sigma - 4. * alpha0 * Ap0 * sigma * sigma) / (alpha0 * pow(sigma,4 )) ) * X0 * X0
-               + r * M_PI * (0.5 * Xp0 * A0 * A0 + solitonic * (6. * pow(A0, 6) * Xp0 / pow(sigma, 4) - 4. * pow(A0,4) * Xp0 / pow(sigma, 2) )  ) * X0 - M_PI * Ap0 * Ap0) * F
+    double Lpp = 32. * ((M_PI * r *(A0 * Ap0 + alphap0 * A0_sq / alpha0) + 4. * pow(A0, 3)* M_PI * r * solitonic
+               * (3. * pow(A0,3) * alphap0 + 9. * A0_sq * Ap0 * alpha0 - 2. * A0 * alphap0 * sigma_sq - 4. * alpha0 * Ap0 * sigma_sq) / (alpha0 * pow(sigma,4 )) ) * X0_sq
+               + r * M_PI * (0.5 * Xp0 * A0_sq + solitonic * (6. * pow(A0, 6) * Xp0 / pow(sigma_sq, 2) - 4. * pow(A0,4) * Xp0 / sigma_sq )  ) * X0 - M_PI * Ap0 * Ap0) * F
                + (16. * M_PI * Ap0 * Ap0 - chi_sq * pow(X0 / alpha0, 2) - 2. * pow(alphap0 / alpha0, 2) + 2. / (r * r) - 4. * alphap0 / (r * alpha0)
                +(2. * Xpp0  + 4. * alphap0 * Xp0 / alpha0 - 2. * Xp0 / r) / X0 - 4. * pow(Xp0 / X0, 2)) * L
-               + 32. * M_PI * ( - Ap0 * A0 + 0.5 * A0 * A0 * r * X0 * X0 + r * X0 * X0 * solitonic * (6. * pow(A0, 6) / pow(sigma, 4) - 4. * pow(A0, 4) / pow(sigma, 2)))  * Fp
+               + 32. * M_PI * ( - Ap0 * A0 + 0.5 * A0_sq * r * X0_sq + r * X0_sq * solitonic * (6. * pow(A0, 6) / pow(sigma, 4) - 4. * pow(A0, 4) / sigma_sq))  * Fp
                + 3. * (-alphap0 / alpha0 + Xp0 / X0) * Lp;
 
     return (PertState){Fp, Fpp, Lp, Lpp};
@@ -137,9 +143,14 @@ void LinearPerturbation::rk4_solve(double chi_sq, double gamma)
 int LinearPerturbation::count_zero_crossings()
 {
     int zero_crossings = 0;
+    int max_search_val = min(blowup_point, (int)round(bg->r_99 * 5 / dr) ); //don't search more than 5 BS radii out for zero crossings -- can get spurious numerical ones at large r.
+
+    double cutoff_radius = 40.;
+
+    max_search_val =  round(n_gridpoints * cutoff_radius / R); // TEST
 
     //check for zero crossings up to blowup point (neglecting one extra point as we sometimes get spurious zero crossings on explosion)
-    for (int j = 1; j < blowup_point - 1; j++)
+    for (int j = 1; j < max_search_val; j++)
     {
         if ((pert[j].L == 0.) || (pert[j].L > 0. && pert[j - 1].L < 0.) || (pert[j].L < 0. && pert[j - 1].L > 0.) )
             {zero_crossings++;}
@@ -202,7 +213,8 @@ double LinearPerturbation::get_best_gamma(double chi_sq, bool quiet)
         counter++;
 
     }
-    if (!quiet) cout << " \nBest gamma with chi_sq = " << chi_sq  << " is gamma =" << lower_guess << " with noether_pert = " << get_noether_perturbation() << endl;
+    if (!quiet) cout << " \nBest gamma with chi_sq = " << chi_sq  << " is gamma =" << lower_guess << " with noether_pert = " << get_noether_perturbation() << " and " <<
+    count_zero_crossings() << " zero crossings." << endl;
 
     solved_gamma = lower_guess;
     return lower_guess;
@@ -211,10 +223,10 @@ double LinearPerturbation::get_best_gamma(double chi_sq, bool quiet)
 //first attempt: use Newton's method to attempt to converge to a root of the Noether charge, using get_best_gamma to try and minimize L(infty) at each step.
 double LinearPerturbation::get_chi_sq()
 {
-    double epsilon = 0.000001;//sqrt(bg->freq_epsilon);
+    double epsilon = chi_epsilon;
 
     double lower_guess = chi_sq0;
-    double upper_guess = chi_sq0 + 0.1;
+    double upper_guess = chi_sq0 + chi_range;
 
     get_best_gamma(lower_guess, 1);
     if (count_zero_crossings() > 0) cout << "WARNING: lower guess too high!" << endl;
@@ -226,9 +238,10 @@ double LinearPerturbation::get_chi_sq()
 
     long double midpoint = 0.5 * (upper_guess + lower_guess);
 
-    while (upper_guess - lower_guess > epsilon && counter < 15 )
+    while (upper_guess - lower_guess > epsilon && counter < 20 )
     {
         midpoint = 0.5 * (upper_guess + lower_guess);
+        //cout << midpoint << endl;
         get_best_gamma(midpoint, 1);
 
         if (count_zero_crossings() > 0)
@@ -240,7 +253,7 @@ double LinearPerturbation::get_chi_sq()
     }
 
 
-    cout << "Obtained chi_sq = " << lower_guess << " with noether_pert = " << noether_perturbation << endl;
+    cout << "Obtained chi_sq = " << lower_guess << " with noether_pert = " << get_noether_perturbation() << endl;
 
     solved_chi_sq = lower_guess;
     return lower_guess;
@@ -280,6 +293,13 @@ void LinearPerturbation::write_pert(string filename)
     }
 }
 
+void LinearPerturbation::write_chi_results()
+{
+     ofstream data_file{"chi.dat"};
+     data_file << std::setprecision (10) <<  bg->A_central << "     " << solved_chi_sq << "     " << solved_gamma << "     "    << get_noether_perturbation() << endl;
+}
+
+//cycles through perturbations as function of A0 in single-valued region
 void LinearPerturbation::pert_cycle(double A0, double dA, int n_stars)
 {
     bg->A_central = A0;
@@ -307,6 +327,7 @@ void LinearPerturbation::pert_cycle(double A0, double dA, int n_stars)
 
         data_file << std::setprecision (10) <<  bg->A_central << "     " << solved_chi_sq << "     " << solved_gamma << "     "    << get_noether_perturbation() << endl;
         bg->A_central += dA;
+        chi_epsilon = 0.001 * solved_chi_sq + 10e-15;
     }
 
 }
