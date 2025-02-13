@@ -30,10 +30,8 @@ PertState LinearPerturbation::pert_rhs(double r, PertState s, double chi_sq, lon
 {
     if (r == 0.)
     {
-        double Fpp0 = ( 2. + (2. * omega * omega - chi_sq) / exp(2. * bg->state[0].phi) + solitonic * (72. * pow(A_central / sigma, 4)  //the small-r expansion leaves L''(0), here gamma, undetermined--
+        double Fpp0 = ( 2 + (2 * omega * omega - chi_sq) / exp(2. * bg->state[0].phi) + solitonic * (72. * pow(A_central / sigma, 4)  //the small-r expansion leaves L''(0), here gamma, undetermined--
                       - 32. * pow(A_central / sigma, 2))) / 3. - gamma / (8. * M_PI * A_central * A_central); // we keep it arbitrary but express F''(0) in terms of it.
-
-        //cout<< setprecision(16) << "Results: [" << 0 << ", " << Fpp0 << ", " << 0 << ", " << gamma << "]" << endl;
 
         return (PertState) {0, Fpp0, 0, gamma};
     }
@@ -70,15 +68,8 @@ PertState LinearPerturbation::pert_rhs(double r, PertState s, double chi_sq, lon
     vector<double> radii{dr * j0, dr *(j0 + 1), dr * (j0 + 2), dr * (j0 + 3)};
     vector<double> XPP{bg->state[j0].X, bg->state[j0 + 1].X, bg->state[j0 + 2].X, bg->state[j0 + 3].X};
 
-    //double Xpp1 = lagrange_interp(r - dr, radii, XPP); double Xpp2 = lagrange_interp(r, radii, XPP); double Xpp3 = lagrange_interp(r + dr, radii, XPP);
-    //double Xpp0 = (Xpp1 + Xpp3 - 2. * Xpp2) / (dr * dr);
-
-
-    //EXPERIMENTAL: analytic background X''
-    double Xpp0 = 3.*Xp0*Xp0 / X0 - 2. * Xp0 / r + 4. * M_PI * (A0_sq + 4.*(A0_sq * A0_sq * A0_sq/(sigma_sq*sigma_sq) - A0_sq * A0_sq/sigma_sq )
-           + 2. * r * A0 * Ap0 + omega_sq * A0_sq * (1 - r * alphap0 / alpha0) / alpha0_sq  + r * Ap0 * A0 *
-           (24. * A0_sq*A0_sq / (sigma_sq*sigma_sq) - 16. * A0_sq / sigma_sq ) ) * X0_sq * X0
-           - 4. * M_PI * Ap0*Ap0 * (1. + r * alphap0 / alpha0) * X0;
+    double Xpp1 = lagrange_interp(r - dr, radii, XPP); double Xpp2 = lagrange_interp(r, radii, XPP); double Xpp3 = lagrange_interp(r + dr, radii, XPP);
+    double Xpp0 = (Xpp1 + Xpp3 - 2. * Xpp2) / (dr * dr);
 
     const double& F = s.F;
     const double& Fp = s.Fp;
@@ -98,11 +89,8 @@ PertState LinearPerturbation::pert_rhs(double r, PertState s, double chi_sq, lon
                + r * M_PI * (0.5 * Xp0 * A0_sq + solitonic * (6. * pow(A0, 6) * Xp0 / pow(sigma_sq, 2) - 4. * pow(A0_sq,2) * Xp0 / sigma_sq )  ) * X0 - M_PI * Ap0 * Ap0) * F
                + (16. * M_PI * Ap0 * Ap0 - chi_sq * X0_sq / alpha0_sq - 2. * pow(alphap0 / alpha0, 2) + 2. / (r * r) - 4. * alphap0 / (r * alpha0)
                +2.* (Xpp0  + 2. * alphap0 * Xp0 / alpha0 - Xp0 / r) / X0 - 4. * pow(Xp0 / X0, 2)) * L
-               + 32. * M_PI * ( - Ap0 * A0 + 0.5 * A0_sq * r * X0_sq + r * X0_sq * solitonic * (6. * pow(A0_sq, 3) / pow(sigma_sq, 2) - 4. * pow(A0_sq, 2) / sigma_sq))  * Fp
+               + 32. * M_PI * ( - Ap0 * A0 + 0.5 * A0_sq * r * X0_sq + r * X0_sq * solitonic * (6. * pow(A0, 6) / pow(sigma, 4) - 4. * pow(A0, 4) / sigma_sq))  * Fp
                + 3. * (-alphap0 / alpha0 + Xp0 / X0) * Lp;
-
-
-    //if (r < 0.1) cout<< setprecision(16) << "Results: [" << r << ", " << Fp << ", " << Fpp << ", " << Lp << ", " << Lpp << "]" << endl;
 
     return (PertState){Fp, Fpp, Lp, Lpp};
 }
@@ -134,9 +122,6 @@ void LinearPerturbation::rk4_solve(double chi_sq, long double gamma)
             blowup_point = j;
             return;
         }
-
-        //if (j < 5) cout<< setprecision(16) << "Results: [" << (dr) * s3.F << ", " << (dr) * s3.Fp << ", " << (dr) * s3.L << ", " <<  (dr) * s3.Lp << "] " << dr << endl;
-
     }
     blowup_point = n_gridpoints - 1; //if blowup does not happen, set to outer boundary.
 }
@@ -145,7 +130,11 @@ void LinearPerturbation::rk4_solve(double chi_sq, long double gamma)
 int LinearPerturbation::count_zero_crossings()
 {
     int zero_crossings = 0;
-    int max_search_val =  round((n_gridpoints - 1) * cutoff_radius / R); // avoid counting spurious numerical zero crossings
+    int max_search_val = min(blowup_point, (int)round(bg->r_99 * 5 / dr) ); //don't search more than 5 BS radii out for zero crossings -- can get spurious numerical ones at large r.
+
+    //double cutoff_radius = 25.;
+
+    max_search_val =  round((n_gridpoints - 1) * cutoff_radius / R); // TEST
 
     //check for zero crossings up to blowup point (neglecting one extra point as we sometimes get spurious zero crossings on explosion)
     for (int j = 1; j < max_search_val; j++)
@@ -219,7 +208,7 @@ long double LinearPerturbation::get_best_gamma(double chi_sq, bool quiet)
     return lower_guess;
 }
 
-//use interval bisection to obtain chi_sq, obtaining the optimal gamma for each chi_sq value tested by the same.
+//first attempt: use Newton's method to attempt to converge to a root of the Noether charge, using get_best_gamma to try and minimize L(infty) at each step.
 double LinearPerturbation::get_chi_sq()
 {
     double epsilon = chi_epsilon;
@@ -336,20 +325,6 @@ void LinearPerturbation::pert_cycle(double A0, double dA, int n_stars)
         chi_epsilon = 0.001 * solved_chi_sq + 10e-15;
     }
 
-}
-
-//testing RHS only (WARNING: BREAKS BACKGROUND BOSON STAR!!!)
-PertState LinearPerturbation::test_rhs (double r, FieldState f, PertState s, double chi_sq, long double gamma)
-{
-    for (int j = 0; j < n_gridpoints; j++)
-    {
-        bg->state[j] = f;
-    }
-
-    PertState p = pert_rhs(r, s, chi_sq, gamma);
-
-    cout<< "Results: [" << p.F << ", " << p.Fp << ", " << p.L << ", " << p.Lp << "]" << endl;
-    return p;
 }
 
 #endif /* LINEARPERTURBATION_CPP_ */

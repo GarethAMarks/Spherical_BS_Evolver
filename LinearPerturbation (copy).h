@@ -65,7 +65,6 @@ class LinearPerturbation
         void write_pert(string filename = "pert.dat");
         void pert_cycle(double A0, double dA, int n_stars);
         void write_chi_results();
-        PertState test_rhs (double r, FieldState f, PertState s, double chi_sq, long double gamma);
 
 };
 
