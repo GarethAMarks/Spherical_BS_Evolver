@@ -55,7 +55,7 @@ class LinearPerturbation
 
         LinearPerturbation(BosonStar* bg, double given_chi_sq0, long double given_gamma0, double given_chi_range, double given_cutoff_radius) //constructor takes a pointer to BosonStar and autofills inherited params
         :bg{bg}, chi_sq0{given_chi_sq0}, gamma0{given_gamma0}, n_gridpoints{bg->n_gridpoints}, R{bg->R}, sigma{bg->sigma}, chi_range{given_chi_range},
-        solitonic{bg->solitonic}, omega{bg->omega}, A_central{bg->A_central}, dr{R/(n_gridpoints - 1)}, chi_epsilon{0.000001}, cutoff_radius{given_cutoff_radius}
+        solitonic{bg->solitonic}, omega{bg->omega}, A_central{bg->A_central}, dr{R/(n_gridpoints - 1)}, chi_epsilon{0.00000000001}, cutoff_radius{given_cutoff_radius}
         {}
 
         void rk4_solve(double chi_sq, long double gamma); //runs RK4 solver on F, L using given chi, gamma

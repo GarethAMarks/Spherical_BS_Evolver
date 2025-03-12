@@ -66,7 +66,6 @@ BSSNSlice operator+(const BSSNSlice& slice1, const BSSNSlice& slice2)
 
     unsigned int length = slice1.states.size();
 
-
     if (length != slice2.states.size() || slice1.R != slice2.R)
     {
         cerr << "ERROR: attempted to add data from slices of different sizes!" << endl;
@@ -74,13 +73,22 @@ BSSNSlice operator+(const BSSNSlice& slice1, const BSSNSlice& slice2)
     }
 
     return_slice.states.resize(length);
+
+    if (slice1.use_CCZ4)
+        return_slice.theta.resize(length);
+
+
     return_slice.R = slice1.R;
     return_slice.has_BH = slice1.has_BH;
+    return_slice.use_CCZ4 = slice1.use_CCZ4;
     return_slice.refinement_points = slice1.refinement_points;
 
     for (int j = 0; j < length; j++)
     {
         return_slice.states[j] = slice1.states[j] + slice2.states[j];
+
+        if (slice1.use_CCZ4)
+            return_slice.theta[j] = slice1.theta[j] + slice2.theta[j];
     }
 
     return return_slice;
@@ -93,13 +101,20 @@ BSSNSlice operator*(double c, const BSSNSlice& slice)
     int length = slice.states.size();
     return_slice.states.resize(length);
 
+    if (slice.use_CCZ4)
+        return_slice.theta.resize(length);
+
     return_slice.R = slice.R;
     return_slice.has_BH = slice.has_BH;
     return_slice.refinement_points = slice.refinement_points;
+    return_slice.use_CCZ4 = slice.use_CCZ4;
 
     for (int j = 0; j < length; j++)
     {
         return_slice.states[j] = c * slice.states[j];
+
+        if (slice.use_CCZ4)
+            return_slice.theta[j] = c * slice.theta[j];
     }
 
     return return_slice;
@@ -110,16 +125,12 @@ BSSNSlice operator*(double c, const BSSNSlice& slice)
 //should add chacks on refinement levels
 double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
 {
-
     int n_gridpoints = states.size();
     double dr = R / (n_gridpoints - 1);
 
     int ref_level = get_refinement_level(index, refinement_points); //refinement level; starts at 1 for no refinement and halves every time.
 
     int res_fac = pow(2, ref_level - 1);
-
-    //if (pow(get_refinement_level(index + 2 * res_fac, refinement_points),2) > ref_level || pow(get_refinement_level(index + res_fac, refinement_points), 2) > ref_level )
-        //res_fac *= 2;
 
     //check index is valid and error out if not
    if (index < 0 || index >= n_gridpoints )
@@ -150,7 +161,6 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
     //Fill out five values; note that at outer boundary this gives unreliable results
     if (index < n_gridpoints)
     {
-        //maybe test if swapping order of for/switch affects runtime
         for (int j  = 0; j < 5; j++)
         {
             switch (var)
@@ -194,28 +204,14 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
                 case v_beta:
                     F[j] = states[J[j]].beta;
                     break;
+                case v_theta:
+                    F[j] = theta[J[j]];
+                    break;
                 default:
                     cerr << "ERROR: invalid variable requested for differentiation" << endl;
                     exit(0);
             }
         }
-
-        //cout << active_points[J[3]] << endl;
-        //extrapolate over refinement boundary where needed at quadratic order
-        /*for (int j  = 3; j < 5; j++)
-        {
-
-            if (J[j] < active_points.size() && !active_points[J[j]])
-            {
-                cout << "Survived with " << J[2] << endl;
-                vector<double> F_vals = {F[j - 3], F[j - 2], F[j - 1]};
-                vector<double> J_vals = {J[j - 3], J[j - 2], J[j - 1]};
-                F[j] = lagrange_interp(J[j], J_vals, F_vals);
-            }
-
-        }*/
-
-
 
         bool parity_is_odd = ((var == v_c_chris_Z || var == v_beta)/*|| (has_BH && (var == v_chi || var == v_alpha))*/);
        //if (var == v_alpha) cout << parity_is_odd<< endl;
@@ -338,10 +334,14 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
 
     int n_gridpoints = (boson_star.n_gridpoints + BS_resolution_factor - 1) / BS_resolution_factor;
     states.resize(n_gridpoints);
+
+    if (use_CCZ4)
+       theta.resize(n_gridpoints);
+
     R = boson_star.R;
     double dr = R / (n_gridpoints - 1);
 
-    double D = SPACEDIM + 1.;
+    double D = boson_star.D;
 
     //
     for (int j = 0; j < n_gridpoints; j++)
@@ -388,6 +388,9 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
 
         states[j].K_phi_im = - boson_star.omega * states[j].phi_re / (2. * states[j].alpha) + pert_correction;
 
+        if (use_CCZ4)
+            theta[j] = 0.;
+
     }
 
     //separate loop to fill in values for the contracted Christoffel symbols as they require derivatives of h (hence info off j value)
@@ -431,9 +434,14 @@ void BSSNSlice::write_slice(std::string file_name)
         //if (!active_points[j]) //perform no computations on inactive points
             //continue;
 
+        double theta0 = 0.; //if using CCZ4, write theta at the end
+        if (use_CCZ4)
+            theta0 = theta[j];
+
+
         data_file <<  std::setprecision (16) << dr * j << "   " << states[j].chi << "    " << states[j].h_zz << "    " << states[j].h_ww  << "    " << states[j].A_zz
         << "   " << states[j].A_ww << "    " << states[j].K << "    " << states[j].c_chris_Z  << "    " << states[j].phi_re << "    " << states[j].phi_im
-        << "   " << states[j].K_phi_re << "    " << states[j].K_phi_im << "    " << states[j].alpha << "    " << states[j].beta << endl;
+        << "   " << states[j].K_phi_re << "    " << states[j].K_phi_im << "    " << states[j].alpha << "    " << states[j].beta << "    " << theta0 << endl;
     }
 
 }
@@ -458,8 +466,18 @@ void BSSNSlice::read_checkpoint(int time, int n_gridpoints)
         double z;
         BSSNState& s = states[j];
 
-        if(iss >> z >> s.chi >> s.h_zz >> s.h_ww >> s.A_zz >> s.A_ww >> s.K >> s.c_chris_Z >> s.phi_re >> s.phi_im >> s.K_phi_re >> s.K_phi_im >> s.alpha >> s.beta)
-            j++;
+        if (use_CCZ4)
+        {
+            double& t = theta[j];
+
+            if(iss >> z >> s.chi >> s.h_zz >> s.h_ww >> s.A_zz >> s.A_ww >> s.K >> s.c_chris_Z >> s.phi_re >> s.phi_im >> s.K_phi_re >> s.K_phi_im >> s.alpha >> s.beta >> t)
+                j++;
+        }
+        else
+        {
+            if(iss >> z >> s.chi >> s.h_zz >> s.h_ww >> s.A_zz >> s.A_ww >> s.K >> s.c_chris_Z >> s.phi_re >> s.phi_im >> s.K_phi_re >> s.K_phi_im >> s.alpha >> s.beta)
+                j++;
+        }
     }
 }
 
@@ -551,7 +569,7 @@ double Spacetime::dV(const double A)
 
 }
 
-//asymptotic values of chi and alpha and their derivatives
+//asymptotic values of chi and alpha and their derivatives. TODO: generalize D > 4
 double Spacetime::chi_asymp(double r)
 {
     return(isotropic) ? (pow(1. +  0.5 * M / r, -4.)) : pow(1 - 2. * M / r, -1./3.); //use isotropic/areal Schwarzchilld value for chi as appropriate
@@ -632,7 +650,6 @@ double Spacetime::d_alpha_asymp(double r)
 
  }
 
-//TODO: try inwards, compare!
  void Spacetime::solve_initial_ham()
  {
     if (!isotropic)
@@ -771,6 +788,13 @@ void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
     R_zz[j] = R_zz_c + R_zz_chi;// d_z(v_chi,j);
     R_ww[j] = R_ww_c + R_ww_chi;
 
+    if (use_CCZ4) //if CCZ4 is used, add supplementary terms to the (extended) Ricci tensor and fill out theta_Z
+    {
+        theta_Z[j] = 0.5 * chi * (c_chris_Z - h_ZZ[j] * chris_Zzz[j] - n * h_WW[j] * chris_Zww[j]);
+        R_zz[j] += theta_Z[j] * (chi * d_z_h_zz + h_zz * d_z_chi) / (chi * chi) - 2. * theta_Z[j] * chris_zzz / chi; //R^Z_zz with correction to c_chris_Z (tilde->hat)
+        R_ww[j] += theta_Z[j] * (chi * d_z_h_ww - h_ww * d_z_chi) / (chi * chi) - 2. * theta_Z[j] * chris_wwz / chi; // R^Z_ww with correction to c_chris_Z (tilde->hat)
+    }
+
     //traceless part of Ricci components
     R_zz_TF[j] = n * (R_zz[j] - h_zz * h_WW[j] * R_ww[j]) / (D - 1.);
     R_ww_TF[j] = (R_ww[j] - h_ww * h_ZZ[j] * R_zz[j] ) / (D - 1.);
@@ -795,15 +819,12 @@ void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
 
     S_zz_TF[j] = S_zz[j] - S[j] * h_zz /( chi * (D - 1.));
     S_ww_TF[j] = S_ww[j] - S[j] * h_ww/ ( chi * (D - 1.));
-    //try removing chi...
 
 }
 
 //compute auxiliary quantities on a slice. Should no longer be called in slice_rhs (pointwise evaluator called directly for efficiency to avoid re-computing derivatives)
 void Spacetime::compute_auxiliary_quantities(BSSNSlice* slice_ptr, bool derivatives_computed)
 {
-    //current_slice_ptr = &slices[time_step]; //update current slice pointer first
-
     //double n = D - 2.;
     dr = R / (n_gridpoints - 1);
 
@@ -827,15 +848,13 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
     double n = D - 2.;
     dr = R / (n_gridpoints - 1);
 
-    //compute_auxiliary_quantities(slice_ptr);
-
     //define return slice and size its states array appropriately
     BSSNSlice rhs;
     rhs.R = R;
-
     rhs.has_BH = slice_ptr->has_BH;
     rhs.refinement_points = slice_ptr->refinement_points;
 
+    rhs.use_CCZ4 = use_CCZ4;
     rhs.states.resize(n_gridpoints);
 
     int max_ref = (refinement_levels.size() == 0 ) ? 1 : refinement_levels[refinement_levels.size() - 1]; //refinement level at outermost bdry
@@ -843,10 +862,7 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
     for (int j = 0; j < n_gridpoints - 2; j++)
     {
         if (!active_points[j])//perform no calculations and skip on inactive points
-        {
-                //rhs.states[j] = {0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.}
-                continue;
-        }
+            continue;//rhs.states[j] = {0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.}
 
         double z = j * dr;
 
@@ -871,11 +887,7 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
             rhs.states[j] = (BSSNState){0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.};
             rhs.states[j].phi_re = beta;
             rhs.states[j].beta = d_zz(v_phi_re, j);
-
-            //cout << rhs.states[j].phi_re <<  "    " << rhs.states[j].beta << endl;
-
             continue;
-
             //return rhs;
         }
 
@@ -899,8 +911,9 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
         rhs.states[j].h_zz = beta * d_z_h_zz + 2. * h_zz * d_z_beta - 2. * h_zz * (d_z_beta + n * beta_z) / (D - 1.) - 2. * alpha * A_zz;
         rhs.states[j].h_ww = beta * d_z_h_ww - 2. * h_ww * (d_z_beta - beta_z) / (D - 1.) - 2. * alpha * A_ww;
 
-        rhs.states[j].K = beta * d_z_K - chi * h_ZZ[j] * D_zz_alpha[j] + alpha * h_ZZ[j] * h_ZZ[j] * A_zz * A_zz + alpha * K * K / (D - 1.)
-                        + n * h_WW[j] * (alpha * A_ww * A_ww / h_ww - chi * D_ww_alpha[j]) + 8. * M_PI * alpha * (S[j] + (D - 3.) * rho[j]) / n;
+        if (!use_CCZ4) //different evolution eq'n used in CCZ4
+        {rhs.states[j].K = beta * d_z_K - chi * h_ZZ[j] * D_zz_alpha[j] + alpha * h_ZZ[j] * h_ZZ[j] * A_zz * A_zz + alpha * K * K / (D - 1.)
+                        + n * h_WW[j] * (alpha * A_ww * A_ww / h_ww - chi * D_ww_alpha[j]) + 8. * M_PI * alpha * (S[j] + (D - 3.) * rho[j]) / n;}
 
         rhs.states[j].A_zz = beta * d_z(v_A_zz, j) + 2. * A_zz * d_z_beta - 2. * A_zz * (d_z_beta + n * beta_z) / (D - 1.) + alpha * K * A_zz
                             - 2. * alpha * A_zz * h_ZZ[j] * A_zz + chi * (alpha * R_zz_TF[j] - D_zz_alpha_TF[j] - 8. * M_PI * alpha * S_zz_TF[j]);
@@ -934,19 +947,50 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
 
 
         rhs.states[j].K_phi_re = beta * d_z(v_K_phi_re,j) + alpha * K * K_phi_re + 0.5 * alpha * phi_re * dV(mod_phi)
-                               - 0.5 * chi * (h_ZZ[j] * d_z_alpha * d_z_phi_re + alpha * (h_ZZ[j] * cD_zz_phi_re + n * h_WW[j] * cD_ww_phi_re)  )
+                               - 0.5 * chi * (h_ZZ[j] * d_z_alpha * d_z_phi_re + alpha * (h_ZZ[j] * cD_zz_phi_re + n * h_WW[j] * cD_ww_phi_re))
                                + 0.25 * alpha * h_ZZ[j] * d_z_chi * d_z_phi_re;
 
         rhs.states[j].K_phi_im =  beta * d_z(v_K_phi_im,j) + alpha * K * K_phi_im + 0.5 * alpha * phi_im * dV(mod_phi)
-                               - 0.5 * chi * (h_ZZ[j] * d_z_alpha * d_z_phi_im + alpha * (h_ZZ[j] * cD_zz_phi_im + n * h_WW[j] * cD_ww_phi_im) )
+                               - 0.5 * chi * (h_ZZ[j] * d_z_alpha * d_z_phi_im + alpha * (h_ZZ[j] * cD_zz_phi_im + n * h_WW[j] * cD_ww_phi_im))
                                + 0.25 * alpha * h_ZZ[j] * d_z_chi * d_z_phi_im;
 
         //Gauge variable update using moving puncture evolution, unless evolve_shift is off in which case do not update beta
         rhs.states[j].alpha = beta * d_z_alpha - 2. * pow(alpha, 1.) * K;
         rhs.states[j].beta =  (evolve_shift)? (beta * d_z_beta + gamma_fac * c_chris_Z - eta * beta): 0.;
 
+        //add supplementary terms if CCZ4 evolution is on
+        if (use_CCZ4)
+        {
+            const double theta = slice_ptr->theta[j];
+            rhs.theta.resize(n_gridpoints);
+
+            //rhs.states[j].K += alpha * (-2. * K * theta - (D - 1.) * c1 * (1. + c2) * theta); //FIX ME!!!
+
+            //need to add correction to above for BSSN to avoid recomputing
+            rhs.states[j].K = beta * d_z_K - chi * h_ZZ[j] * D_zz_alpha[j]  - n * h_WW[j] * chi * D_ww_alpha[j]
+                            + alpha * (chi * h_ZZ[j] * R_zz[j] + n * chi * h_WW[j] * R_ww[j] + K * (K - 2. * theta)
+                            - (D - 1.) * c1 * (1. + c2) * theta + 8. * M_PI * (S[j] - (D - 1.) * rho[j]) / (D - 2.));
+
+            rhs.states[j].A_zz += -2. * alpha * theta * A_zz;
+            rhs.states[j].A_ww += -2. * alpha * theta * A_ww;
+
+            //note this is now \hat{\Gamma}^z, not \tilde{\Gamma}^z. So we first remove BSSN specific damping then add new terms.
+            rhs.states[j].c_chris_Z +=   sigma_BSSN * aux_constraint[j] - 2. * d_z_alpha * theta * h_ZZ[j] + 2. * alpha * h_ZZ[j] * d_z(v_theta, j)
+                                        - 2. * c1 * alpha * theta_Z[j] / chi - 4. * alpha * K * theta_Z[j] / ((D - 1.) * chi)
+                                        + sigma_BSSN * theta_Z[j]  * ((3. - D) * d_z_beta + 2. * n * beta_z) / chi;
+
+            rhs.states[j].alpha += 4. * alpha * theta;
+
+            if (!theta_off)
+                rhs.theta[j] = beta * d_z(v_theta, j) + 0.5 * alpha * (chi * h_ZZ[j] * R_zz[j] - h_ZZ[j] * h_ZZ[j] * A_zz * A_zz + n * K * K / (D - 1.)
+                            + n * (chi * h_WW[j] * R_ww[j] - A_ww * A_ww / (h_ww * h_ww))  - 2. * K * theta - 2. * theta_Z[j] * d_z_alpha / alpha
+                            - c1 * (D + c2 * n) * theta  - 16. * M_PI * rho[j]);
+            else
+                rhs.theta[j] = 0.;
+        }
+
         //add damping in away from edges for now; may need to add for edges-- we'll see
-        //WARNING: damping + refinement not currently fully compatible
+        //note: leaving theta undamped for now; can play with this maybe...
         if (damping_factor != 0. && j < n_gridpoints - 3 * pow(2, max_ref - 1))
             {
                 int res_fac = pow(2, slice_ptr->get_refinement_level(j, refinement_points) - 1);
@@ -983,12 +1027,6 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
             }
     }
 
-    // Radiative BC stuff currently only works for D = 4!!!!!
-
-    //version without spatially varying asymptotics
-    //BSSNState asymp_state{1., 1., 1., 0., 0., 0., 0., 0., 0., 0., 0.,1., 0.};
-    //BSSNState asymp_deriv{0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.};
-
     int res_fac = pow(2, max_ref - 1); //number of points skipped per slot in stencil
 
     //asymptotic states and their derivatives where relevant (can ignore for matter values as they decay exponentially)
@@ -996,25 +1034,48 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
     BSSNState asymp_state{chi_asymp(R - dr * res_fac), 1., 1., 0., 0., 0., 0., 0., 0., 0., 0.,alpha_asymp(R - dr * res_fac), 0.};
     BSSNState asymp_deriv{d_chi_asymp(R - dr * res_fac), 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., d_alpha_asymp(R - dr * res_fac), 0.}; // r-derivative of asymptotic expansion
 
+    //version without spatially varying asymptotics
+    if (!spatially_varying_BC)
+    {
+        asymp_state = (BSSNState) {1., 1., 1., 0., 0., 0., 0., 0., 0., 0., 0.,1., 0.};
+        asymp_deriv = (BSSNState) {0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.};
+    }
+
     //maybe adjust to account for purported 1/r^2 decay in K!
     BSSNState N{1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.};
 
     //outermost 5 active gridpoints
-    BSSNState& s1= slice_ptr->states[last_active_j - 4 * res_fac];
-    BSSNState& s2= slice_ptr->states[last_active_j - 3 * res_fac];
-    BSSNState& s3= slice_ptr->states[last_active_j - 2 * res_fac];
-    BSSNState& s4= slice_ptr->states[last_active_j - 1 * res_fac];
-    BSSNState& s5= slice_ptr->states[last_active_j];
+    BSSNState& s1 = slice_ptr->states[last_active_j - 4 * res_fac];
+    BSSNState& s2 = slice_ptr->states[last_active_j - 3 * res_fac];
+    BSSNState& s3 = slice_ptr->states[last_active_j - 2 * res_fac];
+    BSSNState& s4 = slice_ptr->states[last_active_j - 1 * res_fac];
+    BSSNState& s5 = slice_ptr->states[last_active_j];
+
     //limiting characteristic speeds at infinity
+    //BSSNState char_speeds{1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.};
     BSSNState char_speeds{sqrt(2. / s4.alpha), 1., 1., 1., 1., sqrt(2. / s4.alpha), 1., 1., 1., 1., 1., sqrt(2. / s4.alpha), 1.};
 
-    rhs.states[last_active_j - res_fac] = (-1) * char_speeds * ( p4_stencil(dr * res_fac, s1, s2, s3, s4, s5) + N * (s4 - asymp_state) /  (dr * (last_active_j - res_fac))- asymp_deriv);
+    rhs.states[last_active_j - res_fac] = (-1.) * char_speeds * ( p4_stencil(dr * res_fac, s1, s2, s3, s4, s5) + (0.5 * D - 1.) * N * (s4 - asymp_state) /  (dr * (last_active_j - res_fac))- asymp_deriv);
 
     //update variable asymptotic states to outermost edge
-    asymp_state.chi = chi_asymp(R);  asymp_state.alpha = alpha_asymp(R);
-    asymp_deriv.chi = d_chi_asymp(R);  asymp_deriv.alpha = d_alpha_asymp(R);
+    if (spatially_varying_BC)
+    {asymp_state.chi = chi_asymp(R);  asymp_state.alpha = alpha_asymp(R);
+    asymp_deriv.chi = d_chi_asymp(R);  asymp_deriv.alpha = d_alpha_asymp(R);}
 
-    rhs.states[last_active_j] = (-1) * char_speeds * ( p5_stencil(dr * res_fac, s1, s2, s3, s4, s5) + N * (s5 - asymp_state) / (dr * last_active_j) - asymp_deriv);
+    rhs.states[last_active_j] = (-1) * char_speeds * ( p5_stencil(dr * res_fac, s1, s2, s3, s4, s5) + (0.5 * D - 1.) * N * (s5 - asymp_state) / (dr * last_active_j) - asymp_deriv);
+
+
+    if (use_CCZ4)
+    {
+        double& t1 = slice_ptr->theta[last_active_j - 4 * res_fac];
+        double& t2 = slice_ptr->theta[last_active_j - 3 * res_fac];
+        double& t3 = slice_ptr->theta[last_active_j - 2 * res_fac];
+        double& t4 = slice_ptr->theta[last_active_j - 1 * res_fac];
+        double& t5 = slice_ptr->theta[last_active_j];
+
+        rhs.theta[last_active_j - res_fac] = -(p4_stencil(dr * res_fac, t1, t2, t3, t4, t5) + (0.5 * D - 1.) * t4 / (dr * (last_active_j - res_fac)));
+        rhs.theta[last_active_j] = -(p5_stencil(dr * res_fac, t1, t2, t3, t4, t5) + (0.5 * D - 1.) * t5 / (dr * (last_active_j)));
+    }
 
     return rhs;
 }
@@ -1071,7 +1132,6 @@ double Spacetime::slice_mass(BSSNSlice* slice_ptr)
     return mass;
 }
 
-
 double Spacetime::slice_charge(BSSNSlice* slice_ptr)
 {
     //const double n = D - 2;
@@ -1093,7 +1153,6 @@ double Spacetime::slice_charge(BSSNSlice* slice_ptr)
     }
     return charge;
 }
-
 
 //computes hamiltonian and momentum constraints and conformal metric determinant
 void Spacetime:: compute_diagnostics (BSSNSlice* slice_ptr)
@@ -1149,7 +1208,7 @@ void Spacetime:: compute_diagnostics (BSSNSlice* slice_ptr)
     Mom_L2 = sqrt(Mom_L2) / (16. * M_PI * rho0_init);
 }
 
-//writes diagnostic quantities to output file
+//writes diagnostic quantities to output file. maybe just make appropriate call to write_slice() instead?
 void Spacetime:: write_current_slice(std::string file_name)
 {
     const BSSNSlice& s = *current_slice_ptr;
@@ -1163,15 +1222,19 @@ void Spacetime:: write_current_slice(std::string file_name)
         exit(1);
     }
 
+    double theta0 = 0;
 
     for (int j = 0; j < n_gridpoints; j++)
     {
         if (!active_points[j]) //perform no computations on inactive points
             continue;
 
+        if (use_CCZ4)
+            theta0 = s.theta[j];
+
         data_file <<  std::setprecision (16) << dr * j << "   " << s.states[j].chi << "    " << s.states[j].h_zz << "    " << s.states[j].h_ww  << "    " << s.states[j].A_zz
         << "   " << s.states[j].A_ww << "    " << s.states[j].K << "    " << s.states[j].c_chris_Z  << "    " << s.states[j].phi_re << "    " << s.states[j].phi_im
-        << "   " << s.states[j].K_phi_re << "    " << s.states[j].K_phi_im << "    " << s.states[j].alpha << "    " << s.states[j].beta << endl;
+        << "   " << s.states[j].K_phi_re << "    " << s.states[j].K_phi_im << "    " << s.states[j].alpha << "    " << s.states[j].beta << "    " << theta0 << endl;
     }
 
 }
@@ -1213,7 +1276,7 @@ void Spacetime:: write_diagnostics()
         double A = sqrt(phi_re * phi_re + phi_im * phi_im);
 
         data_file << std::setprecision (10) <<  dr * j << "   " << Ham[j] << "    " << Mom_Z[j]<< "    " << det_h[j]  << "    " << aux_test[j]
-        << "    " << A << "    "  << d_zz(v_chi, j) << "    "  << d_zz(v_alpha, j)  << "    " << d_z(v_phi_re,j) /*d_z_phi_re*/ /*c_chris_Z +  (8.) / (2. * chi) * d_z(v_chi, j) * h_ZZ[j]*/    << endl;
+        << "    " << A << "    "  << d_zz(v_chi, j) << "    "  << d_zz(v_alpha, j)  << "    " << d_z(v_phi_re,j) << endl;
     }
 
     //cout << "Wrote diagnostics" << endl;
@@ -1224,7 +1287,6 @@ void Spacetime::read_parameters(bool quiet)
 {
     std::ifstream params{ "BSParams.par" };
 
-    // Print an error and exit if file cannot open
     if (!params)
     {
         std::cerr << "Could not open BSParams.par\n";
@@ -1255,6 +1317,11 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "only_BS_violation = ", only_BS_violation, quiet);
         fill_parameter(current_line, "run_spacetime_solver = ", run_spacetime_solver, quiet);
         fill_parameter(current_line, "gamma_fac = ", gamma_fac, quiet);
+        fill_parameter(current_line, "spatially_varying_BC = ", spatially_varying_BC, quiet);
+        fill_parameter(current_line, "use_CCZ4 = ", use_CCZ4, quiet);
+        fill_parameter(current_line, "c1 = ", c1, quiet);
+        fill_parameter(current_line, "c2 = ", c2, quiet);
+        fill_parameter(current_line, "theta_off = ", theta_off, quiet);
 
         fill_param_array(current_line, "refinement_points = ", refinement_points, quiet);
 
@@ -1335,7 +1402,7 @@ void Spacetime::kill_refinement_noise()
         int j1 = j4 - 3 * step;
 
         BSSNSlice& s1 = *current_slice_ptr;
-        s1.states[j1] = 0.5 * (s1.states[j1 - step] + s1.states[j1 + step]); //average at points that seem to produce noise to hopefully kill error
+        s1.states[j1] = 0.5 * (s1.states[j1 - step] + s1.states[j1 + step]); //average at points that seem to produce noise to hopefully kill error. should be only 2nd-order...
         s1.states[j3] = 0.5 * (s1.states[j3 - step] + s1.states[j3 + step]);
 
         start_point = j4;
@@ -1346,7 +1413,7 @@ void Spacetime::kill_refinement_noise()
 }
 
 //corrects the initial field momentum in such a way that constraints are satisfied. Must have filled in initial slice already.
-//seems to only work for negative initial perturbation, at least for early tests...
+//seems to only work for negative initial perturbation, at least for early tests... now deprecated
 void Spacetime::fix_initial_field_mom()
 {
     compute_auxiliary_quantities(&slices[0], 0);
@@ -1392,7 +1459,8 @@ void Spacetime::compute_dtK(int time_index)
             dtK_L2 += dr * local_dtK * local_dtK * z * z   * pow(slice_current.states[j].chi, -1.5);
         }
     }
-    dtK_L2 = sqrt(abs(dtK_L2 - 1));
+    dtK_L2 = sqrt(dtK_L2);
+    dtK_L2 = abs(dtK_L2 - 1);
 }
 
 void Spacetime::prepare_ham_solve()  //EXPERIMENTAL: try to return to pure isotropic coords + solve Ham constraint mid-run
@@ -1430,6 +1498,11 @@ void Spacetime::resize_temp_arrays()
     Mom_Z.resize(n_gridpoints);
     det_h.resize(n_gridpoints);
 
+    if (use_CCZ4)
+    {
+        theta_Z.resize(n_gridpoints);
+    }
+
     dtK_L2 = 0;
 
     last_active_j = n_gridpoints - 1; //find last active gridpoint
@@ -1463,7 +1536,8 @@ void Spacetime::add_spacetime_pert(double a, double k, double center)
 void Spacetime::initialize(BosonStar& boson_star)
 {
     wave_mode = 0; //make 1 for MR testing purposes only
-    D = SPACEDIM + 1.;
+    //D = SPACEDIM + 1.;
+    D = boson_star.D;
 
     //inherit parameters from BS
     n_gridpoints = boson_star.n_gridpoints;
@@ -1480,9 +1554,13 @@ void Spacetime::initialize(BosonStar& boson_star)
     BS_perturbed = boson_star.perturb;
 
     gamma_fac = 0.75; // initialize to 3/4 by default (before params read) for backwards compatibility w/ older params files
+    spatially_varying_BC = 1; //as above
 
     refinement_points = {};
     read_parameters();
+
+    if (D != 4.)
+        spatially_varying_BC = 0; //only try this for D = 4 for now
 
     //cout << refinement_points.size() << endl;
 
@@ -1523,7 +1601,8 @@ void Spacetime::initialize(BosonStar& boson_star)
         boson_star.read_thinshell();
         boson_star.write_field();
 
-        if (boson_star.isotropic){
+        if (boson_star.isotropic)
+        {
             boson_star.fill_isotropic_arrays();
             boson_star.write_isotropic();
         }
@@ -1538,8 +1617,8 @@ void Spacetime::initialize(BosonStar& boson_star)
     //add perturbation to "standard" BS
     if (!read_thinshell && !boson_star.gaussian_start && boson_star.perturb)
     {
-       // boson_star.add_perturbation(boson_star.perturb_amp, boson_star.perturb_spread, boson_star.perturb_center);
-        //boson_star.fill_given_A(omega);
+        boson_star.add_perturbation(boson_star.perturb_amp, boson_star.perturb_spread, boson_star.perturb_center);
+        boson_star.fill_given_A(omega);
     }
 
     dr = R / (n_gridpoints - 1);
@@ -1549,6 +1628,7 @@ void Spacetime::initialize(BosonStar& boson_star)
     slices.resize(std::min(num_timesteps + 1, max_stored_slices));
     slices[0].active_points = active_points;
     slices[0].refinement_points = refinement_points;
+    slices[0].use_CCZ4 = use_CCZ4;
 
     if (start_time == 0)
         slices[0].read_BS_data(boson_star, BS_resolution_factor, isotropic);
@@ -1570,6 +1650,9 @@ void Spacetime::initialize(BosonStar& boson_star)
 
     slices[0].states.resize(n_gridpoints);
     slices[0].R = R;
+
+    if (use_CCZ4)
+        slices[0].theta.resize(n_gridpoints);
 
     if (start_time > 0)
         slices[0].read_checkpoint(start_time, n_gridpoints);
@@ -1604,6 +1687,7 @@ void Spacetime::initialize(BosonStar& boson_star)
     std::ofstream dynamical_file{"dynamical_constants.dat"};
     dynamical_file << mass0 << "    " << charge0 << "    " << mass0 - mu * charge0;
     cout << "Dynamical N =" << charge0 << ", M = "  << mass0 << " and binding energy is " << mass0 - mu * charge0  << endl;
+
 }
 
 
@@ -1617,7 +1701,7 @@ void Spacetime::evolve()
     int num_timesteps = ceil(stop_time / dt);
     int last_checkpoint_time = 0;
 
-    if(store_A0) A0_values.resize(num_timesteps);
+   // if(store_A0) A0_values.resize(num_timesteps);
 
     //write constraint norms at each timestep to file
     std::ofstream constraints_file{"constraint_norms.dat"};
@@ -1635,10 +1719,11 @@ void Spacetime::evolve()
     {
         double t = start_time + time_step * dt;
 
-        //fill out array until we've reached maximum number of stored slices, then update last element + rotate at end. Also add central chi to help diagnose BH collapse
+        //fill out array until we've reached maximum number of stored slices, then update last element + rotate at end.
         int n = (time_step > max_stored_slices - 2) ? (max_stored_slices - 2) : time_step;
-        if(store_A0)
-            A0_values[time_step] = test_ctr;
+
+        //if(store_A0)
+            //A0_values[time_step] = test_ctr;
 
         double phase_ctr, phase_last;
         if (time_step > 0) phase_last = phase_ctr;
@@ -1656,7 +1741,7 @@ void Spacetime::evolve()
 
         if (time_step % write_CN_interval == 0) //write time-dependent diagnostics to constraint_norms.dat
             constraints_file << std::setprecision (10) << start_time + dt * time_step << "   " << Ham_L2  << "   " << Mom_L2 <<  "   " << slices[n].states[0].chi << "   "
-            << test_ctr << "   "  << phase_diff   << "   " <<  /*slice_mass(current_slice_ptr)*/ M << "   "  << slice_charge(current_slice_ptr)  << "   " << dtK_L2 << "   " << omega_approx <<  endl;
+            << test_ctr << "   "  << phase_diff   << "   " <<  /*slice_mass(current_slice_ptr)*/ M << "   "  << slice_charge(current_slice_ptr)  << "   " << dtK_L2 << "   " << omega_approx << "   " << slices[n].states[0].alpha<<  endl;
 
         slices[n + 1].states.resize(n_gridpoints);
         slices[n + 1].R = R;
@@ -1666,11 +1751,15 @@ void Spacetime::evolve()
         if (make_tangherlini || slices[n].states[0].chi < 10 * min_chi)
             slices[n + 1].has_BH = 1;
 
+        if (use_CCZ4)
+            slices[n + 1].theta.resize(n_gridpoints);
+
         //evaluate intermediate RK4 quantities
         current_slice_ptr = &slices[n];
 
         s1 = slice_rhs(current_slice_ptr);
         t1 = slices[n]  + (0.5 * dt) * s1;
+
 
         compute_diagnostics(current_slice_ptr);
 
@@ -1727,22 +1816,6 @@ void Spacetime::evolve()
         }
     }
 
-}
-
-void Spacetime::fourier_transform_A0() //really just copies central A data over time to a text file so a python script can do the FFT
-{
-    std::ofstream ftransf_file{"ftransf.dat"};
-
-    if (!ftransf_file)
-    {
-        std::cerr << "ftransf.dat could not be opened for writing!\n";
-        exit(1);
-    }
-
-    for (unsigned int k = 0; k < A0_values.size();  k++)
-    {
-        ftransf_file << k * dt << "    " << A0_values[k] << endl;
-    }
 }
 
 

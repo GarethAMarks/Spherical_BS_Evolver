@@ -22,7 +22,8 @@ enum bssn_var
     v_K_phi_re,
     v_K_phi_im,
     v_alpha,
-    v_beta
+    v_beta,
+    v_theta //this isn't a BSSN var (CCZ4), but added for derivatives.
 };
 
 //a set of BSSN evolution variables at a point in spacetime
@@ -53,13 +54,15 @@ class BSSNSlice
     private:
 
     bool has_BH = 0;
+
+    bool use_CCZ4;
+
     double make_tangherlini(double m, double min_chi);
     double refinement_level;
 
-
-
     public:
         std::vector<BSSNState> states; //array of states on a BSSN time slice
+        std::vector<double> theta; //array of theta-values, only to be allocated if CCZ4 is used
 
         std::vector<int> refinement_points; //points at which refinement should be halved; to be copied from spacetime version at start of each step
 
@@ -110,6 +113,11 @@ class Spacetime
 
         double D;
 
+        bool use_CCZ4; //0 for BSSN, 1 for CCZ4
+        double c1; //CCZ4 damping params
+        double c2;
+        bool theta_off; //disable theta evolution, essentially reducing to re-formulated BSSN which seems more stable sometimes???
+
         std::vector<double> h_WW;//inverse metric components
         std::vector<double> h_ZZ;
 
@@ -142,6 +150,8 @@ class Spacetime
         std::vector<double>  S_zz_TF; //trace and trace-free parts
         std::vector<double>  S_ww_TF;
         std::vector<double>  S;
+
+        std::vector<double>  theta_Z; //CCZ4 spatial vector z-component
 
         //Hamiltionian and Momentum constraints, and determinant of h
         std::vector<double>  Ham;
@@ -212,6 +222,7 @@ class Spacetime
         bool run_quietly;
         bool read_thinshell;
         double cutoff_frac;
+        bool spatially_varying_BC;
 
         bool run_spacetime_solver;
         bool BS_perturbed;

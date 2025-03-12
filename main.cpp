@@ -7,6 +7,7 @@
 #include <sstream>
 #include "BosonStar.h"
 #include "EvolutionVariables.h"
+#include "LinearPerturbation.h"
 #include "mathutils.h"
 #include <iomanip>
 
@@ -43,7 +44,7 @@ int main()
     boson_star.write_isotropic();
     boson_star.write_field();
 
-    //boson_star.cycle_models(5000, 0.001, 0.001);
+    //boson_star.cycle_models(5000, 0.0005, 0.0005);
 
     if (boson_star.gaussian_start)
         gauss_initialize(boson_star);
@@ -56,6 +57,21 @@ int main()
     st.write_diagnostics();
 
     st.evolve();
+
+    //LinearPerturbation lp{&boson_star, 0.0, 0.0, 0.0001, 150.}; //s=0.08, A = 0.06: 0.00003, 0.18, 0.00003
+
+    //FieldState f = (FieldState){0.1, 0.2, 0.3, 0.4};
+    //PertState p = (PertState){0.1, 0.2, 0.3, 0.4};
+    //lp.test_rhs(1.0, f, p, 0.0145, 6.3);
+
+    //lp.rk4_solve(0.0145, 6.3); //0.00003519, 0.3097 // 0.0, 0.30965
+    //lp.get_best_gamma(0.000084); //0.000083
+    //lp.get_chi_sq();
+    //lp.pert_cycle(0.0001, 0.00005, 180);
+    //cout << "Noether charge perturbation is " << lp.get_noether_perturbation() << endl;
+    //lp.write_pert();
+    //lp.write_chi_results();
+    //todo: add cutoff radius
 
     //st.fourier_transform_A0();
 

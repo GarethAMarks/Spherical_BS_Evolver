@@ -56,7 +56,7 @@ class BosonStar
 
         FieldState state_RHS(const double radius, long double frequency, FieldState  s, bool asymptotic_region, bool given_A = 0);
 
-
+        double D;
         double R; //max radius of computational domain
         int n_gridpoints; // number of spatial gridpoints
         double courant_factor;
@@ -124,9 +124,10 @@ class BosonStar
 
 
 
-    //declare BSSNSlice a friend class so we can construct one from a boson_star object
-    friend class BSSNSlice;
+
+    friend class BSSNSlice;  //declare friend classes so we can construct them from a boson_star object accessing private members
     friend class Spacetime;
+    friend class LinearPerturbation;
 
 
 };

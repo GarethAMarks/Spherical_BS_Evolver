@@ -75,9 +75,9 @@ PertState LinearPerturbation::pert_rhs(double r, PertState s, double chi_sq, lon
 
 
     //EXPERIMENTAL: analytic background X''
-    double Xpp0 = 3.*Xp0*Xp0 / X0 - 2. * Xp0 / r + 4. * M_PI * (A0_sq + 4.*(A0_sq * A0_sq * A0_sq/(sigma_sq*sigma_sq) - A0_sq * A0_sq/sigma_sq )
+    double Xpp0 = 3.*Xp0*Xp0 / X0 - 2. * Xp0 / r + 4. * M_PI * (A0_sq + 4.*solitonic *(A0_sq * A0_sq * A0_sq/(sigma_sq*sigma_sq) - A0_sq * A0_sq/sigma_sq )
            + 2. * r * A0 * Ap0 + omega_sq * A0_sq * (1 - r * alphap0 / alpha0) / alpha0_sq  + r * Ap0 * A0 *
-           (24. * A0_sq*A0_sq / (sigma_sq*sigma_sq) - 16. * A0_sq / sigma_sq ) ) * X0_sq * X0
+           solitonic * (24. * A0_sq*A0_sq / (sigma_sq*sigma_sq) - 16. * A0_sq / sigma_sq ) ) * X0_sq * X0
            - 4. * M_PI * Ap0*Ap0 * (1. + r * alphap0 / alpha0) * X0;
 
     const double& F = s.F;

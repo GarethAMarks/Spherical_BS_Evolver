@@ -67,6 +67,7 @@ void BosonStar::read_parameters(bool quiet)
 
     while (getline(params, current_line))
     {
+        fill_parameter(current_line, "D = ", D, quiet);
         fill_parameter(current_line, "mu = ", mu, quiet);
         fill_parameter(current_line, "lambda = ", lambda, quiet);
         fill_parameter(current_line, "solitonic = ", solitonic, quiet);
@@ -105,19 +106,18 @@ FieldState BosonStar::state_RHS(const double radius, const long double frequency
     double r = ((radius == 0.) ? epsilon : radius);
 
     //helper terms that appear multiple times / should be zeroed at r = 0
-    double T1 = 0.5 * (s.X * s.X - 1) / r;
+    double T1 = 0.5 * (D - 3.) * (s.X * s.X - 1) / r;
     double T2 =  s.eta * s.eta + frequency * frequency * s.A * s.A / exp(2 * s.phi) ;
     double T3 = s.eta / r;
 
-    double F1 = 2. * PI * G * r * s.X * s.X;
+    double F1 = 4. * PI * G * r * s.X * s.X / (D - 2.);
 
     //zero out terms that should be zeroed at origin as eta = 0, X = 1 there
     if (radius == 0.)
         {T1 = 0; T3 = 0;}
 
     double dPhi = T1 + F1 * (T2 - V(s.A));
-
-    double eta_corr = (radius == 0) ? (1. / 3.) : 1.;
+    double eta_corr = (radius == 0) ? (1. / (D - 1.)) : 1.;
 
     //in the asymptotic region, evolve phi and X normally but do not update A, eta (these will be hard-coded to asymptotic expressions)
     if (asymptotic_region)
@@ -128,14 +128,14 @@ FieldState BosonStar::state_RHS(const double radius, const long double frequency
     {
         //return RHS of field state variables outside of asymptotic region, A excepted
         return  (FieldState) {0, s.X * ( F1 * (T2 + V(s.A)) - T1 ), dPhi,
-        eta_corr *(-2. * T3 - s.eta * dPhi + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi))) };
+        eta_corr *(-(D - 2.) * T3 - s.eta * dPhi + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi))) };
     }
 
     else
     {
         //return RHS of field state variables outside of asymptotic region
         return  (FieldState) {s.X * s.eta, s.X * ( F1 * (T2 + V(s.A)) - T1 ), dPhi,
-        -2. * T3 - s.eta * dPhi + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi))};
+        eta_corr * (-(D - 2.) * T3 - s.eta * dPhi + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi)))};
     }
 
    //test for playing with RK4 convergence-- seems that 1/r terms can spoil 4th-order convergence (but we still get tight 3rd-order)
@@ -197,7 +197,9 @@ double BosonStar::m(int j)
             cerr << "ERROR: invalid index passed to m(r)" << endl;
             exit(1);
         }
-    return radius_array[j]  / 2. * (1 - (1 / (state[j].X * state[j].X)));
+    //return pow(radius_array[j], D - 3.)  / 2. * (1 - (1 / (state[j].X * state[j].X))); //schwarzchild mass
+
+    return (D - 2.) * pow(M_PI, 0.5 * (D - 3.)) * pow(radius_array[j], D - 3.)   * (1 - (1 / (state[j].X * state[j].X))) / (8. * tgamma(0.5 * (D - 1.))); //adm mass???
 }
 
 //writes field values to BSdata.dat
@@ -374,6 +376,7 @@ int BosonStar::find_last_minimum()
     return -1; //signifies that next function should skip
 }
 //fill up the solution in the region after the blowup point, using asymptotic matching for A and eta and integrating phi and X. Returns 1 if successful
+//TODO: D != 4 asymptotics??
 bool BosonStar:: fill_asymptotic(bool quiet)
 {
 
@@ -508,10 +511,11 @@ double BosonStar::get_noether_charge()
     {
         double J_0 = 2 * omega * state[j].A * state[j].A; //0th component of the conserved current covector
         double r = j * dr;
-        Q += r * r * dr * state[j].X * J_0 * exp(-1. * state[j].phi);
+        Q += pow(r, D - 2.) * dr * state[j].X * J_0 * exp(-1. * state[j].phi);
     }
 
-    Q *= 2 * M_PI;
+    if (D == 4.2) Q *= 2 * M_PI;
+    else Q *=  pow(M_PI, 0.5 * (D - 1.)) / tgamma(0.5 * (D - 1.));
     return Q;
 }
 
@@ -559,7 +563,7 @@ double BosonStar::r_areal(int j_iso)
         //cerr << "WARNING: extrapolating to find areal radius corresponding to isotropic index " << j_iso << endl;
         //exit(1);
 
-        return r_iso + M + M * M / (4. * r_iso);
+        return r_iso + M + M * M / (4. * r_iso); //maybe generalize to D != 4, but might not be necessary...
     }
 
     //upper and lower bounds of r_areal
@@ -600,8 +604,6 @@ double BosonStar::r_areal(int j_iso)
 void BosonStar::fill_isotropic_arrays()
 {
     double dr = R / (n_gridpoints - 1);
-
-
 
     double f1, f2, f3, f4; //, g1, g2, g3, g4; //intermediate rk4 values
 
@@ -701,6 +703,7 @@ void BosonStar::fill_isotropic_arrays()
         double l_frac = 0.8;
         double u_frac = 0.9;
 
+        //should fix for D > 4... however can always just cut off at r = 0.75R or more beforehand.
         if (j > n_gridpoints * l_frac)
         {
             double portion_crossed = min((j - n_gridpoints * l_frac) / (n_gridpoints * (u_frac - l_frac)), 1.);
@@ -986,14 +989,13 @@ void BosonStar::read_thinshell()
         }
     }
 
-    //read in phi-values, accounting for offset and (crudely) computing eta while we're at it
+    //read in phi-values, accounting for offset
     while (std::getline(phi_file, linePhi))
     {
         std::istringstream iss(linePhi);
         if(iss >> r_vals[j] >> phi_vals[j] )
         {
             phi_vals[j] -= phi_offset; //enforce phi(infty) = 0
-            //state[j].eta = (j == 0) ? 0 : (A_vals[j] - A_vals[j - 1] / ( r_vals[j] - r_vals[j - 1] ) / state[j].X ); //wrong currently bc of X
             j++;
 
         }
@@ -1003,7 +1005,6 @@ void BosonStar::read_thinshell()
     //interpolate to fill uniform grid with A, phi, eta
     for (int k = 0; k < n_gridpoints * thinshell_res_fac - thinshell_res_fac + 1; k++)
     {
-
         radius_array[k] = dr * k;
 
         if (uniform_data)
@@ -1060,7 +1061,7 @@ void BosonStar::read_thinshell()
     if (perturb)
         add_perturbation(perturb_amp, perturb_spread, perturb_center);
 
-    fill_given_A(omega);
+    fill_given_A(omega); // maybe disable for unperturbed?
 
     //return to original resolution
     vector<FieldState> hi_res_state = state;
@@ -1176,12 +1177,9 @@ void BosonStar::add_perturbation(double a, double k, double center)
     double k2 = k*k;
     pert_array.resize(num_points);
 
-
-
    // vector<double> phi_vals(num_points);
     //for (int j = 0; j < num_points; j++)
         //phi_vals[j] = state[j].phi;
-
 
     //apply perturbation to A
     for (int j = 0; j < num_points; j++)
