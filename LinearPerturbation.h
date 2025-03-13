@@ -21,35 +21,6 @@ using namespace std;
 //class to hold constructed linear perturbations of a background boson star, a pointer to which is stored as a member variable and can be used in constructor
 class LinearPerturbation
 {
-    private:
-        std::vector<PertState> pert; //array to hold the perturbations
-
-        //inherited BS params
-        double sigma;
-        double R;
-        int n_gridpoints;
-        double dr;
-        bool solitonic;
-        long double omega;
-        double A_central;
-
-        double chi_sq0; // initial guess for characteristic frequency of radial oscillations
-        long double gamma0; //initial guess for undetermined constant affecting central initial values
-        double chi_epsilon;
-        double chi_range;
-
-        double solved_chi_sq;
-        long double solved_gamma;
-
-        int blowup_point;
-
-        double noether_perturbation;
-        double cutoff_radius; //radius outside of which to look for zero crossings
-
-        PertState pert_rhs (double r, PertState s, double chi_sq, long double gamma); //returns rhs of the radial ODEs that F, L satisfy
-        int count_zero_crossings();
-
-
     public:
         BosonStar* bg; //pointer to the background boson star
 
@@ -66,6 +37,39 @@ class LinearPerturbation
         void pert_cycle(double A0, double dA, int n_stars);
         void write_chi_results();
         PertState test_rhs (double r, FieldState f, PertState s, double chi_sq, long double gamma);
+
+    private:
+        std::vector<PertState> pert; //array to hold the perturbations
+
+
+        double chi_sq0; // initial guess for characteristic frequency of radial oscillations
+        long double gamma0; //initial guess for undetermined constant affecting central initial values
+
+        //inherited BS params
+        int n_gridpoints;
+        double R;
+        double sigma;
+        double chi_range;
+        bool solitonic;
+        long double omega;
+        double A_central;
+        double dr;
+
+        double chi_epsilon;
+        double cutoff_radius; //radius outside of which to look for zero crossings
+
+
+        double solved_chi_sq;
+        long double solved_gamma;
+
+        int blowup_point;
+
+        double noether_perturbation;
+
+        PertState pert_rhs (double r, PertState s, double chi_sq, long double gamma); //returns rhs of the radial ODEs that F, L satisfy
+        int count_zero_crossings();
+
+
 
 };
 

@@ -99,7 +99,7 @@ void fill_param_array (string& current_line, string line_start, std::vector<T>& 
         }
         std::cout << "Read in " << line_start;
 
-        int k = 0;
+        unsigned int k = 0;
 
         while (!quiet && k < param_array.size() )
         {

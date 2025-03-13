@@ -63,7 +63,6 @@ inline BSSNState operator/(const BSSNState& s, double c)
 BSSNSlice operator+(const BSSNSlice& slice1, const BSSNSlice& slice2)
 {
     BSSNSlice return_slice;
-
     unsigned int length = slice1.states.size();
 
     if (length != slice2.states.size() || slice1.R != slice2.R)
@@ -83,7 +82,7 @@ BSSNSlice operator+(const BSSNSlice& slice1, const BSSNSlice& slice2)
     return_slice.use_CCZ4 = slice1.use_CCZ4;
     return_slice.refinement_points = slice1.refinement_points;
 
-    for (int j = 0; j < length; j++)
+    for (unsigned int j = 0; j < length; j++)
     {
         return_slice.states[j] = slice1.states[j] + slice2.states[j];
 
@@ -1270,13 +1269,13 @@ void Spacetime:: write_diagnostics()
         const double& phi_re = current_slice_ptr->states[j].phi_re;
         const double& phi_im = current_slice_ptr->states[j].phi_im;
 
-        const double& chi = current_slice_ptr->states[j].chi;
-        const double& c_chris_Z = current_slice_ptr->states[j].c_chris_Z;
+        //const double& chi = current_slice_ptr->states[j].chi;
+        //const double& c_chris_Z = current_slice_ptr->states[j].c_chris_Z;
 
         double A = sqrt(phi_re * phi_re + phi_im * phi_im);
 
         data_file << std::setprecision (10) <<  dr * j << "   " << Ham[j] << "    " << Mom_Z[j]<< "    " << det_h[j]  << "    " << aux_test[j]
-        << "    " << A << "    "  << d_zz(v_chi, j) << "    "  << d_zz(v_alpha, j)  << "    " << d_z(v_phi_re,j) << endl;
+        << "    " << A /*<< "    "  << d_zz(v_chi, j) << "    "  << d_zz(v_alpha, j)  << "    " << d_z(v_phi_re,j)*/ << endl;
     }
 
     //cout << "Wrote diagnostics" << endl;
@@ -1520,7 +1519,7 @@ void Spacetime::add_spacetime_pert(double a, double k, double center)
     for (int j = 0; j < n_gridpoints; j++)
     {
         double phase = std::arg( std::complex<double>(s.states[j].phi_re, s.states[j].phi_im));
-        double K_phase = std::arg( std::complex<double>(s.states[j].K_phi_re, s.states[j].K_phi_im));
+        //double K_phase = std::arg( std::complex<double>(s.states[j].K_phi_re, s.states[j].K_phi_im));
         double r = j * dr;
 
         s.states[j].phi_re += cos(phase) * a * exp ( -pow (r - center, 2.) / k2);

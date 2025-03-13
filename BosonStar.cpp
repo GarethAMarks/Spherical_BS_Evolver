@@ -128,14 +128,14 @@ FieldState BosonStar::state_RHS(const double radius, const long double frequency
     {
         //return RHS of field state variables outside of asymptotic region, A excepted
         return  (FieldState) {0, s.X * ( F1 * (T2 + V(s.A)) - T1 ), dPhi,
-        eta_corr *(-(D - 2.) * T3 - s.eta * dPhi + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi))) };
+        static_cast<double>(eta_corr *(-(D - 2.) * T3 - s.eta * dPhi + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi)))) };
     }
 
     else
     {
         //return RHS of field state variables outside of asymptotic region
         return  (FieldState) {s.X * s.eta, s.X * ( F1 * (T2 + V(s.A)) - T1 ), dPhi,
-        eta_corr * (-(D - 2.) * T3 - s.eta * dPhi + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi)))};
+        static_cast<double>(eta_corr * (-(D - 2.) * T3 - s.eta * dPhi + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi))))};
     }
 
    //test for playing with RK4 convergence-- seems that 1/r terms can spoil 4th-order convergence (but we still get tight 3rd-order)
@@ -398,14 +398,14 @@ bool BosonStar:: fill_asymptotic(bool quiet)
 
     double phi_match = state[j_match].phi; //match values in current gauge
     double A_match = state[j_match].A;
-    double eta_match = state[j_match].eta;
-    double deta_match = (state[j_match].eta - state[j_match - 1].eta) / dr; //estimate for derivative of eta at r_match, used to crudely fit exponential falloff for eta to first order
+    //double eta_match = state[j_match].eta;
+    //double deta_match = (state[j_match].eta - state[j_match - 1].eta) / dr; //estimate for derivative of eta at r_match, used to crudely fit exponential falloff for eta to first order
 
     //ensures continuity of A
     double A_factor = A_match * exp(sqrt( 1 - pow(omega / exp(phi_match), 2)) * r_match) * r_match;
 
     //fit exponential of form B * exp(-k * r) to eta in exponential region. If eta is already zero, just keep it there (will likely not happen in practice)
-    double k, B;
+    /*double k;  , B;
     if (eta_match != 0.)
     {
         k = abs(deta_match / eta_match);
@@ -414,7 +414,7 @@ bool BosonStar:: fill_asymptotic(bool quiet)
     else
     {
         k = 0.; B = 0.;
-    }
+    }*/
 
     FieldState s1, s2, s3, s4;
     for (int j = j_match; j < n_gridpoints - 1; j++)
@@ -1081,68 +1081,6 @@ void BosonStar::read_thinshell()
     cout << "Successfully read thinshell model with central amplitude A = " << A_central << ", mass M = " << M << ", noether charge N = " << noether_charge <<  ", and binding energy E = " << binding_energy << endl;
 }
 
-
-
-
-
-void BosonStar::read_isotropic_data()
-{
-    string A_filename = "urA.dat";
-    string X_filename = "urX.dat";
-    string phi_filename = "urPhi.dat";
-
-    ifstream A_file(A_filename);
-    ifstream X_file(X_filename);
-    ifstream phi_file(phi_filename);
-
-    if (!A_file.is_open() ||!phi_file.is_open() || !X_file.is_open())
-    {
-        cerr << "Error reading ur*.dat files! Maybe get rid of read_isotropic_data()?" << endl;
-        exit(1);
-    }
-
-    int line_count = 0;
-    string line1, lineA, linePhi, lineX;
-
-    while (std::getline(A_file, line1))
-        ++line_count;
-
-    n_gridpoints = line_count;
-    A_iso_array.resize(n_gridpoints);
-    phi_iso_array.resize(n_gridpoints);
-    psi_iso_array.resize(n_gridpoints);
-    radius_array.resize(n_gridpoints);
-
-    int j = 0;
-    double junk;
-
-    while (std::getline(A_file, lineA))
-    {
-        std::istringstream iss(lineA);
-        if(iss >> radius_array[j] >> A_iso_array[j])
-            j++;
-    }
-
-    j = 0;
-
-    while (std::getline(X_file, lineX))
-    {
-        std::istringstream iss(lineX);
-        if(iss >> radius_array[j] >> psi_iso_array[j])
-            j++;
-    }
-
-    j = 0;
-
-    while (std::getline(phi_file, linePhi))
-    {
-        std::istringstream iss(linePhi);
-        if(iss >> radius_array[j] >> phi_iso_array[j])
-            j++;
-    }
-}
-
-
 //ensures all field arrays are zero
 void BosonStar::clear_BS()
 {
@@ -1173,7 +1111,6 @@ void BosonStar::add_perturbation(double a, double k, double center)
 {
 
     int num_points = state.size();
-    double dr = R / (num_points - 1);
     double k2 = k*k;
     pert_array.resize(num_points);
 
@@ -1212,7 +1149,7 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
     int N_gridpoints_init = n_gridpoints;
 
     //double refinement whenever we pass a refine_threshold
-    int threshold_counter = 0;
+    unsigned int threshold_counter = 0;
 
     // mini BS: {0.3, 0.375, 0.425, 0.475, 0.525, 0.575, 0.62, 0.66, 0.7, 0.73} is good with n_gridpoints = 2000 from patams file
     //sigma = 0.2: {0.25,0.325,0.375, 0.425, 0.475, 0.525, 0.575};
@@ -1221,7 +1158,7 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
     //bool passed_last_threshold; //set to 1 after last threshold reached
 
     //frequency from previous guess for use in update
-    long double omega_prev = frequency_guess;
+    //long double omega_prev = frequency_guess;
 
     //holds all unrescaled omega / A / phi[0] values yet computed-
     vector<long double> omega_values(n_stars);
@@ -1272,7 +1209,7 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
                 }
 
                 alpha_central = exp(2 * state[0].phi - phi0_prev);
-                omega_prev = omega;
+                //omega_prev = omega;
                 phi0_prev = state[0].phi;
 
             }
