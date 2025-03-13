@@ -1,48 +1,55 @@
 #BS params
-mu = 1.0
+D = 4
+mu = 1.0 
 lambda = 0
 solitonic = 1
 G = 1.0
-sigma = 0.06
+sigma = 0.08
 eigen = 0
 alpha_central = 0.5
-A_central = 0.01
+A_central = 0.17
 frequency_guess = 1.2
 freq_epsilon = 1e-19
 isotropic = 1
-r_match_fac = 0.75
+r_match_fac = 0.765
 
 #Perturbation params
 perturb = 0
-perturb_amp = 0.07
-perturb_spread = 4.2
-perturb_center = 0
+perturb_amp = 0.001
+perturb_spread = 2.0
+perturb_center = 10
 mirror_gaussian = 0
-gaussian_start = 1
+gaussian_start = 0
 enforced_freq = 5.0
 
 #grid params
-R = 2000
-n_gridpoints = 30000
+R = 200
+n_gridpoints = 2000
 courant_factor = 0.4
-stop_time = 100000.08
+stop_time = 150000.08
 
 BS_resolution_factor = 1 #raise BS resolution in ID solver by this factor
 
 refinement_points = -1 1000 2500 #after these points, effective resolution will be halved. Set first value as 0 or negative for no refinement
 
 #evolution parameters
-run_spacetime_solver = 1
+run_spacetime_solver = 0
 min_chi = 0.0001
 min_z = 0.00001
-max_stored_slices = 50
+max_stored_slices = 5
 
-sigma_BSSN = 1.0
-eta = 1.0
+sigma_BSSN = 0.3333
+eta = 0.5
 gamma_fac = 0.75
 damping_factor = 0.0
-evolve_shift = 0
-only_BS_violation = 1
+evolve_shift = 1
+only_BS_violation = 0
+spatially_varying_BC = 1
+
+use_CCZ4 = 1 #0 for BSSN, 1 for CCZ4
+c1 = 0.3
+c2 = 0.0
+theta_off = 0
 
 #output/checkpointing parameters
 start_time = 0
@@ -53,8 +60,9 @@ write_CN_interval = 5
 run_quietly = 0
 make_tangherlini = 0
 store_A0 = 1
-read_thinshell = 0 #if true will read outputs of Uli's thinshell code
+read_thinshell = 1 #if true will read outputs of Uli's thinshell code
 thinshell_res_fac = 1
+
 uniform_data = 1 #if true will expect data smoothed + interpolated onto uniform grid via smooth_and_interp.py
 cutoff_frac = 0.75
 
