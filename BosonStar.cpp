@@ -927,7 +927,7 @@ void BosonStar::read_thinshell()
     radius_array.resize(line_count);
 
     if (state.size() != radius_array.size())
-        cout <<"WARNING: line count does not agree with state size; likely a problem with thinshell_res_fac (try making 1)" << endl;
+        cout <<"WARNING: line count = " << radius_array.size() << " does not agree with state size = " << state.size() << "; likely a problem with thinshell_res_fac (try making 1)" << endl;
 
     cout<< state.size() << endl;
 

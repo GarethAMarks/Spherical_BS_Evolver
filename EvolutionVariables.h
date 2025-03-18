@@ -116,7 +116,10 @@ class Spacetime
         bool use_CCZ4; //0 for BSSN, 1 for CCZ4
         double c1; //CCZ4 damping params
         double c2;
-        bool theta_off; //disable theta evolution, essentially reducing to re-formulated BSSN which seems more stable sometimes???
+        bool theta_off; //disable theta evolution, essentially reducing to re-formulated BSSN-- deprecated now
+
+        bool shock_gauge; //enables shock-avoiding gauge with kappa = shock_fac
+        double shock_fac;
 
         std::vector<double> h_WW;//inverse metric components
         std::vector<double> h_ZZ;

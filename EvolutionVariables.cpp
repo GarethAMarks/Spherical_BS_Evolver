@@ -954,7 +954,10 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
                                + 0.25 * alpha * h_ZZ[j] * d_z_chi * d_z_phi_im;
 
         //Gauge variable update using moving puncture evolution, unless evolve_shift is off in which case do not update beta
-        rhs.states[j].alpha = beta * d_z_alpha - 2. * pow(alpha, 1.) * K;
+
+        double f = (shock_gauge) ? (1. + shock_fac / (alpha * alpha) ): (2. / alpha); //bona-masso f
+
+        rhs.states[j].alpha = beta * d_z_alpha - f * pow(alpha, 2.) * K;
         rhs.states[j].beta =  (evolve_shift)? (beta * d_z_beta + gamma_fac * c_chris_Z - eta * beta): 0.;
 
         //add supplementary terms if CCZ4 evolution is on
@@ -978,7 +981,8 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
                                         - 2. * c1 * alpha * theta_Z[j] / chi - 4. * alpha * K * theta_Z[j] / ((D - 1.) * chi)
                                         + sigma_BSSN * theta_Z[j]  * ((3. - D) * d_z_beta + 2. * n * beta_z) / chi;
 
-            rhs.states[j].alpha += 4. * alpha * theta;
+            rhs.states[j].alpha +=  2. * alpha * alpha * f * theta; //4. * alpha * theta; //corrects for K -> K - 2 * theta in 1+log slicing
+            //rhs.states[j].beta +=  (evolve_shift)? ( -2. * gamma_fac * theta_Z[j] / chi): 0.; //replace theta hat -> theta tilde in CCZ4 moving puncture gauge; seems to produce instability...
 
             if (!theta_off)
                 rhs.theta[j] = beta * d_z(v_theta, j) + 0.5 * alpha * (chi * h_ZZ[j] * R_zz[j] - h_ZZ[j] * h_ZZ[j] * A_zz * A_zz + n * K * K / (D - 1.)
@@ -1018,11 +1022,17 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
                 }*/
 
                 double d_mult = damping_factor * (pow(dr * res_fac, 5.) / 64. );
-
                 BSSNState damping_corr = d_mult * sevenPointDeriv(dr * res_fac, 6, *sts[0], *sts[1], *sts[2], *sts[3],*sts[4], *sts[5], *sts[6]);
-                //BSSNState damping_corr = d_mult * sevenPointDeriv(dr, 6, slice_ptr->states[J[0]], slice_ptr->states[J[1]], slice_ptr->states[J[2]], slice_ptr->states[J[3]], slice_ptr->states[J[4]], slice_ptr->states[J[5]], slice_ptr->states[J[6]]);
 
                 rhs.states[j] = rhs.states[j] + damping_corr;
+
+                if (use_CCZ4)
+                {
+                    vector<double*> ths = {&slice_ptr->theta[J[0]], &slice_ptr->theta[J[1]], &slice_ptr->theta[J[2]], &slice_ptr->theta[J[3]], &slice_ptr->theta[J[4]], &slice_ptr->theta[J[5]], &slice_ptr->theta[J[6]]};
+                    double theta_corr = d_mult * sevenPointDeriv<double>(dr * res_fac, 6, *ths[0], *ths[1], *ths[2], *ths[3],*ths[4], *ths[5], *ths[6]);
+                    rhs.theta[j] = rhs.theta[j] + theta_corr;
+
+                }
             }
     }
 
@@ -1321,6 +1331,8 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "c1 = ", c1, quiet);
         fill_parameter(current_line, "c2 = ", c2, quiet);
         fill_parameter(current_line, "theta_off = ", theta_off, quiet);
+        fill_parameter(current_line, "shock_gauge = ", shock_gauge, quiet);
+        fill_parameter(current_line, "shock_fac = ", shock_fac, quiet);
 
         fill_param_array(current_line, "refinement_points = ", refinement_points, quiet);
 

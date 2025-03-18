@@ -23,8 +23,8 @@ gaussian_start = 0
 enforced_freq = 5.0
 
 #grid params
-R = 200
-n_gridpoints = 2000
+R = 300
+n_gridpoints = 2400
 courant_factor = 0.4
 stop_time = 150000.08
 
@@ -38,22 +38,25 @@ min_chi = 0.0001
 min_z = 0.00001
 max_stored_slices = 5
 
-sigma_BSSN = 0.3333
-eta = 0.5
+sigma_BSSN = 0.333333
+eta = 0.25
 gamma_fac = 0.75
 damping_factor = 0.0
 evolve_shift = 1
 only_BS_violation = 0
 spatially_varying_BC = 1
 
+shock_gauge = 1 #enables / disables shock-avoiding gauge
+shock_fac = 2.0
+
 use_CCZ4 = 1 #0 for BSSN, 1 for CCZ4
-c1 = 0.3
+c1 = 0.05
 c2 = 0.0
 theta_off = 0
 
 #output/checkpointing parameters
 start_time = 0
-checkpoint_time = 1000
+checkpoint_time = 2000
 
 write_interval = 2
 write_CN_interval = 5
