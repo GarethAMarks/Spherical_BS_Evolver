@@ -151,7 +151,7 @@ int LinearPerturbation::count_zero_crossings()
     for (int j = 1; j < max_search_val; j++)
     {
         if ((pert[j].L == 0.) || (pert[j].L > 0. && pert[j - 1].L < 0.) || (pert[j].L < 0. && pert[j - 1].L > 0.) )
-            {zero_crossings++; /*cout << j * dr << ", " << pert[j].L  << "  " << pert[j - 1].L   << endl;*/}
+            zero_crossings++;
     }
 
     //cout << "\n" << zero_crossings << " zero crossings found" << endl;
@@ -352,4 +352,27 @@ PertState LinearPerturbation::test_rhs (double r, FieldState f, PertState s, dou
     return p;
 }
 
+//read params specific to computing linear perturbations
+void LinearPerturbation::read_parameters(bool quiet)
+{
+    ifstream params{ "BSParams.par" };
+
+    // Print an error and exit if file cannot open
+    if (!params)
+    {
+        std::cerr << "Could not open BSParams.par\n";
+        abort();
+    }
+
+    string current_line{};
+
+    while (getline(params, current_line))
+    {
+        fill_parameter(current_line, "chi_sq0 = ", chi_sq0, quiet);
+        fill_parameter(current_line, "gamma0 = ", gamma0, quiet);
+        fill_parameter(current_line, "chi_range = ", chi_range, quiet);
+        fill_parameter(current_line, "chi_epsilon = ", chi_epsilon, quiet);
+        fill_parameter(current_line, "cutoff_radius = ", cutoff_radius, quiet);
+    }
+}
 #endif /* LINEARPERTURBATION_CPP_ */

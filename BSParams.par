@@ -2,18 +2,18 @@
 D = 4
 mu = 1.0 
 lambda = 0
-solitonic = 1
-G = 1.0
-sigma = 0.08
-eigen = 0
-alpha_central = 0.5
+solitonic = 1 #if false will use mini BS potential
+G = 1.0 #keep = 1 
+sigma = 0.06
+eigen = 0 #0 for ground state BS
+alpha_central = 0.5 #starting central lapse, will be rescaled
 A_central = 0.17
 frequency_guess = 1.2
 freq_epsilon = 1e-19
-isotropic = 1
-r_match_fac = 0.765
+isotropic = 0
+r_match_fac = 0.765 #cutoff radius for BS construction
 
-#Perturbation params
+#Dynamical perturbation params
 perturb = 0
 perturb_amp = 0.001
 perturb_spread = 2.0
@@ -23,8 +23,8 @@ gaussian_start = 0
 enforced_freq = 5.0
 
 #grid params
-R = 300
-n_gridpoints = 2400
+R = 267 #grid radius
+n_gridpoints = 2670
 courant_factor = 0.4
 stop_time = 150000.08
 
@@ -37,22 +37,23 @@ run_spacetime_solver = 0
 min_chi = 0.0001
 min_z = 0.00001
 max_stored_slices = 5
+stop_on_migrate = 0 #if true, exit with message when central amplitude migrates by >10%
 
-sigma_BSSN = 0.333333
-eta = 0.25
+sigma_BSSN = 0.333333 #BSSN damping; in CCZ4, doubles as c3 / 3
+eta = 1.0
 gamma_fac = 0.75
 damping_factor = 0.0
 evolve_shift = 1
 only_BS_violation = 0
 spatially_varying_BC = 1
 
-shock_gauge = 1 #enables / disables shock-avoiding gauge
-shock_fac = 2.0
+shock_gauge = 0 #if true enables shock-avoiding gauge evolution, Bonsa-Masso with f(alpha) = 1 + shock_fac / alpha^2
+shock_fac = 2.0 
 
-use_CCZ4 = 1 #0 for BSSN, 1 for CCZ4
-c1 = 0.05
+use_CCZ4 = 0 #0 for BSSN, 1 for CCZ4
+c1 = 1.0
 c2 = 0.0
-theta_off = 0
+theta_off = 0 #disables CCZ4 theta evolution; probably keep this off now
 
 #output/checkpointing parameters
 start_time = 0
@@ -67,6 +68,21 @@ read_thinshell = 1 #if true will read outputs of Uli's thinshell code
 thinshell_res_fac = 1
 
 uniform_data = 1 #if true will expect data smoothed + interpolated onto uniform grid via smooth_and_interp.py
-cutoff_frac = 0.75
+cutoff_frac = 0.75 
+
+#Linear Perturbation params
+pert_only = 0 #toggles computing linear perturbation (1) / dynamical evolution (0)
+
+chi_sq0 = 0.0
+gamma0 = 0.1
+chi_range = 0.1
+chi_epsilon = 1e-8
+cutoff_radius = 50
+
+#model cycling params: for model construction/ linear perturbations
+cycle_only = 0 #if 1 will only cycle thru model construction. Priority over pert_only!
+A0 = 0.0001 #initial central amp
+dA = 0.0001 #step central amp
+n_stars = 150 #number of BS models to cycle thru
 
 

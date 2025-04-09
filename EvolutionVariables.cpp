@@ -1113,22 +1113,9 @@ void Spacetime::make_A_traceless(BSSNSlice* slice_ptr)
 //TODO: make these work for D =/= 4, and MR if this gets working
 double Spacetime::slice_mass(BSSNSlice* slice_ptr)
 {
-
-    //const double& chi = slice_ptr->states[n_gridpoints - 1].chi;
-    //const double& h_zz = slice_ptr->states[n_gridpoints - 1].h_zz;
-    //const double& h_ww = slice_ptr->states[n_gridpoints - 1].h_ww;
-
-    //double h_ZZ = 1 / h_zz;
-    //double h_WW = 1 / h_ww;
-
-
-    //const double Z = slice_ptr->R;
     const double n = D - 2;
-    //return 2 * slice_ptr->R * (pow (chi, -0.25) - 1.); //assumes isotropic Schawrzchild
-
-    //ADM mass. maybe replace w/ one-sided stencils for d_z
-    //return 0.25 * n * pow(chi, -0.5) * Z * ( Z * (h_ZZ - h_WW) - Z * h_ZZ * h_WW * d_z(v_h_ww, n_gridpoints - 3) + Z * h_ZZ * d_z(v_chi, n_gridpoints - 3) / chi);
     double mass = 0;
+
     for (int j = 0; j <  0.95 * n_gridpoints - 1; j++)
     {
         if (!active_points[j]) //perform no computations on inactive points
@@ -1136,15 +1123,20 @@ double Spacetime::slice_mass(BSSNSlice* slice_ptr)
 
         double z = dr * j;
         const double& chi = slice_ptr->states[j].chi;
-        mass += -0.25 * dr * (Ham[j]- h_ZZ[j] * chi * R_zz[j] - n * h_WW[j] * chi * R_ww[j]) * z * z * pow(chi, -1.25) ; //-1.25 is spurious!
+
+        if (D == 4.)
+            mass += -0.25 * dr * (Ham[j]- h_ZZ[j] * chi * R_zz[j] - n * h_WW[j] * chi * R_ww[j]) * z * z * pow(chi, -1.25) ; //-1.25 is spurious! Still haven't figured out why this works...
+        else
+             mass += -0.125 * pow(M_PI, 0.5 * (D - 3.))  * dr * (Ham[j]- h_ZZ[j] * chi * R_zz[j] - n * h_WW[j] * chi * R_ww[j]) * z * z * pow(chi, -1.25 - 0.5 * (D - 4.)) / tgamma(0.5 * (D - 1.));
     }
     return mass;
 }
 
 double Spacetime::slice_charge(BSSNSlice* slice_ptr)
 {
-    //const double n = D - 2;
+    const double n = D - 2;
     double charge = 0;
+
     for (int j = 0; j <  0.95 * n_gridpoints - 1; j++)
     {
         if (!active_points[j]) //perform no computations on inactive points
@@ -1158,7 +1150,10 @@ double Spacetime::slice_charge(BSSNSlice* slice_ptr)
         const double& K_phi_re = slice_ptr->states[j].K_phi_re;
         const double& K_phi_im = slice_ptr->states[j].K_phi_im;
 
-        charge += -8 * M_PI  * dr * (phi_re * K_phi_im - phi_im * K_phi_re) * z * z * pow(chi, 0.5 * (1. - D));
+        if (D == 4.)
+            charge += -8 * M_PI  * dr * (phi_re * K_phi_im - phi_im * K_phi_re) * z * z * pow(chi, 0.5 * (1. - D));
+        else
+             charge += -4. * pow(M_PI, 0.5 * (D - 1.)) * dr * (phi_re * K_phi_im - phi_im * K_phi_re) * pow(z, n) * pow(chi, 0.5 * (1. - D)) / tgamma(0.5 * (D - 1.));
     }
     return charge;
 }
@@ -1245,14 +1240,7 @@ void Spacetime:: write_current_slice(std::string file_name)
         << "   " << s.states[j].A_ww << "    " << s.states[j].K << "    " << s.states[j].c_chris_Z  << "    " << s.states[j].phi_re << "    " << s.states[j].phi_im
         << "   " << s.states[j].K_phi_re << "    " << s.states[j].K_phi_im << "    " << s.states[j].alpha << "    " << s.states[j].beta << "    " << theta0 << endl;
     }
-
 }
-
-/*
-void Spacetime::read_isotropic_data()
-{
-
-}*/
 
 //writes diagnostic quantities to output file
 void Spacetime:: write_diagnostics()
@@ -1333,6 +1321,8 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "theta_off = ", theta_off, quiet);
         fill_parameter(current_line, "shock_gauge = ", shock_gauge, quiet);
         fill_parameter(current_line, "shock_fac = ", shock_fac, quiet);
+        fill_parameter(current_line, "shock_gauge = ", shock_gauge, quiet);
+        fill_parameter(current_line, "stop_on_migrate = ", stop_on_migrate, quiet);
 
         fill_param_array(current_line, "refinement_points = ", refinement_points, quiet);
 
@@ -1712,7 +1702,7 @@ void Spacetime::evolve()
     int num_timesteps = ceil(stop_time / dt);
     int last_checkpoint_time = 0;
 
-   // if(store_A0) A0_values.resize(num_timesteps);
+    // if(store_A0) A0_values.resize(num_timesteps);
 
     //write constraint norms at each timestep to file
     std::ofstream constraints_file{"constraint_norms.dat"};
@@ -1723,6 +1713,10 @@ void Spacetime::evolve()
     }
 
     cout <<" \n Will evolve with " << num_timesteps << " time steps \n" << endl;
+
+    double A0 = test_ctr;
+
+    //cout << A0 << endl;
 
     //s_i are returned RHS's, t represents temporary RHS + current_slice quantities that must be stored so derivatives can be accessed
     BSSNSlice s1, s2, s3, s4, t1, t2, t3;
@@ -1771,8 +1765,7 @@ void Spacetime::evolve()
         s1 = slice_rhs(current_slice_ptr);
         t1 = slices[n]  + (0.5 * dt) * s1;
 
-
-        compute_diagnostics(current_slice_ptr);
+        compute_diagnostics(current_slice_ptr); //do this here so current_slice_ptr is in right place and auxiliary quantities computed
 
         current_slice_ptr = &t1; //must update current_slice_ptr before calling slice_rhs or derivatives will not work properly! Should consider better approach...
         s2 = slice_rhs(current_slice_ptr);
@@ -1823,6 +1816,13 @@ void Spacetime::evolve()
         if (isnan(slices[n + 1].states[0].chi))
         {
             cout << "Central chi became nan on step " << time_step << endl;
+            exit(1);
+        }
+
+        //if stop_on_migrate enabled, exit when central amplitude changes by more than 10%
+        if (stop_on_migrate && abs(A0 - test_ctr) > 0.1 * A0)
+        {
+            cout << "Migration occurred on time step  " << time_step <<" at time t = " << time_step * dt << endl;
             exit(1);
         }
     }

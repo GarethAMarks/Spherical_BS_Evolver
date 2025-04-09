@@ -121,6 +121,8 @@ class Spacetime
         bool shock_gauge; //enables shock-avoiding gauge with kappa = shock_fac
         double shock_fac;
 
+        bool stop_on_migrate;
+
         std::vector<double> h_WW;//inverse metric components
         std::vector<double> h_ZZ;
 

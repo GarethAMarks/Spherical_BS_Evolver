@@ -93,12 +93,17 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "perturb_center = ", perturb_center, quiet);
         fill_parameter(current_line, "mirror_gaussian = ", mirror_gaussian, quiet);
         fill_parameter(current_line, "gaussian_start = ", gaussian_start, quiet);
+
         fill_parameter(current_line, "enforced_freq = ", enforced_freq, quiet);
+        fill_parameter(current_line, "pert_only = ", pert_only, quiet);
+        fill_parameter(current_line, "cycle_only = ", cycle_only, quiet);
+        fill_parameter(current_line, "A0 = ", A0, quiet);
+        fill_parameter(current_line, "dA = ", dA, quiet);
+        fill_parameter(current_line, "n_stars = ", n_stars, quiet);
     }
 }
 
 //right-hand side of the EKG system of equations
-//IDEA: add term in alpha to eta (tentative... for now)
 FieldState BosonStar::state_RHS(const double radius, const long double frequency, FieldState  s, bool asymptotic_region, bool given_A)
 {
     //enforce minimum radius epsilon if needed
@@ -514,7 +519,7 @@ double BosonStar::get_noether_charge()
         Q += pow(r, D - 2.) * dr * state[j].X * J_0 * exp(-1. * state[j].phi);
     }
 
-    if (D == 4.2) Q *= 2 * M_PI;
+    if (D == 4.0) Q *= 2 * M_PI;
     else Q *=  pow(M_PI, 0.5 * (D - 1.)) / tgamma(0.5 * (D - 1.));
     return Q;
 }

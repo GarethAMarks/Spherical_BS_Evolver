@@ -16,13 +16,7 @@ using namespace std;
 
 void slice_convergence_test (BSSNSlice& sl, BSSNSlice& sm, BSSNSlice& sh);
 void gauss_initialize(BosonStar& boson_star);
-
-enum evolution_system
-{
-    BSSN,
-    CCZ4
-};
-
+void compute_linear_perturbation(BosonStar& boson_star, double A0, double dA, double n_stars);
 
 int main()
 {
@@ -49,14 +43,24 @@ int main()
     if (boson_star.gaussian_start)
         gauss_initialize(boson_star);
 
+    //main run: either cycles models/ radial oscillation freqs/ dynamical evolution depending on param choices
+    if (boson_star.pert_only)
+        boson_star.cycle_models(boson_star.A0, boson_star.dA, boson_star.n_stars);
+    else if (boson_star.pert_only)
+        compute_linear_perturbation(boson_star, boson_star.A0, boson_star.dA, boson_star.n_stars);
+    else
+    {
+        Spacetime st{};
+        st.initialize(boson_star);
+        st.slices[0].write_slice();
+        st.write_diagnostics();
+        st.evolve();
+    }
+
+
     //boson_star.convergence_test();
 
-    Spacetime st{};
-    st.initialize(boson_star);
-    st.slices[0].write_slice();
-    st.write_diagnostics();
 
-    st.evolve();
 
     //LinearPerturbation lp{&boson_star, 0.0, 0.0, 0.0001, 150.}; //s=0.08, A = 0.06: 0.00003, 0.18, 0.00003
 
@@ -67,13 +71,11 @@ int main()
     //lp.rk4_solve(0.0145, 6.3); //0.00003519, 0.3097 // 0.0, 0.30965
     //lp.get_best_gamma(0.000084); //0.000083
     //lp.get_chi_sq();
-    //lp.pert_cycle(0.0001, 0.00005, 180);
+    //lp.pert_cycle(0.0001, 0.0001, 150); //lp.pert_cycle(0.098, 0.0005, 200);
     //cout << "Noether charge perturbation is " << lp.get_noether_perturbation() << endl;
     //lp.write_pert();
     //lp.write_chi_results();
-    //todo: add cutoff radius
 
-    //st.fourier_transform_A0();
 
     //st.slices[st.slices.size() - 1].write_slice();
 
@@ -122,6 +124,17 @@ void gauss_initialize(BosonStar& boson_star)
         step_var += step;
         }
 
+}
+
+//computes oscillation frequencies for sequence of models starting at A0 separated by dA
+void compute_linear_perturbation(BosonStar& boson_star, double A0, double dA, double n_stars)
+{
+    LinearPerturbation lp{&boson_star, 0.0, 0.0, 0.0001, 150.}; //s=0.08, A = 0.06: 0.00003, 0.18, 0.00003
+
+    lp.read_parameters(0);
+    lp.pert_cycle(A0, dA, n_stars); //lp.pert_cycle(0.098, 0.0005, 200);
+    cout << "Noether charge perturbation is " << lp.get_noether_perturbation() << endl;
+    lp.write_pert();
 }
 
 /*BSSNSlice sl{}; BSSNSlice sm{}; BSSNSlice sh{};

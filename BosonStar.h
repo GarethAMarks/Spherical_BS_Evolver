@@ -97,6 +97,14 @@ class BosonStar
         bool mirror_gaussian; //if true, add an equal and opposite gaussian 2 standard deviations outside the original.
         double enforced_freq; //enforced frequency for arbitrary scalar cloud starts
 
+        double A0;
+        double dA;
+        int n_stars;
+
+
+        bool cycle_only = 0;
+        bool pert_only = 0;
+
         BosonStar() = default;
         //BosonStar(const BosonStar& boson_star); //copy constructor(don't seem to need for now)
         void rk4_solve (const long double freq);
