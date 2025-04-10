@@ -3,7 +3,7 @@ D = 4
 mu = 1.0 
 lambda = 0
 solitonic = 1 #if false will use mini BS potential
-G = 1.0 #keep = 1 
+G = 1.0 
 sigma = 0.06
 eigen = 0 #0 for ground state BS
 alpha_central = 0.5 #starting central lapse, will be rescaled
@@ -23,7 +23,7 @@ gaussian_start = 0
 enforced_freq = 5.0
 
 #grid params
-R = 267 #grid radius
+R = 267 
 n_gridpoints = 2670
 courant_factor = 0.4
 stop_time = 150000.08
@@ -84,5 +84,3 @@ cycle_only = 0 #if 1 will only cycle thru model construction. Priority over pert
 A0 = 0.0001 #initial central amp
 dA = 0.0001 #step central amp
 n_stars = 150 #number of BS models to cycle thru
-
-
