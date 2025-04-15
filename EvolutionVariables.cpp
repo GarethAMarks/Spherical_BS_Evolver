@@ -1622,8 +1622,6 @@ void Spacetime::initialize(BosonStar& boson_star)
         slices[0].has_BH = 1;
     else slices[0].has_BH = 0;
 
-    //if (BS_perturbed)
-        //fix_initial_field_mom();
 
     compute_auxiliary_quantities(current_slice_ptr);
     rho0_init = make_tangherlini ? 1. : rho[0];

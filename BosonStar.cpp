@@ -6,7 +6,6 @@
 #define BOSONSTAR_CPP_
 
 #include "BosonStar.h"
-#include "DimensionMacros.h"
 #include "mathutils.h"
 #include <sstream>
 #include<iomanip>
@@ -115,7 +114,7 @@ FieldState BosonStar::state_RHS(const double radius, const long double frequency
     double T2 =  s.eta * s.eta + frequency * frequency * s.A * s.A / exp(2 * s.phi) ;
     double T3 = s.eta / r;
 
-    double F1 = 4. * PI * G * r * s.X * s.X / (D - 2.);
+    double F1 = 4. * M_PI * G * r * s.X * s.X / (D - 2.);
 
     //zero out terms that should be zeroed at origin as eta = 0, X = 1 there
     if (radius == 0.)
@@ -407,7 +406,7 @@ bool BosonStar:: fill_asymptotic(bool quiet)
     //double deta_match = (state[j_match].eta - state[j_match - 1].eta) / dr; //estimate for derivative of eta at r_match, used to crudely fit exponential falloff for eta to first order
 
     //ensures continuity of A
-    double A_factor = A_match * exp(sqrt( 1 - pow(omega / exp(phi_match), 2)) * r_match) * r_match;
+    double A_factor = A_match * exp(sqrt( mu * mu - pow(omega / exp(phi_match), 2)) * r_match) * r_match;
 
     //fit exponential of form B * exp(-k * r) to eta in exponential region. If eta is already zero, just keep it there (will likely not happen in practice)
     /*double k;  , B;
@@ -438,8 +437,8 @@ bool BosonStar:: fill_asymptotic(bool quiet)
         //cout << A_factor * exp(-sqrt( 1 - pow(omega / exp(phi_match), 2)) * radius_array[j + 1]) / radius_array[j + 1]  << endl;
 
         //fix asymptotic values for A, eta
-        state[j + 1].A = A_factor * exp(-sqrt( 1 - pow(omega / exp(phi_match), 2)) * radius_array[j + 1]) / radius_array[j + 1];
-        state[j + 1].eta = - (1 /radius_array[j + 1] + sqrt( 1 - pow(omega / exp(phi_match), 2)) ) * state[j + 1].A;
+        state[j + 1].A = A_factor * exp(-sqrt( mu * mu - pow(omega / exp(phi_match), 2)) * radius_array[j + 1]) / radius_array[j + 1];
+        state[j + 1].eta = - (1 /radius_array[j + 1] + sqrt( mu * mu - pow(omega / exp(phi_match), 2)) ) * state[j + 1].A;
 
         //cout << "A = " << state[j].A << ", X = " << state[j].X << ", phi = " << state[j].phi << ", eta = " << state[j].A << ", m = " <<  r  / 2. * (1 - (1 / (state[j].X * state[j].X)))<< endl;
 

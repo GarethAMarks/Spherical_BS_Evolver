@@ -42,7 +42,7 @@ int main()
         gauss_initialize(boson_star);
 
     //main run: either cycles models/ radial oscillation freqs/ dynamical evolution depending on param choices
-    if (boson_star.pert_only)
+    if (boson_star.cycle_only)
         boson_star.cycle_models(boson_star.n_stars, boson_star.A0, boson_star.dA);
     else if (boson_star.pert_only)
         compute_linear_perturbation(boson_star, boson_star.A0, boson_star.dA, boson_star.n_stars);
