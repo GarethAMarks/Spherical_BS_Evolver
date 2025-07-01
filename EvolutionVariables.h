@@ -57,7 +57,7 @@ class BSSNSlice
 
     bool use_CCZ4;
 
-    double make_tangherlini(double m, double min_chi);
+    double make_tangherlini(double m, double min_chi, double D);
     double refinement_level;
 
     public:
@@ -117,6 +117,8 @@ class Spacetime
         double c1; //CCZ4 damping params
         double c2;
         bool theta_off; //disable theta evolution, essentially reducing to re-formulated BSSN-- deprecated now
+
+        double one_log_fac;//factor in in 1+log slicing condition, f = one_log_fac / alpha
 
         bool shock_gauge; //enables shock-avoiding gauge with kappa = shock_fac
         double shock_fac;

@@ -55,6 +55,9 @@ class BosonStar
         double dV (const double p);
 
         FieldState state_RHS(const double radius, long double frequency, FieldState  s, bool asymptotic_region, bool given_A = 0);
+        FieldState state_expansion(const double radius, long double frequency);
+        void enforce_continuity(int n);
+
 
         double D;
         double R; //max radius of computational domain

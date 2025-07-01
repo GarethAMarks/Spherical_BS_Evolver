@@ -3,13 +3,14 @@
 
 #include "BosonStar.h"
 #include "LinearPerturbation.h"
-#include "DimensionMacros.h"
 #include "mathutils.h"
 #include <sstream>
 #include<iomanip>
 
 using namespace std;
 
+
+//overloads for adding / scalar multiplication of PertState objects
 PertState operator+(const PertState& s1, const PertState& s2)
 {
     return (PertState){s1.F + s2.F, s1.Fp + s2.Fp, s1.L + s2.L, s1.Lp + s2.Lp};
@@ -32,8 +33,6 @@ PertState LinearPerturbation::pert_rhs(double r, PertState s, double chi_sq, lon
     {
         double Fpp0 = ( 2. + (2. * omega * omega - chi_sq) / exp(2. * bg->state[0].phi) + solitonic * (72. * pow(A_central / sigma, 4)  //the small-r expansion leaves L''(0), here gamma, undetermined--
                       - 32. * pow(A_central / sigma, 2))) / 3. - gamma / (8. * M_PI * A_central * A_central); // we keep it arbitrary but express F''(0) in terms of it.
-
-        //cout<< setprecision(16) << "Results: [" << 0 << ", " << Fpp0 << ", " << 0 << ", " << gamma << "]" << endl;
 
         return (PertState) {0, Fpp0, 0, gamma};
     }
@@ -59,7 +58,7 @@ PertState LinearPerturbation::pert_rhs(double r, PertState s, double chi_sq, lon
     double alpha0_sq = alpha0 * alpha0;
     double sigma_sq = sigma * sigma;
 
-    //now compute background derivatives using respective bg ODEs (or: better to just obtain numerically?)
+    //now compute background derivatives using respective bg ODEs
     double Xp0 = X0 * ( 0.5 * (1 - X0_sq) / r + 2. * M_PI * r * X0_sq * ( (Ap0 * Ap0) / (X0_sq) + pow(omega * A0 / alpha0, 2) + bg->V(A0)  ));
     double alphap0 = alpha0 * ( 0.5 * (-1 + X0_sq) / r + 2. * M_PI * r * X0_sq * ( (Ap0 * Ap0) / (X0_sq) + pow(omega * A0 / alpha0, 2) - bg->V(A0)  ));
 
@@ -74,7 +73,7 @@ PertState LinearPerturbation::pert_rhs(double r, PertState s, double chi_sq, lon
     //double Xpp0 = (Xpp1 + Xpp3 - 2. * Xpp2) / (dr * dr);
 
 
-    //EXPERIMENTAL: analytic background X''
+    //EXPERIMENTAL: analytic expression for the background value of X''
     double Xpp0 = 3.*Xp0*Xp0 / X0 - 2. * Xp0 / r + 4. * M_PI * (A0_sq + 4.*solitonic *(A0_sq * A0_sq * A0_sq/(sigma_sq*sigma_sq) - A0_sq * A0_sq/sigma_sq )
            + 2. * r * A0 * Ap0 + omega_sq * A0_sq * (1 - r * alphap0 / alpha0) / alpha0_sq  + r * Ap0 * A0 *
            solitonic * (24. * A0_sq*A0_sq / (sigma_sq*sigma_sq) - 16. * A0_sq / sigma_sq ) ) * X0_sq * X0
@@ -100,7 +99,6 @@ PertState LinearPerturbation::pert_rhs(double r, PertState s, double chi_sq, lon
                +2.* (Xpp0  + 2. * alphap0 * Xp0 / alpha0 - Xp0 / r) / X0 - 4. * pow(Xp0 / X0, 2)) * L
                + 32. * M_PI * ( - Ap0 * A0 + 0.5 * A0_sq * r * X0_sq + r * X0_sq * solitonic * (6. * pow(A0_sq, 3) / pow(sigma_sq, 2) - 4. * pow(A0_sq, 2) / sigma_sq))  * Fp
                + 3. * (-alphap0 / alpha0 + Xp0 / X0) * Lp;
-
 
     //if (r < 0.1) cout<< setprecision(16) << "Results: [" << r << ", " << Fp << ", " << Fpp << ", " << Lp << ", " << Lpp << "]" << endl;
 
@@ -162,16 +160,23 @@ int LinearPerturbation::count_zero_crossings()
 // given chi_sq, attempts to use interval bisection to find the gamma-value minimizing L at bdry.
 long double LinearPerturbation::get_best_gamma(double chi_sq, bool quiet)
 {
-    //lower bound on frequency
+    long double sign = 1.;
+
+    //relevant for chi_sq < 0: account for the fact that our cutoff position in the oscillating L profile may begin with L > 0 for small gamma, not the other way around
+    rk4_solve(chi_sq, 0.0);
+    if (pert[blowup_point].L < 0)
+        sign = -1.;
+
+    //lower bound on gamma
     long double lower_guess = gamma0;
-    long double epsilon = bg->freq_epsilon; // just use the epsilon for the frequency for now
+    long double epsilon = bg->freq_epsilon; // just use the epsilon for the frequency; this seems to be OK generally
 
     rk4_solve(chi_sq, lower_guess);
     //double& L_inf = pert[blowup_point].L;
 
     int counter = 0;
 
-    while (pert[blowup_point].L < 0. && counter <= 10 ) //primitively looks for suitable lower bound if not immediately found
+    while (pert[blowup_point].L * sign < 0. && counter <= 10 ) //primitively looks for suitable lower bound if not immediately found
     {
         lower_guess -= 0.1 * lower_guess + 0.01;
         rk4_solve(chi_sq, lower_guess);
@@ -185,7 +190,7 @@ long double LinearPerturbation::get_best_gamma(double chi_sq, bool quiet)
     rk4_solve(chi_sq, upper_guess);
     counter = 0;
 
-    while (pert[blowup_point].L > 0. && counter <= 10 ) //primitively looks for suitable lower bound if not immediately found
+    while (pert[blowup_point].L * sign > 0. && counter <= 10 ) //primitively looks for suitable lower bound if not immediately found
     {
         lower_guess += 0.1 * upper_guess + 0.01;
         rk4_solve(chi_sq, upper_guess);
@@ -203,7 +208,9 @@ long double LinearPerturbation::get_best_gamma(double chi_sq, bool quiet)
         midpoint = 0.5 * (upper_guess + lower_guess);
         rk4_solve(chi_sq, midpoint);
 
-        if (pert[blowup_point].L < 0.)
+        //cout << midpoint << endl;
+
+        if (pert[blowup_point].L * sign < 0.)
             upper_guess = midpoint;
         else
             lower_guess = midpoint;
@@ -230,11 +237,11 @@ double LinearPerturbation::get_chi_sq()
     get_best_gamma(lower_guess, 1);
 
     if (count_zero_crossings() > 0)
-        cout << "WARNING: lower guess too high!" << endl;
+        cout << "WARNING: lower guess of chi_sq = "  <<  lower_guess << " too high!" << endl;
 
     get_best_gamma(upper_guess, 1);
     if (count_zero_crossings() == 0)
-        cout << "WARNING: upper guess too low!" << endl;
+        cout << "WARNING: upper guess of chi_sq = " << upper_guess << " too low!" << endl;
 
     int counter = 0;
 
@@ -254,7 +261,6 @@ double LinearPerturbation::get_chi_sq()
         counter++;
     }
 
-
     cout << "Obtained chi_sq = " << lower_guess << " with noether_pert = " << get_noether_perturbation() << endl;
 
     solved_chi_sq = lower_guess;
@@ -267,7 +273,6 @@ double LinearPerturbation::get_noether_perturbation()
     if (blowup_point < n_gridpoints - 1) cout << "\n WARNING: perturbation solution nan'd; Noether perturbation likely to be inaccurate" << endl;
 
     int edge_point = n_gridpoints - 1;
-    //edge_point = n_gridpoints / 2; //test
     double R_edge = (R * edge_point) / (n_gridpoints - 1);
 
     FieldState& s = bg->state[edge_point];
@@ -310,10 +315,14 @@ void LinearPerturbation::write_chi_results()
 void LinearPerturbation::pert_cycle(double A0, double dA, int n_stars)
 {
     bg->A_central = A0;
-
     ofstream data_file{"chi.dat"};
 
     double chi_prev, gamma_prev;
+
+    //use if we want to switch behaviour when chi^2 switches sign
+    bool chi_sq_positive = 1;
+    if (chi_sq0 < 0.)
+        chi_sq_positive = 0;
 
     for (int j = 0; j < n_stars; j++)
     {
@@ -321,21 +330,42 @@ void LinearPerturbation::pert_cycle(double A0, double dA, int n_stars)
         omega = bg->omega;
         A_central = bg-> A_central;
 
+        if (j > 1)
+        {
+            gamma0 = 2.0 * solved_gamma - gamma_prev;
+            chi_sq0 = solved_chi_sq - 1.5 * abs(solved_chi_sq - chi_prev);
+        }
+
         if (j > 0)
         {
             chi_prev = solved_chi_sq;
             gamma_prev = solved_gamma;
-
-            gamma0 = solved_gamma - 0.01;
         }
 
         get_chi_sq();
 
         data_file << std::setprecision (10) <<  bg->A_central << "     " << solved_chi_sq << "     " << solved_gamma << "     "    << get_noether_perturbation() << "     " << bg->M <<  "     " << bg->omega << endl;
         bg->A_central += dA;
-        chi_epsilon = 0.001 * solved_chi_sq + 10e-15;
+        chi_epsilon = 0.0001 * solved_chi_sq + 10e-15;
     }
 
+}
+
+//find and return value of first extremum in L
+double LinearPerturbation::last_extremum()
+{
+    double ext_val = 0.;
+
+    for (int j = n_gridpoints - 2; j > 0; j--)
+    {
+        if (abs(pert[j].L) > abs(pert[j - 1].L) &&  abs(pert[j].L) > abs(pert[j + 1].L))
+        {
+            ext_val = pert[j].L;
+            break;
+        }
+    }
+
+    return ext_val;
 }
 
 //testing RHS only (WARNING: BREAKS BACKGROUND BOSON STAR!!!)

@@ -31,6 +31,7 @@ class LinearPerturbation
 
         void rk4_solve(double chi_sq, long double gamma); //runs RK4 solver on F, L using given chi, gamma
         long double get_best_gamma(double chi_sq, bool quiet = 0);
+        long double get_best_gamma_neg(double chi_sq, bool quiet = 0);
         double get_chi_sq();
         double get_noether_perturbation(); //returns the perturbation to the Noether charge associated with the computed perturbation
         void write_pert(string filename = "pert.dat");
@@ -68,6 +69,7 @@ class LinearPerturbation
         double noether_perturbation;
 
         PertState pert_rhs (double r, PertState s, double chi_sq, long double gamma); //returns rhs of the radial ODEs that F, L satisfy
+        double last_extremum(); //returns absolute value of last extremum in L
         int count_zero_crossings();
 
 

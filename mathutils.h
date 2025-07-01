@@ -13,7 +13,10 @@ double cubic_interp(double r, double f0, double f1, double f2, double f3, int j0
 int bound(int n, int lower, int upper);
 double fivePointDeriv(double step, int order, double f1, double f2, double f3, double f4, double f5);
 double sevenPointDeriv(double step, int order, double f1, double f2, double f3, double f4, double f5, double f6, double f7);
-
+void computeSplineCoefficients(const std::vector<double>& y, std::vector<double>& M);
+double evaluateSpline(const std::vector<double>& y, const std::vector<double>& secondDerivatives, int i, double x);
+double evaluateSplineSegment(const std::vector<double>& x, const std::vector<double>& y,
+                              const std::vector<double>& M, int seg, double xi);
 double lagrange_interp(double x, const std::vector<double>& X, const std::vector<double>& Y);
 
 //Below are templated, so we put these in the header directly

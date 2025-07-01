@@ -105,5 +105,60 @@ double fivePointDeriv(double step, int order, double f1, double f2, double f3, d
     }
 }
 
+// Natural cubic spline solver
+void computeSplineCoefficients(const std::vector<double>& y, std::vector<double>& M) {
+    int n = y.size();
+    M.assign(n, 0.0);
+    if (n < 3) return;
+
+    std::vector<double> a(n - 1), b(n), c(n - 1), d(n);
+
+    // Setup the tridiagonal system
+    for (int i = 1; i < n - 1; ++i) {
+        a[i - 1] = 1.0;          // sub-diagonal
+        b[i] = 4.0;              // main diagonal
+        c[i] = 1.0;              // super-diagonal
+        d[i] = 6.0 * (y[i + 1] - 2.0 * y[i] + y[i - 1]); // RHS
+    }
+
+    // Natural spline: second derivatives at ends = 0
+    b[0] = b[n - 1] = 1.0;
+    d[0] = d[n - 1] = 0.0;
+
+    // Forward elimination
+    for (int i = 1; i < n; ++i) {
+        double m = a[i - 1] / b[i - 1];
+        b[i] -= m * c[i - 1];
+        d[i] -= m * d[i - 1];
+    }
+
+    // Back substitution
+    M[n - 1] = d[n - 1] / b[n - 1];
+    for (int i = n - 2; i >= 0; --i) {
+        M[i] = (d[i] - c[i] * M[i + 1]) / b[i];
+    }
+}
+
+
+// Evaluates the spline at a given index
+double evaluateSpline(const std::vector<double>& y, const std::vector<double>& secondDerivatives, int i, double x) {
+    double h = 1.0; // uniform spacing
+    double a = (i + 1 - x) / h;
+    double b = (x - i) / h;
+    return a * y[i] + b * y[i + 1] +
+           ((a * a * a - a) * secondDerivatives[i] +
+            (b * b * b - b) * secondDerivatives[i + 1]) * (h * h) / 6.0;
+}
+
+double evaluateSplineSegment(const std::vector<double>& x, const std::vector<double>& y,
+                              const std::vector<double>& M, int seg, double xi) {
+    double h = x[seg + 1] - x[seg];
+    double a = (x[seg + 1] - xi) / h;
+    double b = (xi - x[seg]) / h;
+
+    return a * y[seg] + b * y[seg + 1] +
+           ((a * a * a - a) * M[seg] + (b * b * b - b) * M[seg + 1]) * (h * h) / 6.0;
+}
+
 #endif /* MATHUTILS_CPP_ */
 
