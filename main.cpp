@@ -20,23 +20,14 @@ void compute_linear_perturbation(BosonStar& boson_star, double A0, double dA, do
 
 int main()
 {
+    //construct initial BS solution
     BosonStar boson_star{};
     boson_star.read_parameters();
 
-
-    //cout << boson_star.solve() << endl;
-    //boson_star.rk4_solve(50.0);
-    //boson_star.write_field();
-    //boson_star.fill_isotropic_arrays();a
-    //boson_star.write_isotropic();
-
-    //boson_star.read_thinshell();
     boson_star.solve();
     boson_star.fill_isotropic_arrays();
     boson_star.write_isotropic();
     boson_star.write_field();
-
-    //boson_star.cycle_models(5000, 0.0005, 0.0005);
 
     if (boson_star.gaussian_start)
         gauss_initialize(boson_star);
@@ -102,11 +93,12 @@ void gauss_initialize(BosonStar& boson_star)
 //computes oscillation frequencies for sequence of models starting at A0 separated by dA
 void compute_linear_perturbation(BosonStar& boson_star, double A0, double dA, double n_stars)
 {
-    LinearPerturbation lp{&boson_star, -0.00005, 0.025, 0.0001, 25.}; //s=0.08, A = 0.06: 0.00003, 0.18, 0.00003
+    LinearPerturbation lp{&boson_star, -2e-5, 0.025, 0.0001, 30.}; //s=0.08, A = 0.06: 0.00003, 0.18, 0.00003
 
     //lp.rk4_solve(-0.00001, 0.0235);
-    //lp.get_best_gamma(-0.00001);
+    //lp.get_best_gamma(-4.5e-5);
     //lp.get_chi_sq();
+    //lp.get_chi_sq_newton();
 
     lp.read_parameters(0);
     lp.pert_cycle(A0, dA, n_stars); //lp.pert_cycle(0.098, 0.0005, 200);

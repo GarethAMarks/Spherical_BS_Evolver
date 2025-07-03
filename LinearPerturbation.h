@@ -33,6 +33,7 @@ class LinearPerturbation
         long double get_best_gamma(double chi_sq, bool quiet = 0);
         long double get_best_gamma_neg(double chi_sq, bool quiet = 0);
         double get_chi_sq();
+        double get_chi_sq_newton();
         double get_noether_perturbation(); //returns the perturbation to the Noether charge associated with the computed perturbation
         void write_pert(string filename = "pert.dat");
         void pert_cycle(double A0, double dA, int n_stars);

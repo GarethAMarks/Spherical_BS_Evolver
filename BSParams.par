@@ -11,7 +11,7 @@ A_central = 0.025
 frequency_guess = 1.8
 freq_epsilon = 1e-19
 isotropic = 1
-r_match_fac = 0.765 #cutoff radius for BS construction
+r_match_fac = 0.85 #cutoff radius for BS construction
 
 #Dynamical perturbation params
 perturb = 0
@@ -23,8 +23,8 @@ gaussian_start = 0
 enforced_freq = 0.9
 
 #grid params
-R = 300
-n_gridpoints = 2000
+R = 120
+n_gridpoints = 2400
 courant_factor = 0.4
 stop_time = 100000.1
 
@@ -42,7 +42,7 @@ stop_on_migrate = 0 #if true, exit with message when central amplitude migrates 
 sigma_BSSN = 1.0 #BSSN damping; in CCZ4, doubles as c3 / 3
 eta = 1.0
 gamma_fac = 0.75
-damping_factor = 0.3
+damping_factor = 0.0
 evolve_shift = 1
 only_BS_violation = 0
 spatially_varying_BC = 1
@@ -72,16 +72,16 @@ uniform_data = 1 #if true will expect data smoothed + interpolated onto uniform 
 cutoff_frac = 0.75
 
 #Linear Perturbation params
-pert_only = 0 #toggles computing linear perturbation (1) / dynamical evolution (0)
+pert_only = 1 #toggles computing linear perturbation (1) / dynamical evolution (0)
 
-chi_sq0 = 0.0000
-gamma0 = 0.03
+chi_sq0 = 0.00
+gamma0 = 0.0
 chi_range = 0.15
 chi_epsilon = 1e-8
-cutoff_radius = 25
+cutoff_radius = 40
 
 #model cycling params: for model construction/ linear perturbations
 cycle_only = 0 #if 1 will only cycle thru model construction. Priority over pert_only!
-A0 = 0.025 #initial central amp
-dA = 0.00025 #step central amp
+A0 = 0.005 #initial central amp
+dA = 0.0005 #step central amp
 n_stars = 300 #number of BS models to cycle thru

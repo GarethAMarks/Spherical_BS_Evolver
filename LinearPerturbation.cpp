@@ -236,8 +236,43 @@ double LinearPerturbation::get_chi_sq()
 
     get_best_gamma(lower_guess, 1);
 
+    //for chi_sq < 0 this can happen if chi_sq is too small; try to find a guess with no zero crossings if this happens
     if (count_zero_crossings() > 0)
-        cout << "WARNING: lower guess of chi_sq = "  <<  lower_guess << " too high!" << endl;
+    {
+        if (lower_guess >= 0.)
+            cout << "WARNING: lower guess of chi_sq = "  <<  lower_guess << " too high!" << endl;
+        else
+        {
+
+            cout << "WARNING: zero crossings found with negative lower guess chi_sq = "  <<  lower_guess << ", attempting to find good lower guess" << endl;
+            double lower_search = lower_guess;
+
+            int j = 1, k = 1;
+
+            while (count_zero_crossings() > 0 && k < 4)
+            {
+                lower_search = lower_guess * (1. - j * pow(10., -k));
+                j++;
+
+                get_best_gamma(lower_search, 1);
+
+                if (j >= 10)
+                {
+                    j = 0;
+                    k++;
+                }
+            }
+
+            if (count_zero_crossings() > 0)
+                cout << "Search failed..." << endl;
+            else
+            {
+                cout << "Search succeeded with chi_sq = " << lower_search << endl;
+                lower_guess = lower_search;
+            }
+
+        }
+    }
 
     get_best_gamma(upper_guess, 1);
     if (count_zero_crossings() == 0)
@@ -265,6 +300,48 @@ double LinearPerturbation::get_chi_sq()
 
     solved_chi_sq = lower_guess;
     return lower_guess;
+
+}
+
+
+//alternative: try using secant method to get chi, searching for root of noether perturbation
+double LinearPerturbation::get_chi_sq_newton()
+{
+    double epsilon = chi_epsilon;
+
+    double chi_sq = chi_sq0;
+    double chi_sq_prev = chi_sq0 * 0.99; //0.99 is ad hoc
+
+    get_best_gamma(chi_sq, 1);
+    double noether = get_noether_perturbation();
+
+    get_best_gamma(chi_sq_prev, 1);
+    double noether_prev = get_noether_perturbation();
+
+    int counter = 0;
+
+    while(abs(chi_sq - chi_sq_prev) > epsilon && counter < 50 && abs(noether) > 1e-11)
+    {
+        double chi_sq_new = chi_sq - noether * (chi_sq - chi_sq_prev) / (noether - noether_prev);
+
+        get_best_gamma(chi_sq_new, 1);
+        double noether_new = get_noether_perturbation();
+
+        chi_sq_prev = chi_sq;
+        noether_prev = noether;
+        chi_sq = chi_sq_new;
+        noether = noether_new;
+
+        counter++;
+
+        cout << "chi_sq = " << chi_sq << ", noether = " << noether << endl;
+    }
+
+    cout << "Obtained chi_sq = " << chi_sq << " with noether_pert = " << get_noether_perturbation() << endl;
+
+    solved_chi_sq = chi_sq;
+    return chi_sq;
+
 
 }
 
@@ -332,8 +409,12 @@ void LinearPerturbation::pert_cycle(double A0, double dA, int n_stars)
 
         if (j > 1)
         {
-            gamma0 = 2.0 * solved_gamma - gamma_prev;
-            chi_sq0 = solved_chi_sq - 1.5 * abs(solved_chi_sq - chi_prev);
+            gamma0 = 2.0 * solved_gamma - gamma_prev; //just linearly extrapolate the gamma guess, if this is a little off in either direction it should be OK
+
+            if (chi_sq_positive)
+                chi_sq0 = 0.95 * solved_chi_sq - 2.0 * abs(solved_chi_sq - chi_prev); //must be more careful here, as chi_sq0 must be < the true chi_sq: factors are a bit ad hoc
+            else
+                chi_sq0 = 2.0 * solved_chi_sq - chi_prev; //using Newton's method, want to be close, but no hard buffer needed
         }
 
         if (j > 0)
@@ -342,11 +423,20 @@ void LinearPerturbation::pert_cycle(double A0, double dA, int n_stars)
             gamma_prev = solved_gamma;
         }
 
-        get_chi_sq();
+        //use bisection if we expect chi_sq > 0 and Newton's method otherwise
+        if (chi_sq_positive)
+            get_chi_sq();
+        else
+            get_chi_sq_newton();
 
         data_file << std::setprecision (10) <<  bg->A_central << "     " << solved_chi_sq << "     " << solved_gamma << "     "    << get_noether_perturbation() << "     " << bg->M <<  "     " << bg->omega << endl;
         bg->A_central += dA;
         chi_epsilon = 0.0001 * solved_chi_sq + 10e-15;
+
+        if (solved_chi_sq <= 0.)
+            chi_sq_positive = 0;
+        else
+            chi_sq_positive = 1;
     }
 
 }
