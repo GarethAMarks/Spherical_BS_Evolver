@@ -1,8 +1,6 @@
 C++ code that constructs and evolves spherical boson star solutions in polar-areal gauge, optionally converts to isotropic gauge, then evolves using the BSSN formalism reduced to spherical symmetry using a modified cartoon approach.
 Can also generate families of BS models if the cycle_models line is uncommented in main(). More detailed rundown below:
 
-NOTE: for some reason  my .gitignore didn't seem to work. Nothing ending in .dat or .cbp in the repo is needed to run the code (Can look at the .gitignore for a full list)
-
 ###COMPILE + RUN####
 I include a shell script make_BSEvolver_gcc.sh that should produce the executable BosonStarStability.o in the directory it is run using gcc (the shell script must be run in the same directory as all source files currently).
 The executable needs to run in the same directory as a BSParams.par file (included in repo), else it will abort. Many of these are self-explanatory/same as GRChombo but some I will explain below.
