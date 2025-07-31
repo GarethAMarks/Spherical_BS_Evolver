@@ -50,6 +50,16 @@ double BosonStar::dV( const double A)
 
 }
 
+double BosonStar::ddV( const double A)
+{
+    if (!solitonic)
+        return 2. * lambda;
+
+    else
+        return - 8. * mu * mu * pow(1. / sigma, 2) + 24. * mu * mu * A * A * pow(1. / sigma, 4) + 2.* lambda ;
+
+}
+
 //read parameters in from file BSParams.par. TODO: default values
 void BosonStar::read_parameters(bool quiet)
 {
@@ -457,7 +467,6 @@ int BosonStar::find_last_minimum()
     return -1; //signifies that next function should skip
 }
 //fill up the solution in the region after the blowup point, using asymptotic matching for A and eta and integrating phi and X. Returns 1 if successful
-//TODO: D != 4 asymptotics??
 bool BosonStar:: fill_asymptotic(bool quiet)
 {
 
@@ -514,7 +523,6 @@ bool BosonStar:: fill_asymptotic(bool quiet)
         //cout << A_factor * exp(-sqrt( 1 - pow(omega / exp(phi_match), 2)) * radius_array[j + 1]) / radius_array[j + 1]  << endl;
 
         //fix asymptotic values for A, eta
-        //TODO: fix
         state[j + 1].A = A_factor * exp(-sqrt( mu * mu - pow(omega / exp(phi_match), 2)) * radius_array[j + 1]) / pow(radius_array[j + 1], 0.5*(D - 2.));
         state[j + 1].eta = - (0.5*(D - 2.) /radius_array[j + 1] + sqrt( mu * mu - pow(omega / exp(phi_match), 2)) ) * state[j + 1].A;
 
@@ -539,11 +547,12 @@ bool BosonStar:: fill_asymptotic(bool quiet)
 
     //fills radius
     int j = 0;
-    while (j < n_gridpoints - 1 && m(j) < 0.99 * M)
+    double cutoff_dev = 0.01;
+    while (j < n_gridpoints - 1 && m(j) < (1 - cutoff_dev) * M)
     {
         //just uses linear interpolation to find r_99 for now
         if ( m(j + 1) != m(j) )
-            r_99 = dr * j + dr * (0.99 * M - m(j) ) / (m(j + 1) - m(j));
+            r_99 = dr * j + dr * ((1 - cutoff_dev) * M - m(j) ) / (m(j + 1) - m(j));
 
         j++;
     }
@@ -602,6 +611,39 @@ double BosonStar::get_noether_charge()
     if (D == 4.0) Q *= 2 * M_PI;
     else Q *=  pow(M_PI, 0.5 * (D - 1.)) / tgamma(0.5 * (D - 1.));
     return Q;
+}
+
+//get compactness corresponding to Collodel et. al's C4 definition, defined using the radius within which X is within 0.999 of its Schwarzchild value. Must have computed M!
+double BosonStar::get_c4()
+{
+    double r4 = R;
+    double cutoff_dev = 0.001; //relative deviation from Schwarzschild at which we define BS boundary
+
+    for (int j = n_gridpoints - 3; j > 0; j--)
+    {
+        double dr = R / (n_gridpoints - 1);
+        double r = j * dr;
+
+        double BH_X_sq = 1. /(1. - 2. * M / r);
+        double BS_X_sq = state[j].X * state[j].X;
+
+        if (abs((BS_X_sq - BH_X_sq) / BH_X_sq) > cutoff_dev )
+        {
+            //linearly interpolate to estimate exactly where the relative deviation = cutoff_dev
+            double f1 = abs((BS_X_sq - BH_X_sq) / BH_X_sq);
+
+            double BH_X2_sq = 1. /(1. - 2. * M / (r + dr) );
+            double f2 = abs((state[j + 1].X * state[j + 1].X  - BH_X2_sq) / BH_X2_sq);
+
+            r4 = r + dr * (cutoff_dev - f1) / (f2 - f1);
+            break;
+        }
+
+        if (j == 1)
+            cout <<"WARNING: get_c4() failed to establish deviation from Schwarzschild BH!" << endl;
+    }
+
+    return (M / r4);
 }
 
 //returns right-hand side for the ODE that f solves. r is areal radius
@@ -1453,7 +1495,7 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
             //exit(1);
         }
         else data_file << std::setprecision (10) <<  A_central << "     " << M << "     " << r_99 << "     " << noether_charge <<  "     " << binding_energy
-        << "     "  << static_cast<double>(omega) << "     " << static_cast<double>(omega_pre_rescale) << "     " << state[0].phi << endl;
+        << "     "  << static_cast<double>(omega) << "     " << static_cast<double>(omega_pre_rescale) << "     " << state[0].phi << "     " << get_c4() << endl;
 
         A_values[j] = A_central;
         omega_values[j]  = omega;

@@ -1358,8 +1358,9 @@ void Spacetime::kill_refinement_noise()
         int j3 = j4 - step;
         int j1 = j4 - 3 * step;
 
+        //average at points that seem to produce noise to hopefully kill error. should be only 2nd-order...
         BSSNSlice& s1 = *current_slice_ptr;
-        s1.states[j1] = 0.5 * (s1.states[j1 - step] + s1.states[j1 + step]); //average at points that seem to produce noise to hopefully kill error. should be only 2nd-order...
+        s1.states[j1] = 0.5 * (s1.states[j1 - step] + s1.states[j1 + step]);
         s1.states[j3] = 0.5 * (s1.states[j3 - step] + s1.states[j3 + step]);
 
         start_point = j4;

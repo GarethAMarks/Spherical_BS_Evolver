@@ -93,7 +93,7 @@ void gauss_initialize(BosonStar& boson_star)
 //computes oscillation frequencies for sequence of models starting at A0 separated by dA
 void compute_linear_perturbation(BosonStar& boson_star, double A0, double dA, double n_stars)
 {
-    LinearPerturbation lp{&boson_star, -2e-5, 0.025, 0.0001, 30.}; //s=0.08, A = 0.06: 0.00003, 0.18, 0.00003
+    LinearPerturbation lp{&boson_star, -2e-5, 0.025, 0.0001, 100.}; //s=0.08, A = 0.06: 0.00003, 0.18, 0.00003
 
     //lp.rk4_solve(-0.00001, 0.0235);
     //lp.get_best_gamma(-4.5e-5);

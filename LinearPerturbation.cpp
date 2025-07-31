@@ -29,10 +29,26 @@ PertState operator*(double c, const PertState& s)
 //returns rhs of the radial ODEs that F, L satisfy
 PertState LinearPerturbation::pert_rhs(double r, PertState s, double chi_sq, long double gamma)
 {
+    double n = D - 2.;
+
+
     if (r == 0.)
     {
-        double Fpp0 = ( 2. + (2. * omega * omega - chi_sq) / exp(2. * bg->state[0].phi) + solitonic * (72. * pow(A_central / sigma, 4)  //the small-r expansion leaves L''(0), here gamma, undetermined--
-                      - 32. * pow(A_central / sigma, 2))) / 3. - gamma / (8. * M_PI * A_central * A_central); // we keep it arbitrary but express F''(0) in terms of it.
+        double alpha0 = exp(bg->state[0].phi);
+        double alpha0_sq = alpha0 * alpha0;
+        double A0_sq = A_central * A_central;
+
+        double V = bg->V(A_central);
+        double dV = bg->dV(A_central);
+        double ddV = bg->ddV(A_central);
+
+        double Fpp0 = (
+        32.0 * pow(A_central, 4) * ddV * alpha0_sq * M_PI +
+        32.0 * dV * alpha0_sq * A0_sq * M_PI
+        - n * n * gamma * alpha0_sq - 16.0 * chi_sq * A0_sq * M_PI
+        + 32.0 * omega * omega * A0_sq * M_PI - n * gamma * alpha0_sq
+        ) / (16.0 * alpha0_sq * A0_sq * M_PI * (n+1));
+
 
         return (PertState) {0, Fpp0, 0, gamma};
     }
@@ -59,9 +75,15 @@ PertState LinearPerturbation::pert_rhs(double r, PertState s, double chi_sq, lon
     double sigma_sq = sigma * sigma;
 
     //now compute background derivatives using respective bg ODEs
-    double Xp0 = X0 * ( 0.5 * (1 - X0_sq) / r + 2. * M_PI * r * X0_sq * ( (Ap0 * Ap0) / (X0_sq) + pow(omega * A0 / alpha0, 2) + bg->V(A0)  ));
-    double alphap0 = alpha0 * ( 0.5 * (-1 + X0_sq) / r + 2. * M_PI * r * X0_sq * ( (Ap0 * Ap0) / (X0_sq) + pow(omega * A0 / alpha0, 2) - bg->V(A0)  ));
+    //double Xp0 = X0 * ( 0.5 * (1 - X0_sq) / r + 2. * M_PI * r * X0_sq * ( (Ap0 * Ap0) / (X0_sq) + pow(omega * A0 / alpha0, 2) + bg->V(A0)  ));
+    double Xp0 = X0 * ( 0.5 * (D - 3) * (1 - X0_sq) / r
+    + (4. * M_PI * r * X0_sq) / (D - 2) * ( (Ap0 * Ap0) / (X0_sq)
+    + pow(omega * A0 / alpha0, 2) + bg->V(A0) ));
 
+    //double alphap0 = alpha0 * ( 0.5 * (-1 + X0_sq) / r + 2. * M_PI * r * X0_sq * ( (Ap0 * Ap0) / (X0_sq) + pow(omega * A0 / alpha0, 2) - bg->V(A0)  ));
+    double alphap0 = alpha0 * ( 0.5 * (D - 3) * (-1 + X0_sq) / r
+    + (4. * M_PI * r * X0_sq) / (D - 2) * ( (Ap0 * Ap0) / (X0_sq)
+    + pow(omega * A0 / alpha0, 2) - bg->V(A0)));
 
     //for now: interpolate 3 surrounding points at r + dr using cubic legendre + use 2nd order approx. to get X''. Can almost certainly do better!!!
     int j0 = bound(j - 1, 0, n_gridpoints - 4);
@@ -73,11 +95,22 @@ PertState LinearPerturbation::pert_rhs(double r, PertState s, double chi_sq, lon
     //double Xpp0 = (Xpp1 + Xpp3 - 2. * Xpp2) / (dr * dr);
 
 
-    //EXPERIMENTAL: analytic expression for the background value of X''
-    double Xpp0 = 3.*Xp0*Xp0 / X0 - 2. * Xp0 / r + 4. * M_PI * (A0_sq + 4.*solitonic *(A0_sq * A0_sq * A0_sq/(sigma_sq*sigma_sq) - A0_sq * A0_sq/sigma_sq )
-           + 2. * r * A0 * Ap0 + omega_sq * A0_sq * (1 - r * alphap0 / alpha0) / alpha0_sq  + r * Ap0 * A0 *
-           solitonic * (24. * A0_sq*A0_sq / (sigma_sq*sigma_sq) - 16. * A0_sq / sigma_sq ) ) * X0_sq * X0
-           - 4. * M_PI * Ap0*Ap0 * (1. + r * alphap0 / alpha0) * X0;
+
+    double V = bg->V(A0);
+    double dV = bg->dV(A0);
+    double ddV = bg->ddV(A0);
+
+    //analytic expression for the background value of X''
+    double Xpp0 = 3 * Xp0 * Xp0 / X0 - n * Xp0/r + (
+        (16.0/n) * r * A0 * Ap0 * M_PI * dV
+        - (8.0/n) * r * A0_sq * M_PI * omega_sq * alphap0 / pow(alpha0, 3)
+        + (8.0/n) * A0_sq * M_PI * omega_sq / (alpha0_sq)
+        + (8.0/n) * M_PI * V) * pow(X0, 3) + (
+        -(8.0/n) * r * M_PI * Ap0 * Ap0 * alphap0 / (alpha0)
+        + (8.0/n) * M_PI * Ap0 * Ap0
+        - 8.0 * M_PI * Ap0 * Ap0
+        ) * X0;
+
 
     const double& F = s.F;
     const double& Fp = s.Fp;
@@ -85,20 +118,20 @@ PertState LinearPerturbation::pert_rhs(double r, PertState s, double chi_sq, lon
     const double& Lp = s.Lp;
 
     //the actual pulsation equations
-    double Fpp = ((2. + ( 2. * omega_sq - chi_sq ) / alpha0_sq + 8. * A0 * Ap0 * r * M_PI  + 8. * solitonic * A0_sq
-               *(r * A0 * Ap0 * M_PI * (12. * A0_sq - 8. * sigma_sq) + 9. * A0_sq - 4 * sigma_sq) / pow(sigma_sq, 2)  ) * X0_sq + 2. * pow(Ap0 / A0, 2 )) * F
-               + ((1 - omega_sq / (alpha0_sq) + solitonic * (12. * pow(A0_sq / sigma_sq, 2) - 8. *  A0_sq / sigma_sq)) * X0_sq
-               - 1. / (4. * M_PI * pow(r * A0, 2))  -  pow(Ap0 / A0, 2) - Ap0 / (A0 * r) - Ap0 * alphap0 / (A0 * alpha0) + Xp0 * (Ap0 + 1./(2. * M_PI * r * A0)) / (A0 * X0)) * L
-               + ( -alphap0 / alpha0 + Xp0 / X0 - 2. / r) * Fp - Lp / (4. * M_PI * r * A0_sq);
+
+    double Fpp = ( (2.0*omega_sq/alpha0_sq + 2.0*A0_sq*ddV - chi_sq/alpha0_sq + 2.0*dV + (16.0/n)*r*A0*M_PI*Ap0*dV) * X0_sq + 2.0*(Ap0*Ap0)/A0_sq) * F
+                + ((-omega_sq/alpha0_sq + dV)*X0_sq - (n*n)/(8.0*r*r*A0_sq*M_PI) + n/(8.0*r*r*A0_sq*M_PI) + (1. - n) * Ap0/(A0*r) - Ap0*alphap0/(A0*alpha0)
+                - (Ap0*Ap0)/(A0_sq) + (Ap0/A0)*(Xp0/X0) + (n/(4.0*r*A0_sq*M_PI))*(Xp0/X0) )*L
+                + (Xp0/X0 - n/r - alphap0/alpha0)*Fp - n/(8.0*r*A0_sq*M_PI)*Lp;
+
+      double Lpp = ( ((64.0/n)*r*Ap0*pow(A0,3)*M_PI*ddV + (64.0/n)*r*A0*M_PI*Ap0*dV + (64.0/n)*r*A0_sq*M_PI*dV*alphap0/alpha0)*X0_sq
+                + (32.0/n)*r*A0_sq*M_PI*X0*dV*Xp0 - (32.0*M_PI*Ap0*Ap0) )*F
+                + ( -chi_sq*X0_sq/alpha0_sq - 4.0*n*alphap0/(r*alpha0) - 2.0/(r*r) + 2.0*n/(r*r) + 16.0*M_PI*Ap0*Ap0 + 4.0*alphap0/(r*alpha0)
+                - 2.0*pow(alphap0/alpha0,2) + 4.0*(Xp0/X0)*(alphap0/alpha0) + 2.0*(Xpp0/X0) - 2.0/r*(Xp0/X0) - 4.0*pow(Xp0/X0,2) )*L
+                + ( (32.0/n)*r*A0_sq*X0_sq*M_PI*dV - 32.0*M_PI*Ap0*A0 )*Fp
+                + ( 2.0/r - 3.0*(alphap0/alpha0) + 3.0*(Xp0/X0) - n/r )*Lp;
 
 
-    double Lpp = 32. * ((M_PI * r *(A0 * Ap0 + alphap0 * A0_sq / alpha0) + 4. * pow(A0, 3)* M_PI * r * solitonic
-               * (3. * pow(A0,3) * alphap0 + 9. * A0_sq * Ap0 * alpha0 - 2. * A0 * alphap0 * sigma_sq - 4. * alpha0 * Ap0 * sigma_sq) / (alpha0 * pow(sigma_sq, 2 )) ) * X0_sq
-               + r * M_PI * (0.5 * Xp0 * A0_sq + solitonic * (6. * pow(A0, 6) * Xp0 / pow(sigma_sq, 2) - 4. * pow(A0_sq,2) * Xp0 / sigma_sq )  ) * X0 - M_PI * Ap0 * Ap0) * F
-               + (16. * M_PI * Ap0 * Ap0 - chi_sq * X0_sq / alpha0_sq - 2. * pow(alphap0 / alpha0, 2) + 2. / (r * r) - 4. * alphap0 / (r * alpha0)
-               +2.* (Xpp0  + 2. * alphap0 * Xp0 / alpha0 - Xp0 / r) / X0 - 4. * pow(Xp0 / X0, 2)) * L
-               + 32. * M_PI * ( - Ap0 * A0 + 0.5 * A0_sq * r * X0_sq + r * X0_sq * solitonic * (6. * pow(A0_sq, 3) / pow(sigma_sq, 2) - 4. * pow(A0_sq, 2) / sigma_sq))  * Fp
-               + 3. * (-alphap0 / alpha0 + Xp0 / X0) * Lp;
 
     //if (r < 0.1) cout<< setprecision(16) << "Results: [" << r << ", " << Fp << ", " << Fpp << ", " << Lp << ", " << Lpp << "]" << endl;
 
@@ -355,11 +388,25 @@ double LinearPerturbation::get_noether_perturbation()
     FieldState& s = bg->state[edge_point];
 
     //both terms included as F generically grows exponentially (indeed 1st term usually dominates)
-    noether_perturbation = 8. * M_PI * exp(s.phi) * s.A * s.eta * R_edge * R_edge * pert[edge_point].F / (omega)
-                                - exp(s.phi) * R_edge * pert[edge_point].L / (omega * s.X );
 
+    double n = D - 2;
+    // Surface area of a unit n-sphere : S = 2 * pi^(n/2) / Gamma(n/2)
+    double S = 2.0 * pow(M_PI, n / 2.0) / tgamma(n / 2.0);
 
-    //cout << 8. * M_PI * exp(s.phi) * s.A * s.eta * R * R * pert[edge_point].F / omega << endl;
+    double alpha0 = exp(s.phi); // background value of alpha at edge
+    double A0 = s.A; // background value of A at edge
+    double X0 = s.X; // background value of X at edge
+    double Ap0 = s.eta * X0;
+
+    double F = pert[edge_point].F; // perturbation value of F at edge
+    double L = pert[edge_point].L; // perturbation value of L at edge
+
+    // D>= 4 expression provided here
+    noether_perturbation = 2.0 * S * alpha0 * A0 * Ap0
+        * pow(R_edge, n) / (omega * X0) * F
+        - (1.0/8.0) * n * S * alpha0 * pow(R_edge, n-1)
+        / (M_PI * omega * X0) * L;
+
     return noether_perturbation;
 }
 
@@ -375,6 +422,8 @@ void LinearPerturbation::write_pert(string filename)
         std::cerr << "pert.dat could not be opened for writing!\n";
         exit(1);
     }
+
+    data_file << std::setprecision (10) <<"# A0   F   Fp  L   Lp" << endl;
 
     for (int j = 0; j < n_gridpoints; j++)
     {
@@ -400,6 +449,8 @@ void LinearPerturbation::pert_cycle(double A0, double dA, int n_stars)
     bool chi_sq_positive = 1;
     if (chi_sq0 < 0.)
         chi_sq_positive = 0;
+
+     data_file << "#A0      chi_0^2     gamma       noether_pert        M       omega" << endl;
 
     for (int j = 0; j < n_stars; j++)
     {
@@ -437,6 +488,9 @@ void LinearPerturbation::pert_cycle(double A0, double dA, int n_stars)
             chi_sq_positive = 0;
         else
             chi_sq_positive = 1;
+
+        if (isnan(solved_chi_sq))
+            break;
     }
 
 }
