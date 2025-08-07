@@ -60,6 +60,7 @@ class LinearPerturbation
 
         double chi_epsilon;
         double cutoff_radius; //radius outside of which to look for zero crossings
+        double noether_epsilon; //used with chi_sq < 0 to determine the max allowable noether perturbation for convergence to be declared
 
 
         double solved_chi_sq;

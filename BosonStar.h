@@ -70,6 +70,7 @@ class BosonStar
         bool uniform_data; //only relevant for reading thinshell files; determines whether to use uniformly spaced data files or interpolate from originals
         int thinshell_res_fac; //must be power of 2. If >1, thinshell model will be brought in using resolution raised by this factor.
 
+
         //whether to perturb, and the height + "standard deviation" of the perturbation
 
 
@@ -122,6 +123,7 @@ class BosonStar
         double get_noether_charge();
         double get_c4(); //get compactness corresponding to Collodel et. al's C4 definition, defined as the radius within which X is within 0.999 of its Schwarzchild value.
 
+        bool relax();
 
         void read_isotropic_data();
         void fill_isotropic_arrays();

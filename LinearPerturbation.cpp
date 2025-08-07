@@ -338,6 +338,7 @@ double LinearPerturbation::get_chi_sq()
 
 
 //alternative: try using secant method to get chi, searching for root of noether perturbation
+//maybe add memory of best chi in case counter hit...
 double LinearPerturbation::get_chi_sq_newton()
 {
     double epsilon = chi_epsilon;
@@ -353,7 +354,7 @@ double LinearPerturbation::get_chi_sq_newton()
 
     int counter = 0;
 
-    while(abs(chi_sq - chi_sq_prev) > epsilon && counter < 50 && abs(noether) > 1e-11)
+    while(abs(chi_sq - chi_sq_prev) > epsilon && counter < 50 && abs(noether) > noether_epsilon)
     {
         double chi_sq_new = chi_sq - noether * (chi_sq - chi_sq_prev) / (noether - noether_prev);
 
@@ -547,6 +548,7 @@ void LinearPerturbation::read_parameters(bool quiet)
         fill_parameter(current_line, "chi_range = ", chi_range, quiet);
         fill_parameter(current_line, "chi_epsilon = ", chi_epsilon, quiet);
         fill_parameter(current_line, "cutoff_radius = ", cutoff_radius, quiet);
+        fill_parameter(current_line, "noether_epsilon = ", noether_epsilon, quiet);
     }
 }
 #endif /* LINEARPERTURBATION_CPP_ */

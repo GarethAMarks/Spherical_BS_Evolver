@@ -1267,8 +1267,13 @@ void BosonStar::add_perturbation(double a, double k, double center)
     cout << "\nAdded Gaussian perturbation with central value " << a << " and effective radius " << k << endl;
 }
 
+//WIP: apply a relaxation algorithm to solve for BS; based on the Siemonsen + East approach...
+bool BosonStar::relax()
+{
+    vector<double> x_values(n_gridpoints);
+}
 
-//force 2nd derivatives of X, Phi to be continuous
+//force 2nd derivatives of X, Phi to be continuous; now deprecated;
 void BosonStar::enforce_continuity(int n) {
     int N = state.size();
     if (N < 3 || n >= N - 1) return;
