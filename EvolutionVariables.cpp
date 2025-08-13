@@ -496,11 +496,10 @@ double Spacetime::d_zz(bssn_var var, int index)
     return current_slice_ptr->d_zz(var, index);
 }
 
-//replace with f'n of A^2 maybe?
 double Spacetime::V(const double A)
 {
     if (!solitonic)
-        return mu * mu * A * A + lambda * pow(A,4;
+        return mu * mu * A * A + lambda * pow(A,4);
 
     else
         return mu * mu * A * A * pow((1. - 2. * pow(A / sigma, 2)), 2) + lambda * pow(A,4) ;
@@ -513,7 +512,7 @@ double Spacetime::dV(const double A)
         return mu * mu + 2 * A * A * lambda;
 
     else
-        return mu * mu - 8. * mu * mu * pow(A / sigma, 2) + 12. * mu * mu * pow(A / sigma, 4) + 2 * A * A * lambda;
+        return mu * mu - 8. * mu * mu * pow(A / sigma, 2) + 12. * mu * mu * pow(A / sigma, 4) + 2. * A * A * lambda;
 
 }
 
@@ -1503,6 +1502,7 @@ void Spacetime::initialize(BosonStar& boson_star)
     courant_factor = boson_star.courant_factor;
     stop_time = boson_star.stop_time;
     mu = boson_star.mu;
+    lambda = boson_star.lambda;
     sigma = boson_star.sigma;
     solitonic = boson_star.solitonic;
     omega = boson_star.omega;

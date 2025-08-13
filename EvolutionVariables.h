@@ -211,6 +211,7 @@ class Spacetime
         //inherited BS parameters
         double sigma;
         double mu;
+        double lambda;
         bool solitonic;
         double omega;
         bool isotropic; //whether we will use isotropic coordinates (otherwise polar-areal)
