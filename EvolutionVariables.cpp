@@ -500,20 +500,20 @@ double Spacetime::d_zz(bssn_var var, int index)
 double Spacetime::V(const double A)
 {
     if (!solitonic)
-        return mu * mu * A * A;
+        return mu * mu * A * A + lambda * pow(A,4;
 
     else
-        return mu * mu * A * A * pow((1. - 2. * pow(A / sigma, 2)), 2);
+        return mu * mu * A * A * pow((1. - 2. * pow(A / sigma, 2)), 2) + lambda * pow(A,4) ;
 
 }
 
 double Spacetime::dV(const double A)
 {
     if (!solitonic)
-        return mu * mu;
+        return mu * mu + 2 * A * A * lambda;
 
     else
-        return mu * mu - 8. * mu * mu * pow(A / sigma, 2) + 12. * mu * mu * pow(A / sigma, 4);
+        return mu * mu - 8. * mu * mu * pow(A / sigma, 2) + 12. * mu * mu * pow(A / sigma, 4) + 2 * A * A * lambda;
 
 }
 
