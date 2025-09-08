@@ -16,17 +16,17 @@ using namespace std;
 //overloads for addition/subtraction/scalar multiplication of fieldstate vars, useful for simplifying RK4 evolution code
 FieldState operator+(const FieldState& s1, const FieldState& s2)
 {
-    return (FieldState){s1.A + s2.A, s1.X + s2.X, s1.phi + s2.phi, s1.eta + s2.eta};
+    return FieldState{s1.A + s2.A, s1.X + s2.X, s1.phi + s2.phi, s1.eta + s2.eta};
 }
 
 FieldState operator-(const FieldState& s1, const FieldState& s2)
 {
-    return (FieldState){s1.A - s2.A, s1.X - s2.X, s1.phi - s2.phi, s1.eta - s2.eta};
+    return FieldState{s1.A - s2.A, s1.X - s2.X, s1.phi - s2.phi, s1.eta - s2.eta};
 }
 
 FieldState operator*(double c, const FieldState& s)
 {
-    return (FieldState){c * s.A, c * s.X, c * s.phi, c * s.eta};
+    return FieldState{c * s.A, c * s.X, c * s.phi, c * s.eta};
 }
 
 //potential and its  derivative (wrt |phi|^2)
@@ -136,28 +136,22 @@ FieldState BosonStar::state_RHS(const double radius, const long double frequency
     //in the asymptotic region, evolve phi and X normally but do not update A, eta (these will be hard-coded to asymptotic expressions)
     if (asymptotic_region)
     {
-        return  (FieldState) {0., s.X * ( F1 * (T2 + V(s.A)) - T1 ), dPhi, 0.};
+        return  FieldState{0., s.X * ( F1 * (T2 + V(s.A)) - T1 ), dPhi, 0.};
     }
-    else if (given_A)
+    else if (given_A) //return RHS of field state variables outside of asymptotic region, A excepted
     {
-        //return RHS of field state variables outside of asymptotic region, A excepted
-        return  (FieldState) {0, s.X * ( F1 * (T2 + V(s.A)) - T1 ), dPhi,
+        return  FieldState{0, s.X * ( F1 * (T2 + V(s.A)) - T1 ), dPhi,
         static_cast<double>(eta_corr *(-(D - 2.) * T3 - s.eta * dPhi + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi)))) };
     }
 
-    else
+    else //return RHS of field state variables outside of asymptotic region
     {
-        //return RHS of field state variables outside of asymptotic region
-        return  (FieldState) {s.X * s.eta, s.X * ( F1 * (T2 + V(s.A)) - T1 ), dPhi,
+        return  FieldState {s.X * s.eta, s.X * ( F1 * (T2 + V(s.A)) - T1 ), dPhi,
         static_cast<double>(eta_corr * (-(D - 2.) * T3 - s.eta * dPhi + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi))))};
     }
-
-   //test for playing with RK4 convergence-- seems that 1/r terms can spoil 4th-order convergence (but we still get tight 3rd-order)
-   //return  (FieldState) {s.A / r + s.X, s.X + s.phi, s.phi + s.eta, s.eta + s.A};
-
 }
 
-//returns the small-r expansion in X and alpha, currently to 2nd order. Testing for D > 4 to improve accuracy
+//returns the small-r expansion in X and alpha, currently to 2nd order. Improves accuracy for D > 4 to use this at second-to-innermost gridpoint.
 FieldState BosonStar::state_expansion(const double radius, long double frequency)
 {
 
@@ -180,7 +174,7 @@ FieldState BosonStar::state_expansion(const double radius, long double frequency
     alpha0-48*A0*A0*M_PI*frequency*frequency*r*r*alpha2)/(alpha0 * alpha0)/(D-2)/(r*r);
 
     // currently 4th-order in X, alpha; 2nd-order in A, eta
-    return (FieldState){A_central + 0.5 * A2 * r * r,
+    return FieldState{A_central + 0.5 * A2 * r * r,
                          1. + 0.5 * X2 * r * r + X4 * pow(r,4.) / 24.,
                         log(alpha_central + 0.5 * alpha2 * r * r + alpha4 * pow(r,4.) / 24.),
                         A2 * r
@@ -190,7 +184,7 @@ FieldState BosonStar::state_expansion(const double radius, long double frequency
 void BosonStar::rk4_solve (const long double freq)
 {
 
-    state = {(FieldState){A_central, 1.0, log(alpha_central), 0.0 }};
+    state = {FieldState{A_central, 1.0, log(alpha_central), 0.0 }};
     radius_array = {0.};
 
     blowup_point = n_gridpoints; //make this 1 larger than max possible value to start, in case solution does not break
@@ -211,8 +205,8 @@ void BosonStar::rk4_solve (const long double freq)
     {
         double r = j * dr;
 
-        //something like this may be strictly necessary, but it doesnt seem needed at current order of expansion.
-        if (D > 10. && j < 1.)
+        //something like this may be strictly necessary, but it doesnt seem important at current order of expansion.
+        if (D > 100. && j < 1.)
         {
             s1 = state_RHS(r, freq, state[j], 0);
 
@@ -432,7 +426,6 @@ long double BosonStar::find_frequency(bool quiet)
 
         num_solves++;
 
-       // cout << static_cast<double>(upper_guess - lower_guess) << endl;
     }
 
     omega = lower_guess; //use lower_guess for frequency so we are guarenteed to have right # zero crossings in principle...
@@ -470,7 +463,7 @@ int BosonStar::find_last_minimum()
 bool BosonStar:: fill_asymptotic(bool quiet)
 {
 
-    double min_index = find_last_minimum();
+    int min_index = find_last_minimum();
 
     if (min_index == -1 && !quiet)
         cerr << "ERROR: No local minimum in |A| found for A_central = " << A_central << endl;
@@ -568,11 +561,6 @@ bool BosonStar:: fill_asymptotic(bool quiet)
         cout << "\nBinding energy is E = " << binding_energy << endl;
      }
 
-    //if (D  > 4.)
-    //{
-    //    enforce_continuity(0);
-    //}
-
      return 1;
 }
 
@@ -646,6 +634,24 @@ double BosonStar::get_c4()
     return (M / r4);
 }
 
+//return the maximum value of the compactness as defined by c = m(r) / r with m the aspect mass.
+double BosonStar::get_cmax()
+{
+    double cmax = 0.;
+
+    for (int j = 0; j < n_gridpoints - 1; j++)
+    {
+        double dr = R / (n_gridpoints - 1);
+        double r = j * dr;
+        double c = m(j) / r;
+
+        if (c > cmax )
+            cmax = c;
+    }
+
+    return cmax;
+}
+
 //returns right-hand side for the ODE that f solves. r is areal radius
 double BosonStar::f_RHS(double r, double f)
 {
@@ -672,7 +678,6 @@ double BosonStar::f_RHS(double r, double f)
 //returns areal radius corresponding to a given isotropic index
 double BosonStar::r_areal(int j_iso)
 {
-
     if (j_iso == 0)
         return 0.;
 
@@ -693,10 +698,6 @@ double BosonStar::r_areal(int j_iso)
         return r_iso + M + M * M / (4. * r_iso); //maybe generalize to D != 4, but might not be necessary...
     }
 
-    //upper and lower bounds of r_areal
-    //double r_low = (j_areal - 1) * dr;
-    //double r_high = j_areal * dr;
-
     int j0 = bound(j_areal - 2, -2, n_gridpoints - 4);
 
     vector<int> j{0, 1, 2, 3};
@@ -716,12 +717,6 @@ double BosonStar::r_areal(int j_iso)
 
 
     return lagrange_interp(r_iso, r, r_areal);
-
-    //interpolate via cubic to find r_areal, using nearest 4 known positions of r_iso (r_areal)
-    /*return (r_iso - r[1]) * (r_iso - r[2])  * (r_iso - r[3]) * (j0 + j[0]) * dr / ( (r[0] - r[1]) *  (r[0] - r[2]) * (r[0] - r[3]))
-         + (r_iso - r[0]) * (r_iso - r[2])  * (r_iso - r[3]) * (j0 + j[1]) * dr / ( (r[1] - r[0]) *  (r[1] - r[2]) * (r[1] - r[3]))
-         + (r_iso - r[0]) * (r_iso - r[1])  * (r_iso - r[3]) * (j0 + j[2]) * dr / ( (r[2] - r[0]) *  (r[2] - r[1]) * (r[2] - r[3]))
-         + (r_iso - r[0]) * (r_iso - r[1])  * (r_iso - r[2]) * (j0 + j[3]) * dr / ( (r[3] - r[0]) *  (r[3] - r[1]) * (r[3] - r[2]));*/
 
 }
 
@@ -750,8 +745,6 @@ void BosonStar::fill_isotropic_arrays()
         pert_array[j] = perturb_amp * exp ( -pow (j * dr - perturb_center, 2.) / (perturb_spread * perturb_spread))
                         -mirror_gaussian * perturb_amp * exp ( -pow (j * dr - perturb_center - 2. * perturb_spread, 2.) / (perturb_spread * perturb_spread));
     }
-
-
 
     r_iso_array[0] = 0;
 
@@ -797,9 +790,6 @@ void BosonStar::fill_isotropic_arrays()
         //linearly interpolate from the radial array data where we won't go OOB in radial array
         if (j_areal_high <= n_gridpoints - 1)
         {
-            //phi_iso_array[j]  = (1. - gap_frac) * state[j_areal_low].phi + gap_frac * state[j_areal_high].phi;
-            //A_iso_array[j]  = (1. - gap_frac) * state[j_areal_low].A + gap_frac * state[j_areal_high].A;
-            //f = (1. - gap_frac) * f_array[j_areal_low] + gap_frac * f_array[j_areal_high];
 
             //cubic spline interpolation for all but boundaries of domain
             int j0 = bound(j_areal_low - 1, 0, n_gridpoints - 4);
@@ -820,8 +810,6 @@ void BosonStar::fill_isotropic_arrays()
             f = f_array[n_gridpoints - 1]  + (r_areal_array[j] - R) * (f_array[n_gridpoints - 1] - f_array[n_gridpoints - 2] ) / dr;
 
             if (perturb) pert_iso_array[j] = pert_array[n_gridpoints - 1]  + (r_areal_array[j] - R) * (pert_array[n_gridpoints - 1] - pert_array[n_gridpoints - 2] ) / dr;
-            //f = cubic_interp(r_areal_array[j], f_array[n_gridpoints - 4], f_array[n_gridpoints - 3], f_array[n_gridpoints - 2], f_array[n_gridpoints - 1], n_gridpoints - 4, dr );
-            //f = pow((1 + M / (2 * dr * j)), -2.);
         }
 
         //linearly transition between interpolated and asymptotic f in this region. u_frac must be small enough that we have non-extrapolated r_areal values there
@@ -870,24 +858,6 @@ bool BosonStar::solve_finding_A(long double freq, double A_guess, double A_range
 {
     long double A_upper = A_guess + A_range;
     long double A_lower = A_guess - A_range;
-
-    /*int max_blowup_point = 0;
-
-    long double A_best = A_guess;
-    for (int n = 0; n < 1000; ++n)
-    {
-        int sign = 2 * (n % 2) - 1;
-        A_central = A_guess + sign * A_range * n;
-        rk4_solve(freq);
-
-        if (blowup_point > max_blowup_point)
-        {
-            max_blowup_point = blowup_point;
-            A_best = A_central;
-            cout << "blowup point = " << blowup_point << " at A = " << A_best<< endl;;
-        }
-
-    }*/
 
 
     //interval bisection to find A, assuming omega is decreasing with A. may need to first figure out sign of d_A(omega)/d_omega
@@ -949,16 +919,8 @@ bool BosonStar::fill_given_A(const long double freq, bool fully_fixed)
 
 
         s1 = state_RHS(r, freq + freq_correction, state[j], fully_fixed, 0);
-
-        //state[j].A = 0.5 * (A_vals[j + 1] + A_vals[j]); //use linearly interpolated A-values for intermediate stages: outdated as currently evolve A for intermediate steps
-        //state[j].eta = 0.5 * (eta_vals[j + 1] + eta_vals[j]);
-
         s2 = state_RHS(r + dr / 2., freq + freq_correction, state[j] + 0.5 * dr * s1, fully_fixed, 0);
         s3 = state_RHS(r + dr / 2., freq + freq_correction, state[j] + 0.5 * dr * s2, fully_fixed, 0);
-
-        //state[j].A = A_vals[j + 1];
-        //state[j].eta = eta_vals[j + 1];
-
         s4 = state_RHS(r + dr, freq + freq_correction, state[j] + dr * s3, fully_fixed, 0);
 
         //update state variables and radius array
@@ -966,10 +928,6 @@ bool BosonStar::fill_given_A(const long double freq, bool fully_fixed)
 
         state[j + 1].A = A_vals[j + 1]; //replace original A,eta, allowing for "natural" evolutions at mid-step stages. We also use the old lapse
         state[j + 1].eta = eta_vals[j + 1] * X_vals[ j + 1] / state[j + 1].X; //correct factor of X in eta at each stage
-        //state[j + 1].phi = phi_vals[j + 1];
-
-        //X_vals[j + 1] = state[j + 1].X;
-        //phi_vals[j + 1] = state[j + 1].phi;
 
         radius_array[j + 1] = (j + 1) * dr;
 
@@ -1190,8 +1148,6 @@ void BosonStar::read_thinshell()
         fill_given_A(omega);
     }
 
-
-
     //return to original resolution
     vector<FieldState> hi_res_state = state;
 
@@ -1242,10 +1198,6 @@ void BosonStar::add_perturbation(double a, double k, double center)
     int num_points = state.size();
     double k2 = k*k;
     pert_array.resize(num_points);
-
-   // vector<double> phi_vals(num_points);
-    //for (int j = 0; j < num_points; j++)
-        //phi_vals[j] = state[j].phi;
 
     //apply perturbation to A
     for (int j = 0; j < num_points; j++)
@@ -1399,7 +1351,6 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
                 alpha_central = exp(2 * state[0].phi - phi0_prev);
                 //omega_prev = omega;
                 phi0_prev = state[0].phi;
-
             }
 
         if (j > 3 && var_dA_method)
@@ -1463,9 +1414,6 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
        if (A_central > trouble_end && guess_layer > max_guess_layer)
             {frequency_guess = f_start; dA_factor = 1.; alpha_central = alpha_end; alpha_flag = 1;}
 
-
-
-
         //updates resolution according to # of threshold A-values passed
         while ( threshold_counter < refine_thresholds.size() - 1 && A_central > refine_thresholds[threshold_counter])
         {
@@ -1488,7 +1436,6 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
 
             //n_gridpoints_no_error *= exp(k * delta_A);
             //n_gridpoints = ceil(n_gridpoints_no_error);
-
         }
 
         //cout << state[0].phi << endl;
@@ -1500,18 +1447,15 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
             //exit(1);
         }
         else data_file << std::setprecision (10) <<  A_central << "     " << M << "     " << r_99 << "     " << noether_charge <<  "     " << binding_energy
-        << "     "  << static_cast<double>(omega) << "     " << static_cast<double>(omega_pre_rescale) << "     " << state[0].phi << "     " << get_c4() << endl;
+        << "     "  << static_cast<double>(omega) << "     " << static_cast<double>(omega_pre_rescale) << "     " << state[0].phi << "     " << get_c4()
+        << "     " << get_cmax() << endl;
 
         A_values[j] = A_central;
         omega_values[j]  = omega;
         phi0_values[j] = state[0].phi;
 
         //cout << frequency_guess << endl;
-
-
     }
-
-
 }
 
 

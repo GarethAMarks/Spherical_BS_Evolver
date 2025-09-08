@@ -25,8 +25,11 @@ int main()
     boson_star.read_parameters();
 
     boson_star.solve();
-    boson_star.fill_isotropic_arrays();
-    boson_star.write_isotropic();
+    if (boson_star.isotropic)
+    {
+        boson_star.fill_isotropic_arrays();
+        boson_star.write_isotropic();
+    }
     boson_star.write_field();
 
     if (boson_star.gaussian_start)

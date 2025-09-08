@@ -33,7 +33,6 @@ class BosonStar
         double sigma;
         int eigen; //desired eigenvalue, 0 for ground state
         double alpha_central; //central lapse
-        bool isotropic; //whether we will use isotropic coordinates (otherwise polar-areal)
 
         double frequency_guess; //initial guess for eigenfrequency
         double r_match_fac;
@@ -106,6 +105,7 @@ class BosonStar
         double dA;
         int n_stars;
 
+        bool isotropic; //whether we will use isotropic coordinates (otherwise polar-areal)
 
         bool cycle_only = 0;
         bool pert_only = 0;
@@ -122,6 +122,7 @@ class BosonStar
         bool solve_finding_A(long double freq, double A_guess, double A_range, bool quiet = 0);
         double get_noether_charge();
         double get_c4(); //get compactness corresponding to Collodel et. al's C4 definition, defined as the radius within which X is within 0.999 of its Schwarzchild value.
+        double get_cmax(); //get maximum of aspect mass / r
 
         bool relax();
 
