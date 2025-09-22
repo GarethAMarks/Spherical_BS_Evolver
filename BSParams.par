@@ -7,17 +7,17 @@ G = 1.0
 sigma = 0.15
 eigen = 0 #0 for ground state BS
 alpha_central = 0.5 #starting central lapse, will be rescaled
-A_central = 0.001
-frequency_guess = 1.8
+A_central = 0.11
+frequency_guess = 2.0
 freq_epsilon = 1e-19
-isotropic = 1
+isotropic = 0
 r_match_fac = 0.85 #cutoff radius for BS construction
 
 #Dynamical perturbation params
 perturb = 1
 perturb_amp = -0.001
 perturb_spread = 1.0
-perturb_center = 2.0
+perturb_center = 3.0
 mirror_gaussian = 0
 gaussian_start = 0
 enforced_freq = 0.9
@@ -25,14 +25,14 @@ enforced_freq = 0.9
 #grid params
 R = 200
 n_gridpoints = 4000
-courant_factor = 0.4
+courant_factor = 0.25
 stop_time = 100000.1
 
 BS_resolution_factor = 1 #raise BS resolution in ID solver by this factor
 
 refinement_points = -1 1000 2500 #after these points, effective resolution will be halved. Set first value as 0 or negative for no refinement
 
-#evolution parameters
+## evolution parameters
 run_spacetime_solver = 0
 min_chi = 0.0001
 min_z = 0.00001
@@ -52,7 +52,7 @@ shock_gauge = 0 #if true enables shock-avoiding gauge evolution, Bona-Masso with
 shock_fac = 1.0 
 
 use_CCZ4 = 0 #0 for BSSN, 1 for CCZ4
-c1 = 0.02
+c1 = 0.1
 c2 = 0.0
 theta_off = 0 #disables CCZ4 theta evolution; probably keep this off now
 
@@ -60,7 +60,7 @@ theta_off = 0 #disables CCZ4 theta evolution; probably keep this off now
 start_time = 0
 checkpoint_time = 2000
 
-read_thinshell = 1 #if true will read outputs of Uli's thinshell code
+read_thinshell = 0 #if true will read outputs of Uli's thinshell code
 write_interval = 2
 write_CN_interval = 5
 run_quietly = 0
@@ -72,17 +72,21 @@ uniform_data = 1 #if true will expect data smoothed + interpolated onto uniform 
 cutoff_frac = 0.75
 
 #Linear Perturbation params
-pert_only = 1 #toggles computing linear perturbation (1) / dynamical evolution (0)
+pert_only = 0 #toggles computing linear perturbation (1) / dynamical evolution (0)
 
-chi_sq0 = -0.0001
-gamma0 = 0.00
+chi_sq0 = -0.0000004  #initial chi^2 guess
+gamma0 = 0.00 # initial gamma (eigenvalue) guess
 chi_range = 0.15
 chi_epsilon = 1e-8
-cutoff_radius = 50
-noether_epsilon = 1e-9
+cutoff_radius = 30
+dynamic_cutoff = 0
+noether_epsilon = 1e-4
+mode_number = 2
+
 
 #model cycling params: for model construction/ linear perturbations
+
 cycle_only = 0 #if 1 will only cycle thru model construction. Priority over pert_only!
-A0 = 0.005 #initial central amp
-dA = 0.0001 #step central amp
-n_stars = 10000 #number of BS models to cycle thru
+A0 = 0.001 #initial central amp
+dA = 0.00025 #step central amp
+n_stars = 2000 #number of BS models to cycle thru

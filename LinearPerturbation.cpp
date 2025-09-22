@@ -270,7 +270,7 @@ double LinearPerturbation::get_chi_sq()
     get_best_gamma(lower_guess, 1);
 
     //for chi_sq < 0 this can happen if chi_sq is too small; try to find a guess with no zero crossings if this happens
-    if (count_zero_crossings() > 0)
+    if (count_zero_crossings() > mode_number)
     {
         if (lower_guess >= 0.)
             cout << "WARNING: lower guess of chi_sq = "  <<  lower_guess << " too high!" << endl;
@@ -282,7 +282,7 @@ double LinearPerturbation::get_chi_sq()
 
             int j = 1, k = 1;
 
-            while (count_zero_crossings() > 0 && k < 4)
+            while (count_zero_crossings() > mode_number && k < 4)
             {
                 lower_search = lower_guess * (1. - j * pow(10., -k));
                 j++;
@@ -296,7 +296,7 @@ double LinearPerturbation::get_chi_sq()
                 }
             }
 
-            if (count_zero_crossings() > 0)
+            if (count_zero_crossings() > mode_number)
                 cout << "Search failed..." << endl;
             else
             {
@@ -308,7 +308,7 @@ double LinearPerturbation::get_chi_sq()
     }
 
     get_best_gamma(upper_guess, 1);
-    if (count_zero_crossings() == 0)
+    if (count_zero_crossings() <= mode_number)
         cout << "WARNING: upper guess of chi_sq = " << upper_guess << " too low!" << endl;
 
     int counter = 0;
@@ -321,7 +321,7 @@ double LinearPerturbation::get_chi_sq()
         //cout << midpoint << endl;
         get_best_gamma(midpoint, 1);
 
-        if (count_zero_crossings() > 0)
+        if (count_zero_crossings() > mode_number)
             upper_guess = midpoint;
         else
             lower_guess = midpoint;
@@ -459,6 +459,9 @@ void LinearPerturbation::pert_cycle(double A0, double dA, int n_stars)
         omega = bg->omega;
         A_central = bg-> A_central;
 
+        if (dynamic_cutoff)
+            cutoff_radius = max(30.0, bg->r_99 * 0.75);
+
         if (j > 1)
         {
             gamma0 = 2.0 * solved_gamma - gamma_prev; //just linearly extrapolate the gamma guess, if this is a little off in either direction it should be OK
@@ -541,6 +544,8 @@ void LinearPerturbation::read_parameters(bool quiet)
 
     string current_line{};
 
+    mode_number = 0; //for backwards compatibility
+
     while (getline(params, current_line))
     {
         fill_parameter(current_line, "chi_sq0 = ", chi_sq0, quiet);
@@ -549,6 +554,8 @@ void LinearPerturbation::read_parameters(bool quiet)
         fill_parameter(current_line, "chi_epsilon = ", chi_epsilon, quiet);
         fill_parameter(current_line, "cutoff_radius = ", cutoff_radius, quiet);
         fill_parameter(current_line, "noether_epsilon = ", noether_epsilon, quiet);
+        fill_parameter(current_line, "mode_number = ", mode_number, quiet);
+        fill_parameter(current_line, "dynamic_cutoff = ", dynamic_cutoff, quiet);
     }
 }
 #endif /* LINEARPERTURBATION_CPP_ */

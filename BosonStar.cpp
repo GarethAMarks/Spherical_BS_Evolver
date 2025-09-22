@@ -1342,9 +1342,6 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
 
                 if(j > 2 && !alpha_flag)
                 {
-                    //frequency_guess = 1.2;//omega_values[j - 1] +  (omega_values[j - 1] - omega_values[j - 2]) + guess_buffer;
-
-                    //this breaks with __float128 : (
                     alpha_central =  exp(2 * phi0_values[j - 1] - phi0_values[j - 2]);
                 }
 
@@ -1355,8 +1352,6 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
 
         if (j > 3 && var_dA_method)
         {
-
-
             double theta = atan(10 * (omega_values[j - 1] - omega_values[j - 2]) / (A_values[j - 1] - A_values[j - 2]));
             double theta_prev = atan(10 * (omega_values[j - 2] - omega_values[j - 3]) / (A_values[j - 2] - A_values[j - 3]));
 
@@ -1390,10 +1385,6 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
             }
         }
 
-       //if (j == 10)
-            //var_dA_method = 1;
-
-
         if (A_central > trouble_start && alpha_start < 0)
             alpha_start = exp(phi0_values[j - 1]);
 
@@ -1405,7 +1396,6 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
             alpha_central = alpha_start;
             alpha_end = exp(phi0_values[j - 1]);
             frequency_guess -= f_search_interval;
-            //cout << frequency_guess << endl;
             dA_factor = 0.1;
             guess_layer++;
             alpha_flag = 1;
@@ -1417,10 +1407,7 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
         //updates resolution according to # of threshold A-values passed
         while ( threshold_counter < refine_thresholds.size() - 1 && A_central > refine_thresholds[threshold_counter])
         {
-            //n_gridpoints *= 2;
-
             threshold_counter++;
-
             cout << "n_gridpoints = " << n_gridpoints << " at threshold " << threshold_counter << endl;
         }
 
@@ -1431,18 +1418,12 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
             double A_lower =  refine_thresholds[threshold_counter - 1];
             double k = log(2) / (A_upper - A_lower); //factor in exponential to ensure number of gridpoints doubles exponentially/smoothly between thresholds
 
-
             n_gridpoints = ceil(N_gridpoints_init * pow(2., threshold_counter - 1) * exp (k * (A_central - A_lower)));
-
-            //n_gridpoints_no_error *= exp(k * delta_A);
-            //n_gridpoints = ceil(n_gridpoints_no_error);
         }
-
-        //cout << state[0].phi << endl;
 
          if (!solve(1) )
         {
-            //cout << "Failed to solve with A = " << A_central << endl;
+            cout << "Failed to solve with A = " << A_central << endl;
             omega = 0;
             //exit(1);
         }

@@ -58,15 +58,16 @@ class LinearPerturbation
         double A_central;
         double dr;
 
-        double chi_epsilon;
+        double chi_epsilon; //desired chi precision for zero crossing counting method
         double cutoff_radius; //radius outside of which to look for zero crossings
         double noether_epsilon; //used with chi_sq < 0 to determine the max allowable noether perturbation for convergence to be declared
-
+        bool dynamic_cutoff = 0;// if true use BS radius as cutoff in pert_cycle
 
         double solved_chi_sq;
         long double solved_gamma;
 
         int blowup_point;
+        int mode_number;
 
         double noether_perturbation;
 
