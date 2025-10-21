@@ -251,17 +251,11 @@ void BosonStar::rk4_solve (const long double freq)
         //use series expansions for X, Phi near origin for D > 4: this seems to be sufficient for now
         if (D > 4. && j < 1.)
         {
-            double X_prev = state[j + 1].X;
             FieldState small_state = state_expansion(r + dr, freq);
 
-            //cout << state[j+1].X - small_state.X << endl;
+            // replace near-origin values with small-radius series expansion
             state[j + 1].X = small_state.X;
             state[j + 1].phi = small_state.phi;
-
-            //state[j + 1].A = small_state.A;
-            //state[j + 1].eta = small_state.eta;
-            //state[j + 1].eta /= (X_prev / state[j + 1].X );
-
         }
 
         //cout << "A = " << state[j].A << ", X = " << state[j].X << ", phi = " << state[j].phi << ", eta = " << state[j].A << ", m = " <<  r  / 2. * (1 - (1 / (state[j].X * state[j].X)))<< endl;
@@ -1169,6 +1163,14 @@ void BosonStar::read_thinshell()
 //ensures all field arrays are zero
 void BosonStar::clear_BS()
 {
+    // Ensure isotropic-related arrays are large enough before writing
+    if (A_iso_array.size() < static_cast<size_t>(n_gridpoints))
+        A_iso_array.resize(n_gridpoints);
+    if (psi_iso_array.size() < static_cast<size_t>(n_gridpoints))
+        psi_iso_array.resize(n_gridpoints);
+    if (phi_iso_array.size() < static_cast<size_t>(n_gridpoints))
+        phi_iso_array.resize(n_gridpoints);
+
     for (int j = 0; j < n_gridpoints; j++)
     {
         A_iso_array[j] = 0.;
@@ -1222,7 +1224,13 @@ void BosonStar::add_perturbation(double a, double k, double center)
 //WIP: apply a relaxation algorithm to solve for BS; based on the Siemonsen + East approach...
 bool BosonStar::relax()
 {
-    vector<double> x_values(n_gridpoints);
+    x_array.resize(n_gridpoints);
+
+    for (int j = 0; j < n_gridpoints; j++)
+        x_array[j] = j / (n_gridpoints - 1.);
+    
+    // relaxation not implemented fully yet
+    return false;
 }
 
 //force 2nd derivatives of X, Phi to be continuous; now deprecated;
@@ -1244,7 +1252,7 @@ void BosonStar::enforce_continuity(int n) {
         }
     }
 
-    for (int k = 0; k < state.size(); k++)
+    for (size_t k = 0; k < state.size(); k++)
     {
         if (isnan(state[k].X))
             cout << "found a nan at pos " << k << endl;

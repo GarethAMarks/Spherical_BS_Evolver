@@ -16,6 +16,8 @@ struct FieldState
     double X {}; // conformal factor (squared)
     double phi {}; // log(lapse)
     double eta {}; // conformal factor gradient
+    FieldState() = default;
+    FieldState(double A_, double X_, double phi_, double eta_) : A(A_), X(X_), phi(phi_), eta(eta_) {}
 };
 
 //overloads for adding/subtracting//scalar mult by FieldState struct
@@ -40,6 +42,9 @@ class BosonStar
 
         std::vector<FieldState> state;
         std::vector<double> radius_array; // radius
+
+        std::vector<double> omega_array; // frequency array, used in relaxation method
+        std::vector<double> x_array; // compactified coordinate array, used in relaxation method.
 
         std::vector<double> phi_iso_array; // log(lapse) in isotropic coords
         std::vector<double> psi_iso_array; // conformal factor in isotropic coords
@@ -68,7 +73,7 @@ class BosonStar
         double freq_epsilon;//tolerance for the frequency finder
         bool uniform_data; //only relevant for reading thinshell files; determines whether to use uniformly spaced data files or interpolate from originals
         int thinshell_res_fac; //must be power of 2. If >1, thinshell model will be brought in using resolution raised by this factor.
-
+        int relax_iterations; //number of relaxation iterations to perform
 
         //whether to perturb, and the height + "standard deviation" of the perturbation
 

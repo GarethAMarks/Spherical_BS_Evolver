@@ -66,7 +66,7 @@ class BSSNSlice
 
         std::vector<int> refinement_points; //points at which refinement should be halved; to be copied from spacetime version at start of each step
 
-        void read_BS_data(BosonStar& boson_star,int BS_resolution_factor = 1., bool isotropic = 1);
+        void read_BS_data(BosonStar& boson_star,int BS_resolution_factor = 1., bool isotropic = 1, bool cell_centered = 0);
         void read_checkpoint(int time, int n_gridpoints);
         void write_slice( std::string file_name = "SliceData.dat");
 
@@ -187,6 +187,8 @@ class Spacetime
         double d_z_beta;
 
         double rho0_init; //initial central field energy density
+        bool cell_centered; //if true, use cell-centered grid and BCs; else vertex-centered
+        double grid_offset; //0.5 for cell-centered, 0 for vertex-centered
 
         //L2 norms of hamiltonian/momentum constraints
         double Ham_L2;

@@ -14,6 +14,8 @@ struct PertState
     double Fp {};
     double L {};
     double Lp {};
+    PertState() = default;
+    PertState(double F_, double Fp_, double L_, double Lp_) : F(F_), Fp(Fp_), L(L_), Lp(Lp_) {}
 };
 
 using namespace std;
@@ -24,10 +26,10 @@ class LinearPerturbation
     public:
         BosonStar* bg; //pointer to the background boson star
 
-        LinearPerturbation(BosonStar* bg, double given_chi_sq0, long double given_gamma0, double given_chi_range, double given_cutoff_radius) //constructor takes a pointer to BosonStar and autofills inherited params
-        :bg{bg}, chi_sq0{given_chi_sq0}, gamma0{given_gamma0}, n_gridpoints{bg->n_gridpoints}, R{bg->R}, sigma{bg->sigma}, chi_range{given_chi_range},
-        solitonic{bg->solitonic}, omega{bg->omega}, A_central{bg->A_central}, D{bg->D}, dr{R/(n_gridpoints - 1)}, chi_epsilon{0.00000000001}, cutoff_radius{given_cutoff_radius}
-        {}
+                        LinearPerturbation(BosonStar* bg, double given_chi_sq0, long double given_gamma0, double given_chi_range, double given_cutoff_radius) //constructor takes a pointer to BosonStar and autofills inherited params
+                        : bg{bg}, chi_sq0{given_chi_sq0}, gamma0{given_gamma0}, D{static_cast<int>(bg->D)}, n_gridpoints{bg->n_gridpoints}, R{bg->R}, sigma{bg->sigma}, chi_range{given_chi_range},
+                            solitonic{bg->solitonic}, omega{bg->omega}, A_central{bg->A_central}, dr{0.0}, chi_epsilon{0.00000000001}, cutoff_radius{given_cutoff_radius}
+                        {}
 
         void rk4_solve(double chi_sq, long double gamma); //runs RK4 solver on F, L using given chi, gamma
         long double get_best_gamma(double chi_sq, bool quiet = 0);
