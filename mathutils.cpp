@@ -76,11 +76,113 @@ double cubic_interp(double r, double f0, double f1, double f2, double f3, int j0
     std::vector<double> F = {f0,f1,f2,f3};
 
     return lagrange_interp(r, R, F);
+}
 
+// 4-point Lagrange interpolation wrapper for uniform grids.
+// Uses cubic_interp internally. If the requested j0 is out of range, it's clamped.
+double interp4_uniform_with_j0(const std::vector<double>& f, double x, int j0, double dr) {
+    int N = (int)f.size();
+    if (N == 0) return 0.0;
 
-   // return -(r - j1*dr) * (r - j2*dr ) * (r - j3*dr ) * f0 / (6. * dr * dr * dr) +  (r - j0*dr) * (r - j2*dr ) * (r - j3*dr ) * f1 / (2. * dr * dr * dr)
-     //      -(r - j0*dr) * (r - j1*dr ) * (r - j3*dr ) * f2 / (2. * dr * dr * dr) + (r - j0*dr) * (r - j1*dr ) * (r - j2*dr ) * f3 / (6. * dr * dr * dr);
+    // Ensure we have at least 4 points
+    if (N < 4) {
+        // fallback to simple linear interpolation between nearest points
+        if (N == 1) return f[0];
+        double idx = x / dr;
+        int i0 = bound((int)floor(idx), 0, N-2);
+        double t = (x - i0*dr) / dr;
+        return f[i0] * (1.0 - t) + f[i0+1] * t;
+    }
 
+    // Clamp j0 into valid range for cubic_interp which needs j0..j0+3
+    int j0_clamped = bound(j0, 0, N - 4);
+    // Call cubic_interp with the four nodal values
+    return cubic_interp(x, f[j0_clamped], f[j0_clamped+1], f[j0_clamped+2], f[j0_clamped+3], j0_clamped, dr);
+}
+
+// Determine an approximate j0 from x and call interp4_uniform_with_j0.
+double interp4_uniform(const std::vector<double>& f, double x, double dr) {
+    int N = (int)f.size();
+    if (N == 0) return 0.0;
+    // approximate index of x in nodal grid
+    double idx = x / dr;
+    // choose j0 so that x lies near interior of the 4-point stencil
+    int j0 = (int)floor(idx) - 1; // prefer f[j0+1], f[j0+2] around idx
+    return interp4_uniform_with_j0(f, x, j0, dr);
+}
+
+// 5-point (degree-4) Lagrange interpolation on a uniform grid.
+// Uses nodes j0..j0+4 with coordinates (j0+k)*dr.
+double interp5_uniform_with_j0(const std::vector<double>& f, double x, int j0, double dr) {
+    int N = (int)f.size();
+    if (N == 0) return 0.0;
+    if (N < 5) {
+        // Not enough points: fall back to 4-point interpolation
+        int j4 = (int)floor(x / dr) - 1; // reasonable centered guess for 4-point stencil
+        return interp4_uniform_with_j0(f, x, j4, dr);
+    }
+    int j0c = bound(j0, 0, N - 5);
+    std::vector<double> X(5), Y(5);
+    for (int k = 0; k < 5; ++k) {
+        X[k] = (j0c + k) * dr;
+        Y[k] = f[j0c + k];
+    }
+    return lagrange_interp(x, X, Y);
+}
+
+double interp5_uniform(const std::vector<double>& f, double x, double dr) {
+    int N = (int)f.size();
+    if (N == 0) return 0.0;
+    // center the 5-point stencil around x as much as possible: choose j0 so that j0+2 ~ x/dr
+    int j0 = (int)floor(x / dr) - 2;
+    return interp5_uniform_with_j0(f, x, j0, dr);
+}
+
+// Even-symmetric 4-point interpolation (assumes f(-x)=f(x))
+double interp4_uniform_even(const std::vector<double>& f, double x, double dr) {
+    int N = (int)f.size();
+    if (N == 0) return 0.0;
+    if (N < 4) {
+        // Fall back to plain 4-point or linear as implemented in interp4_uniform
+        return interp4_uniform(f, x, dr);
+    }
+
+    int j0 = (int)floor(x / dr) - 1; // nominal start for 4-point
+    // For the right boundary, avoid overrun
+    if (j0 > N - 4) j0 = N - 4;
+    // For the left boundary, allow negative j and reflect
+    std::vector<double> X(4), Y(4);
+    for (int k = 0; k < 4; ++k) {
+        int j = j0 + k;
+        int j_ref = j < 0 ? -j : j; // reflect across 0
+        if (j_ref >= N) j_ref = N - 1; // clamp if needed
+        X[k] = j * dr;      // note: negative coordinate allowed for symmetry
+        Y[k] = f[j_ref];
+    }
+    return lagrange_interp(x, X, Y);
+}
+
+// Even-symmetric 5-point interpolation (assumes f(-x)=f(x))
+double interp5_uniform_even(const std::vector<double>& f, double x, double dr) {
+    int N = (int)f.size();
+    if (N == 0) return 0.0;
+    if (N < 5) {
+        // Fall back to even 4-point
+        return interp4_uniform_even(f, x, dr);
+    }
+
+    int j0 = (int)floor(x / dr) - 2; // nominal start for 5-point
+    if (j0 > N - 5) j0 = N - 5;      // avoid right overrun
+
+    std::vector<double> X(5), Y(5);
+    for (int k = 0; k < 5; ++k) {
+        int j = j0 + k;
+        int j_ref = j < 0 ? -j : j; // reflect across 0
+        if (j_ref >= N) j_ref = N - 1; // clamp if needed (right edge safety)
+        X[k] = j * dr;      // negative coordinate allowed for symmetry
+        Y[k] = f[j_ref];
+    }
+    return lagrange_interp(x, X, Y);
 }
 
 //returns the value of the derivative estimated with a five point centered stencil at f3 at given order (i.e. order = 2 -> 2nd derivative) up to 4

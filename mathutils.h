@@ -11,6 +11,28 @@ using std::string;
 //just a header file for miscellaneous functions to avoid cluttering class-specific files
 double cubic_interp(double r, double f0, double f1, double f2, double f3, int j0, double dr);
 int bound(int n, int lower, int upper);
+// 4th-order accurate uniform-grid interpolation (wrapper around cubic_interp)
+// f: array of nodal values at x = k * dr for k=0..N-1
+// x: target evaluation point (in same coordinate units)
+// dr: grid spacing of the f array
+// Returns cubic (4-point Lagrange) interpolation at x. Falls back to linear/quadratic when near boundaries.
+double interp4_uniform(const std::vector<double>& f, double x, double dr);
+
+// Variant that accepts an explicit starting index j0 (index of f[0] used by cubic_interp)
+// j0 must satisfy 0 <= j0 <= N-4. The function will clamp j0 into range if needed.
+double interp4_uniform_with_j0(const std::vector<double>& f, double x, int j0, double dr);
+
+// 5-point (degree-4) Lagrange interpolation for uniform grids
+// In smooth regions this yields O(dr^5) error; using it ensures interpolation won't be the accuracy bottleneck
+// when combined with 4th-order spatial derivatives. Near boundaries, callers may prefer to fall back to
+// interp4_uniform or a one-sided stencil.
+double interp5_uniform_with_j0(const std::vector<double>& f, double x, int j0, double dr);
+double interp5_uniform(const std::vector<double>& f, double x, double dr);
+
+// Even-symmetric interpolation near the origin (assumes f(-x) = f(x))
+// These versions reflect indices across 0 when a left-boundary stencil would need negative indices.
+double interp4_uniform_even(const std::vector<double>& f, double x, double dr);
+double interp5_uniform_even(const std::vector<double>& f, double x, double dr);
 double fivePointDeriv(double step, int order, double f1, double f2, double f3, double f4, double f5);
 double sevenPointDeriv(double step, int order, double f1, double f2, double f3, double f4, double f5, double f6, double f7);
 void computeSplineCoefficients(const std::vector<double>& y, std::vector<double>& M);

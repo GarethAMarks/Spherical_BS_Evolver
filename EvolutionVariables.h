@@ -6,6 +6,9 @@
 #include <string>
 #include <fstream>
 #include "BosonStar.h"
+#include "ComplexScalarField.h" // for CSF in composite State
+
+class ComplexScalarField; // forward declaration for friendship
 
 //enum class for the BSSN evolved variables. v_ prefix is to prevent ambiguity with numerical state values
 enum bssn_var
@@ -37,14 +40,15 @@ struct BSSNState
     double K; //trace of extrinsic curvature
     double c_chris_Z; //z component of contracted conformal christoffel symbols
 
-    double phi_re; //real + imaginary part of scalar field
-    double phi_im;
-
-    double K_phi_re; //real + imaginary part of scalar field momentum
-    double K_phi_im;
-
     double alpha; //lapse
     double beta; //shift (only z component nonzero)
+};
+
+// Composite state holding geometry/gauge (BSSNState) and matter (CSF)
+// Long-term plan: remove matter fields from BSSNState and access them via State::csf only.
+struct State {
+    CSF csf;         // complex scalar field variables
+    BSSNState bssn;  // geometric and gauge variables
 };
 
 //the BSSN variables, along with some auxiliary quantities, on a single time slice.
@@ -61,7 +65,7 @@ class BSSNSlice
     double refinement_level;
 
     public:
-        std::vector<BSSNState> states; //array of states on a BSSN time slice
+    std::vector<State> states2;    // composite state (geometry + matter) on this time slice
         std::vector<double> theta; //array of theta-values, only to be allocated if CCZ4 is used
 
         std::vector<int> refinement_points; //points at which refinement should be halved; to be copied from spacetime version at start of each step
@@ -92,6 +96,8 @@ class BSSNSlice
 class Spacetime
 {
     public:
+        // Initialize CSF model with this spacetime context
+        Spacetime();
         std::vector<BSSNSlice> slices;//vector of entire time slices
 
         void initialize(BosonStar& boson_star);
@@ -108,6 +114,10 @@ class Spacetime
 
 //auxiliary variables held on a particular time slice-- CONVENTION: upper/lowercase r,w denote upstairs/downstairs indices where relevent
     private:
+        friend class ComplexScalarField; // allow matter models to access potential V, dV
+
+        // Matter model instance reused across evaluations to avoid per-point construction
+        ComplexScalarField csf_model;
 
         BSSNSlice* current_slice_ptr; //pointer to current slice, updated on each time step
 
