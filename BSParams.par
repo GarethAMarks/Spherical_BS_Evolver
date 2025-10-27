@@ -23,36 +23,42 @@ gaussian_start = 0
 enforced_freq = 0.9
 
 #grid params
-R = 120
-n_gridpoints = 1600
+R = 200
+n_gridpoints = 2000
 courant_factor = 0.4
-stop_time = 500
+stop_time = 5000
 cell_centered = 0
+BS_resolution_factor = 2 #raise BS resolution in ID solver by this factor
 
-BS_resolution_factor = 1 #raise BS resolution in ID solver by this factor
+refinement_points = -1 1200 #after these points, effective resolution will be halved. Set first value as 0 or negative for no refinement
 
-refinement_points = -1 1000 2500 #after these points, effective resolution will be halved. Set first value as 0 or negative for no refinement
+#Massless real scalar field params: 0.01322275, 0.0132227675
+add_real_field = 1 #whether to add a real SF before evolution
+real_amp = 0.01322275375
+real_sigma = 5.0
+real_center = 20.0
 
 #evolution parameters
-run_spacetime_solver = 0
+run_spacetime_solver = 1
 min_chi = 0.0001
 min_z = 0.00001
 max_stored_slices = 5
 stop_on_migrate = 0 #if true, exit with message when central amplitude migrates by >10%
 
 sigma_BSSN = 0.333333 #BSSN damping; in CCZ4, doubles as c3 / 3
-eta = 1.0
-gamma_fac = 0.75
+
 damping_factor = 0.0
-evolve_shift = 0
-only_BS_violation = 0
+only_BS_violation = 1
 spatially_varying_BC = 1
 
 shock_gauge = 0 #if true enables shock-avoiding gauge evolution, Bona-Masso with f(alpha) = 1 + shock_fac / alpha^2
 shock_fac = 2.0 
+eta = 1.0
+gamma_fac = 0.75
+evolve_shift = 0
 
-use_CCZ4 = 1 #0 for BSSN, 1 for CCZ4
-c1 = 0.02
+use_CCZ4 = 0 #0 for BSSN, 1 for CCZ4
+c1 = 0.12
 c2 = 0.0
 theta_off = 0 #disables CCZ4 theta evolution; probably keep this off now
 
@@ -68,7 +74,7 @@ make_tangherlini = 0
 store_A0 = 1
 thinshell_res_fac = 1
 
-uniform_data = 1 #if true will expect data smoothed + interpolated onto uniform grid via smooth_and_interp.py
+uniform_data = 1 #if true (and read_thinshell is true) will expect data smoothed + interpolated onto uniform grid via smooth_and_interp.py
 cutoff_frac = 0.75 
 
 #Linear Perturbation params

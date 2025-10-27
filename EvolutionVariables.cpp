@@ -23,9 +23,7 @@ using std::min;
 using std::max;
 using std::rotate;
 // Spacetime constructor: initialize reusable CSF model with this context
-Spacetime::Spacetime() : csf_model(this) {}
-
-
+Spacetime::Spacetime() : csf_model(this), rsf_model(this) {}
 
 //overloads for addition/ scalar multiplication of BSSNState sets and the slice arrays containing them
 // Forward declarations for BSSNState operators used by State operators below
@@ -36,24 +34,25 @@ BSSNState operator*(double c, const BSSNState& s);
 
 // Composite State elementwise operations (applies to both csf and bssn)
 State operator+(const State& a, const State& b) {
-    return State{a.csf + b.csf, a.bssn + b.bssn};
+    return State{a.csf + b.csf, a.bssn + b.bssn, a.rsf + b.rsf};
 }
 
 State operator-(const State& a, const State& b) {
-    return State{a.csf - b.csf, a.bssn - b.bssn};
+    return State{a.csf - b.csf, a.bssn - b.bssn, a.rsf - b.rsf};
 }
 
 State operator*(const State& a, const State& b) {
-    return State{a.csf * b.csf, a.bssn * b.bssn};
+    return State{a.csf * b.csf, a.bssn * b.bssn, a.rsf * b.rsf};
 }
 
 State operator*(double c, const State& a) {
-    return State{c * a.csf, c * a.bssn};
+    return State{c * a.csf, c * a.bssn, c * a.rsf};
 }
 
 inline State operator/(const State& a, double c) {
     return (1.0 / c) * a;
 }
+
 BSSNState operator+(const BSSNState& s1, const BSSNState& s2)
 {
     return (BSSNState){s1.chi + s2.chi, s1.h_zz + s2.h_zz, s1.h_ww + s2.h_ww, s1.A_zz + s2.A_zz, s1.A_ww + s2.A_ww, s1.K + s2.K, s1.c_chris_Z + s2.c_chris_Z,
@@ -233,6 +232,12 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
                 case v_theta:
                     F[j] = theta[J[j]];
                     break;
+                case v_psi:
+                    F[j] = states2[J[j]].rsf.psi;
+                    break;
+                case v_K_psi:
+                    F[j] = states2[J[j]].rsf.K_psi;
+                    break;
                 default:
                     cerr << "ERROR: invalid variable requested for differentiation" << endl;
                     exit(0);
@@ -292,9 +297,143 @@ double BSSNSlice::make_tangherlini (double m, double min_chi, double D)
     states2[j].bssn.beta = 0.;
 
     }
-#
     return m;
 }
+
+// Helper to apply high-order damping at a single gridpoint j
+void Spacetime::apply_damping_at_point(int j,
+                                       BSSNSlice* slice_ptr,
+                                       std::vector<State>& rhs_states2,
+                                       std::vector<double>& rhs_theta)
+{
+    // refinement factor local to j
+    int res_fac = 1 << (slice_ptr->get_refinement_level(j, refinement_points) - 1);
+
+    // indices for 7-point centered stencil with symmetry fix near the origin
+    std::array<int, 7> J = {j - 3 * res_fac, j - 2 * res_fac, j - 1 * res_fac, j, j + 1 * res_fac, j + 2 * res_fac, j + 3 * res_fac};
+    if (j < 3) {
+        for (int k = 0; k < 7; ++k) J[k] = std::max(-J[k], J[k]);
+    }
+
+    const double h = dr * res_fac;
+    const double d_mult = damping_factor * ((h * h * h * h * h) / 64.0);
+
+    // references for State stencil
+    State& sJ0 = slice_ptr->states2[J[0]];
+    State& sJ1 = slice_ptr->states2[J[1]];
+    State& sJ2 = slice_ptr->states2[J[2]];
+    State& sJ3 = slice_ptr->states2[J[3]];
+    State& sJ4 = slice_ptr->states2[J[4]];
+    State& sJ5 = slice_ptr->states2[J[5]];
+    State& sJ6 = slice_ptr->states2[J[6]];
+
+    State damping_corr = d_mult * sevenPointDeriv(h, 6, sJ0, sJ1, sJ2, sJ3, sJ4, sJ5, sJ6);
+    rhs_states2[j] = rhs_states2[j] + damping_corr;
+
+    if (use_CCZ4 && rhs_theta.size() == static_cast<size_t>(n_gridpoints))
+    {
+        double& tJ0 = slice_ptr->theta[J[0]];
+        double& tJ1 = slice_ptr->theta[J[1]];
+        double& tJ2 = slice_ptr->theta[J[2]];
+        double& tJ3 = slice_ptr->theta[J[3]];
+        double& tJ4 = slice_ptr->theta[J[4]];
+        double& tJ5 = slice_ptr->theta[J[5]];
+        double& tJ6 = slice_ptr->theta[J[6]];
+        double theta_corr = d_mult * sevenPointDeriv<double>(h, 6, tJ0, tJ1, tJ2, tJ3, tJ4, tJ5, tJ6);
+        rhs_theta[j] += theta_corr;
+    }
+}
+
+// Apply Sommerfeld-like outer boundary conditions to rhs
+// Updates rhs.states2 at [last_active_j] and [last_active_j - res_fac]
+void Spacetime::sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slice_ptr)
+{
+    int res_fac = res_fac_outer; //number of points skipped per slot in stencil
+
+    // asymptotic states and their derivatives where relevant
+    State asymp_state{}; // matter part zero by default
+    asymp_state.bssn = (BSSNState){chi_asymp(R - dr * res_fac), 1., 1., 0., 0., 0., 0., alpha_asymp(R - dr * res_fac), 0.};
+    State asymp_deriv{}; // r-derivative of asymptotic expansion (matter zero)
+    asymp_deriv.bssn = (BSSNState){d_chi_asymp(R - dr * res_fac), 0., 0., 0., 0., 0., 0., d_alpha_asymp(R - dr * res_fac), 0.};
+
+    //version without spatially varying asymptotics
+    if (!spatially_varying_BC)
+    {
+        asymp_state.bssn = (BSSNState){1., 1., 1., 0., 0., 0., 0., 1., 0.};
+        asymp_deriv.bssn = (BSSNState){0., 0., 0., 0., 0., 0., 0., 0., 0.};
+    }
+
+    //maybe adjust to account for purported 1/r^2 decay in K!
+    State N{};
+    N.bssn = (BSSNState){1., 1., 1., 1., 1., 1., 1., 1., 1.};
+    N.csf = (CSF){1., 1., 1., 1.};
+    
+    if (add_real_field)
+        N.rsf = (RSF){1., 1.};
+
+    N = pow(R, (4. - D))  * N;
+
+    //outermost 5 active gridpoints
+    State& s1 = slice_ptr->states2[last_active_j - 4 * res_fac];
+    State& s2 = slice_ptr->states2[last_active_j - 3 * res_fac];
+    State& s3 = slice_ptr->states2[last_active_j - 2 * res_fac];
+    State& s4 = slice_ptr->states2[last_active_j - 1 * res_fac];
+    State& s5 = slice_ptr->states2[last_active_j];
+
+    //limiting characteristic speeds at infinity
+    // characteristic speeds
+    State char_speeds{};
+    double cs = sqrt(2. / s4.bssn.alpha);
+    char_speeds.bssn = (BSSNState){cs, 1., 1., 1., 1., cs, 1., cs, 1.};
+    char_speeds.csf = (CSF){1., 1., 1., 1.};
+
+    if (add_real_field)
+        char_speeds.rsf = (RSF){1., 1.};
+
+    rhs.states2[last_active_j - res_fac] = (-1.) * char_speeds * ( p4_stencil(dr * res_fac, s1, s2, s3, s4, s5) + (0.5 * D - 1.) * N * (s4 - asymp_state) /  (dr * (last_active_j - res_fac)) - asymp_deriv);
+
+    //update variable asymptotic states to outermost edge
+    if (spatially_varying_BC)
+    {asymp_state.bssn.chi = chi_asymp(R);  asymp_state.bssn.alpha = alpha_asymp(R);
+    asymp_deriv.bssn.chi = d_chi_asymp(R);  asymp_deriv.bssn.alpha = d_alpha_asymp(R);}
+
+    rhs.states2[last_active_j] = (-1) * char_speeds * ( p5_stencil(dr * res_fac, s1, s2, s3, s4, s5) + (0.5 * D - 1.) * N * (s5 - asymp_state) / (dr * last_active_j) - asymp_deriv);
+
+    if (use_CCZ4)
+    {
+        double& t1 = slice_ptr->theta[last_active_j - 4 * res_fac];
+        double& t2 = slice_ptr->theta[last_active_j - 3 * res_fac];
+        double& t3 = slice_ptr->theta[last_active_j - 2 * res_fac];
+        double& t4 = slice_ptr->theta[last_active_j - 1 * res_fac];
+        double& t5 = slice_ptr->theta[last_active_j];
+
+        rhs.theta[last_active_j - res_fac] = -(p4_stencil(dr * res_fac, t1, t2, t3, t4, t5) + (0.5 * D - 1.) * t4 / (dr * (last_active_j - res_fac)));
+        rhs.theta[last_active_j] = -(p5_stencil(dr * res_fac, t1, t2, t3, t4, t5) + (0.5 * D - 1.) * t5 / (dr * (last_active_j)));
+    }
+}
+
+//enforce tracelessness of A
+void Spacetime::make_A_traceless(BSSNSlice* slice_ptr)
+{
+    double n = D - 2.;
+
+    for (int j = 0; j < n_gridpoints; j++)
+    {
+        if (!active_points[j]) //perform no computations on inactive points
+            continue;
+
+        const double h_zz = slice_ptr->states2[j].bssn.h_zz;
+        const double h_ww = slice_ptr->states2[j].bssn.h_ww;
+        const double A_zz = slice_ptr->states2[j].bssn.A_zz;
+        const double A_ww = slice_ptr->states2[j].bssn.A_ww;
+
+            double A = A_zz / h_zz + n * A_ww / h_ww;
+        slice_ptr->states2[j].bssn.A_zz = A_zz - h_zz * A / (D - 1.);
+        slice_ptr->states2[j].bssn.A_ww = A_ww - h_ww * A / (D - 1.);
+    }
+
+}
+
 
 //reads data from a boson_star object we have already solved for into initial BSSN slice.
 void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, bool isotropic, bool cell_centered)
@@ -365,8 +504,8 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
 
     for (int j = 0; j < n_gridpoints; j++)
     {
-    // cell- or vertex-centered coordinate
-    double z = (j + 0.5 * (double)cell_centered) * dr;
+        // cell- or vertex-centered coordinate
+        double z = (j + 0.5 * (double)cell_centered) * dr;
 
         // Interpolate X (areal conformal factor) or psi (isotropic conformal factor)
         double X_interp = 1.;
@@ -388,9 +527,9 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
         }
 
         //for time-independent static, spherically symmetric boson stars K_ij = 0-- may need to do more work when we consider perturbations.
-    states2[j].bssn.A_zz = 0.;
-    states2[j].bssn.A_ww = 0.;
-    states2[j].bssn.K = 0.;
+        states2[j].bssn.A_zz = 0.;
+        states2[j].bssn.A_ww = 0.;
+        states2[j].bssn.K = 0.;
 
         // start at t = 0 so the scalar field is real regardless of phase
         double A_interp = 0.;
@@ -441,10 +580,10 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
         double z = (j) * dr;
 
         // inverse metric components, for convenience
-    double h_ZZ = 1 / states2[j].bssn.h_zz;
-    double h_WW = 1 / states2[j].bssn.h_ww;
+        double h_ZZ = 1 / states2[j].bssn.h_zz;
+        double h_WW = 1 / states2[j].bssn.h_ww;
 
-    states2[j].bssn.c_chris_Z = 0.5 * h_ZZ * h_ZZ * d_z(v_h_zz,j) + (D - 2.) * (-0.5 * h_ZZ * h_WW * d_z(v_h_ww,j));
+        states2[j].bssn.c_chris_Z = 0.5 * h_ZZ * h_ZZ * d_z(v_h_zz,j) + (D - 2.) * (-0.5 * h_ZZ * h_WW * d_z(v_h_ww,j));
 
         // extra geometric term, which goes to zero at z = 0
         if (z > 1e-8)
@@ -452,7 +591,7 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
 
         // hard enforce 0 for isotropic data
         if (isotropic)
-            states2[j].bssn.c_chris_Z = 0;
+            states2[j].bssn.c_chris_Z = 0.;
     }
 
     // Legacy states removed: no mirroring
@@ -480,12 +619,11 @@ void BSSNSlice::write_slice(std::string file_name)
         if (use_CCZ4)
             theta0 = theta[j];
 
-
     data_file <<  std::setprecision (16) << (j) * dr << "   " << states2[j].bssn.chi << "    " << states2[j].bssn.h_zz << "    " << states2[j].bssn.h_ww  << "    " << states2[j].bssn.A_zz
         << "   " << states2[j].bssn.A_ww << "    " << states2[j].bssn.K << "    " << states2[j].bssn.c_chris_Z  << "    " << states2[j].csf.phi_re << "    " << states2[j].csf.phi_im
-        << "   " << states2[j].csf.K_phi_re << "    " << states2[j].csf.K_phi_im << "    " << states2[j].bssn.alpha << "    " << states2[j].bssn.beta << "    " << theta0 << endl;
+        << "   " << states2[j].csf.K_phi_re << "    " << states2[j].csf.K_phi_im << "    " << states2[j].bssn.alpha << "    " << states2[j].bssn.beta << "    " <<  theta0
+        << "   " << states2[j].rsf.psi << "    " << states2[j].rsf.K_psi << endl;
     }
-
 }
 
 //reads slice data from checkpoint file of form checkpoint(time).dat w/o parentheses
@@ -515,7 +653,6 @@ void BSSNSlice::read_checkpoint(int time, int n_gridpoints)
 
             if(iss >> z >> chi >> h_zz >> h_ww >> A_zz >> A_ww >> K >> c_chris_Z >> phi_re >> phi_im >> K_phi_re >> K_phi_im >> alpha >> beta >> t)
             {
-                // migrated
                 states2[j].bssn.chi = chi; states2[j].bssn.h_zz = h_zz; states2[j].bssn.h_ww = h_ww;
                 states2[j].bssn.A_zz = A_zz; states2[j].bssn.A_ww = A_ww; states2[j].bssn.K = K; states2[j].bssn.c_chris_Z = c_chris_Z;
                 states2[j].csf.phi_re = phi_re; states2[j].csf.phi_im = phi_im; states2[j].csf.K_phi_re = K_phi_re; states2[j].csf.K_phi_im = K_phi_im;
@@ -612,7 +749,6 @@ double Spacetime::V(const double A)
 
     else
         return mu * mu * A * A * pow((1. - 2. * pow(A / sigma, 2)), 2) + lambda * pow(A,4) ;
-
 }
 
 double Spacetime::dV(const double A)
@@ -622,7 +758,6 @@ double Spacetime::dV(const double A)
 
     else
         return mu * mu - 8. * mu * mu * pow(A / sigma, 2) + 12. * mu * mu * pow(A / sigma, 4) + 2. * A * A * lambda;
-
 }
 
 //asymptotic values of chi and alpha and their derivatives. TODO: generalize D > 4
@@ -633,11 +768,7 @@ double Spacetime::chi_asymp(double r)
 
 double Spacetime::alpha_asymp(double r)
 {
-    /*if (!make_tangherlini)
-        return 1;
-    else*/
         return sqrt(1 - 2. * M / R);
-
 }
 
 double Spacetime::d_chi_asymp(double r)
@@ -647,9 +778,6 @@ double Spacetime::d_chi_asymp(double r)
 
 double Spacetime::d_alpha_asymp(double r)
 {
-    /*if (!make_tangherlini)
-        return 0;
-    else*/
         return (M / (R * R)) / sqrt(1 - 2. * M / r);
 }
 
@@ -657,7 +785,6 @@ double Spacetime::d_alpha_asymp(double r)
  // returns RHS as {chi, eta} where eta is the radial derivative of chi
  vector<double> Spacetime::ham_init_rhs(double r, double chi, double eta)
  {
-
     int k = floor(r / dr) - 1;
     while (k * dr < r)
         k++;
@@ -677,20 +804,18 @@ double Spacetime::d_alpha_asymp(double r)
     double dz_phi_re = cubic_interp(r, d_z(v_phi_re, j0), d_z(v_phi_re, j0 + 1), d_z(v_phi_re, j0 + 2), d_z(v_phi_re, j0 + 3),j0,  dr);
     double dz_phi_im = cubic_interp(r, d_z(v_phi_im, j0), d_z(v_phi_im, j0 + 1), d_z(v_phi_im, j0 + 2), d_z(v_phi_im, j0 + 3),j0,  dr);
 
-   /* if (j0 == 0)
-    {
-        phi_re = s.states[0].phi_re * (dr - r) / dr + s.states[1].phi_re * r / dr;
-        phi_im = s.states[0].phi_im * (dr - r) / dr + s.states[1].phi_im * r / dr;
-
-        K_phi_re = s.states[0].K_phi_re * (dr - r) / dr + s.states[1].K_phi_re * r / dr;
-        K_phi_im = s.states[0].K_phi_im * (dr - r) / dr + s.states[1].K_phi_im * r / dr;
-
-        dz_phi_re = d_z(v_phi_re, 0) * (dr - r) / dr + d_z(v_phi_re, 1) * r / dr;
-        dz_phi_im = d_z(v_phi_im, 0) * (dr - r) / dr + d_z(v_phi_im, 1) * r / dr;
-    }*/
-
     double mod_phi = sqrt(phi_re * phi_re + phi_im + phi_im);
     double rho0 = 2. * (K_phi_im * K_phi_im + K_phi_re * K_phi_re) +  0.5 * chi * (pow(dz_phi_re,2) + pow(dz_phi_im,2)) + 0.5 * V(mod_phi);
+    
+    //account for real scalar field if needed
+    if (add_real_field)
+    {   
+        //double psi = cubic_interp(r, s.states2[j0].rsf.psi, s.states2[j0 + 1].rsf.psi, s.states2[j0 + 2].rsf.psi, s.states2[j0 + 3].rsf.psi,j0, dr);
+        double dz_psi= cubic_interp(r, d_z(v_psi, j0), d_z(v_psi, j0 + 1), d_z(v_psi, j0 + 2), d_z(v_psi, j0 + 3),j0,  dr);
+        double K_psi = cubic_interp(r, s.states2[j0].rsf.K_psi, s.states2[j0 + 1].rsf.K_psi, s.states2[j0 + 2].rsf.K_psi, s.states2[j0 + 3].rsf.K_psi,j0, dr);
+
+        rho0 += 0.5 * chi * dz_psi * dz_psi + 2. * K_psi * K_psi;
+    }
 
     double chi_rhs = eta;
     double eta_rhs = 5. * eta * eta / (4. * chi) + 8. * M_PI * rho0;
@@ -762,7 +887,6 @@ void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
 
     const double invDm1 = 1.0 / (D - 1.);
 
-
     // shorthand versions of the state on desired slice for convenience
     const double chi = max(min_chi, slice_ptr->states2[j].bssn.chi);
     const double h_zz = slice_ptr->states2[j].bssn.h_zz;
@@ -801,8 +925,8 @@ void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
 
     // 3-covariant derivatives of alpha and tracefree parts
     D_zz_alpha[j] = d_zz(v_alpha, j) - cZzz * d_z_alpha + 0.5 * d_z_chi * d_z_alpha * inv_chi;
-    // regularized alpha_z/z at the origin
-    const double d_alpha_z = (z <= min_z) ? d_zz(v_alpha, j) : (d_z_alpha / z);
+    
+    const double d_alpha_z = (z <= min_z) ? d_zz(v_alpha, j) : (d_z_alpha / z); // regularized alpha_z/z at the origin
     D_ww_alpha[j] = d_alpha_z - (cZww + 0.5 * h_ww * inv_hzz * d_z_chi * inv_chi) * d_z_alpha;
 
     D_zz_alpha_TF[j] = n * (D_zz_alpha[j] - h_zz * inv_hww * D_ww_alpha[j]) * invDm1;
@@ -865,6 +989,19 @@ void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
     S_zz[j] = csf_model.S_zz(csf, bssn, d_z_csf, d_zz_csf);
     S_ww[j] = csf_model.S_ww(csf, bssn, d_z_csf, d_zz_csf);
 
+    // If configured, add massless real scalar field contributions
+    if (add_real_field)
+    {
+        RSF rsf = slice_ptr->states2[j].rsf;
+        RSF d_z_rsf{d_z(v_psi, j), d_z(v_K_psi, j)};
+        RSF d_zz_rsf{0.0, 0.0};
+
+        rho[j] += rsf_model.rho(rsf, bssn, d_z_rsf, d_zz_rsf);
+        j_z[j] += rsf_model.j_z(rsf, bssn, d_z_rsf, d_zz_rsf);
+        S_zz[j] += rsf_model.S_zz(rsf, bssn, d_z_rsf, d_zz_rsf);
+        S_ww[j] += rsf_model.S_ww(rsf, bssn, d_z_rsf, d_zz_rsf);
+    }
+
     // Trace S = gamma^{ij} S_ij = chi * (h^{zz} S_zz + n h^{ww} S_ww)
     S[j] = chi * (inv_hzz * S_zz[j] + n * inv_hww * S_ww[j]);
 
@@ -915,19 +1052,19 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
         if (!active_points[j])//perform no calculations and skip on inactive points
             continue;
 
-    double z = (j + grid_offset) * dr;
+        double z = (j + grid_offset) * dr;
 
-    //shorthand versions of the state vars on desired slice for convenience
-    const double chi = max(min_chi, slice_ptr->states2[j].bssn.chi);
-    const double h_zz = slice_ptr->states2[j].bssn.h_zz;
-    const double h_ww = slice_ptr->states2[j].bssn.h_ww;
-    const double A_zz = slice_ptr->states2[j].bssn.A_zz;
-    const double A_ww = slice_ptr->states2[j].bssn.A_ww;
-    const double K = slice_ptr->states2[j].bssn.K;
-    const double c_chris_Z = slice_ptr->states2[j].bssn.c_chris_Z;
+        //shorthand versions of the state vars on desired slice for convenience
+        const double chi = max(min_chi, slice_ptr->states2[j].bssn.chi);
+        const double h_zz = slice_ptr->states2[j].bssn.h_zz;
+        const double h_ww = slice_ptr->states2[j].bssn.h_ww;
+        const double A_zz = slice_ptr->states2[j].bssn.A_zz;
+        const double A_ww = slice_ptr->states2[j].bssn.A_ww;
+        const double K = slice_ptr->states2[j].bssn.K;
+        const double c_chris_Z = slice_ptr->states2[j].bssn.c_chris_Z;
 
-    const double alpha = slice_ptr->states2[j].bssn.alpha;
-    const double beta = slice_ptr->states2[j].bssn.beta;
+        const double alpha = slice_ptr->states2[j].bssn.alpha;
+        const double beta = slice_ptr->states2[j].bssn.beta;
 
 
         if (wave_mode) //converts to wave eq'n solver with beta the time derivative of phi_re for testing purposes
@@ -961,32 +1098,33 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
 
         //fill out RHS of the BSSN evolution system
         rhs.states2[j].bssn.chi  = beta * d_z_chi  + 2.* chi * (alpha * K - d_z_beta - n * beta_z ) * invDm1;
-
         rhs.states2[j].bssn.h_zz = beta * d_z_h_zz + 2. * h_zz * d_z_beta - 2. * h_zz * (d_z_beta + n * beta_z) * invDm1 - 2. * alpha * A_zz;
         rhs.states2[j].bssn.h_ww = beta * d_z_h_ww - 2. * h_ww * (d_z_beta - beta_z) * invDm1 - 2. * alpha * A_ww;
 
         if (!use_CCZ4) //different evolution eq'n used in CCZ4
-    {rhs.states2[j].bssn.K = beta * d_z_K - chi * inv_hzz * D_zz_alpha[j] + alpha * inv_hzz * inv_hzz * A_zz * A_zz + alpha * K * K * invDm1
-                        + n * inv_hww * (alpha * A_ww * A_ww / h_ww - chi * D_ww_alpha[j]) + 8. * M_PI * alpha * (S[j] + (D - 3.) * rho[j]) / n;}
+        {
+            rhs.states2[j].bssn.K = beta * d_z_K - chi * inv_hzz * D_zz_alpha[j] + alpha * inv_hzz * inv_hzz * A_zz * A_zz + alpha * K * K * invDm1
+                            + n * inv_hww * (alpha * A_ww * A_ww / h_ww - chi * D_ww_alpha[j]) + 8. * M_PI * alpha * (S[j] + (D - 3.) * rho[j]) / n;
+        }
 
-    rhs.states2[j].bssn.A_zz = beta * d_z(v_A_zz, j) + 2. * A_zz * d_z_beta - 2. * A_zz * (d_z_beta + n * beta_z) * invDm1 + alpha * K * A_zz
-                            - 2. * alpha * A_zz * inv_hzz * A_zz + chi * (alpha * R_zz_TF[j] - D_zz_alpha_TF[j] - 8. * M_PI * alpha * S_zz_TF[j]);
-    rhs.states2[j].bssn.A_ww = beta * d_z(v_A_ww, j) - 2. * A_ww * (d_z_beta -  beta_z) * invDm1 + alpha * A_ww * (K - 2 * inv_hww * A_ww)
-                            + chi * (alpha * R_ww_TF[j] - D_ww_alpha_TF[j] - 8. * M_PI * alpha * S_ww_TF[j]);
+        rhs.states2[j].bssn.A_zz = beta * d_z(v_A_zz, j) + 2. * A_zz * d_z_beta - 2. * A_zz * (d_z_beta + n * beta_z) * invDm1 + alpha * K * A_zz
+                                - 2. * alpha * A_zz * inv_hzz * A_zz + chi * (alpha * R_zz_TF[j] - D_zz_alpha_TF[j] - 8. * M_PI * alpha * S_zz_TF[j]);
+        rhs.states2[j].bssn.A_ww = beta * d_z(v_A_ww, j) - 2. * A_ww * (d_z_beta -  beta_z) * invDm1 + alpha * A_ww * (K - 2 * inv_hww * A_ww)
+                                + chi * (alpha * R_ww_TF[j] - D_ww_alpha_TF[j] - 8. * M_PI * alpha * S_ww_TF[j]);
 
-    rhs.states2[j].bssn.c_chris_Z = beta * d_z(v_c_chris_Z,j) + 2. * c_chris_Z * (d_z_beta + n * beta_z) * invDm1 + inv_hzz * d_zz(v_beta,j) - c_chris_Z * d_z_beta
-                                + (D - 3.) * inv_hzz * d_zz(v_beta,j) * invDm1 - 2. * (D - 2.) * alpha * inv_hzz * d_z_K * invDm1
-                                - A_zz * inv_hzz * inv_hzz * ( (D - 1.) * alpha * d_z_chi / chi + 2 * d_z_alpha)
-                                + 2 * alpha * (cZzz * inv_hzz * inv_hzz * A_zz + n * cZww * inv_hww * inv_hww * A_ww)
-                                - sigma_BSSN * aux_constraint[j] - 16. * M_PI * alpha * j_z[j]* inv_hzz;
+        rhs.states2[j].bssn.c_chris_Z = beta * d_z(v_c_chris_Z,j) + 2. * c_chris_Z * (d_z_beta + n * beta_z) * invDm1 + inv_hzz * d_zz(v_beta,j) - c_chris_Z * d_z_beta
+                                    + (D - 3.) * inv_hzz * d_zz(v_beta,j) * invDm1 - 2. * (D - 2.) * alpha * inv_hzz * d_z_K * invDm1
+                                    - A_zz * inv_hzz * inv_hzz * ( (D - 1.) * alpha * d_z_chi / chi + 2 * d_z_alpha)
+                                    + 2 * alpha * (cZzz * inv_hzz * inv_hzz * A_zz + n * cZww * inv_hww * inv_hww * A_ww)
+                                    - sigma_BSSN * aux_constraint[j] - 16. * M_PI * alpha * j_z[j]* inv_hzz;
 
         if (z >= min_z) //add terms in d_z(beta) / z - beta /z^2 when z =/= 0
             rhs.states2[j].bssn.c_chris_Z += n * (inv_hww + (D - 3.) * inv_hzz * invDm1) * (d_z_beta / z - beta / (z * z));
     
-     //gauge evolution
-    double f = (shock_gauge) ? (1. + shock_fac / (alpha * alpha) ): (one_log_fac/ alpha); //bona-masso f
-    rhs.states2[j].bssn.alpha = beta * d_z_alpha - f * (alpha * alpha) * K;
-    rhs.states2[j].bssn.beta =  (evolve_shift)? (beta * d_z_beta + gamma_fac * c_chris_Z - eta * beta): 0.;
+        //Gauge variable update using moving puncture evolution, unless evolve_shift is off in which case do not update beta
+        double f = (shock_gauge) ? (1. + shock_fac / (alpha * alpha) ): (one_log_fac/ alpha); //bona-masso f
+        rhs.states2[j].bssn.alpha = beta * d_z_alpha - f * (alpha * alpha) * K;
+        rhs.states2[j].bssn.beta =  (evolve_shift)? (beta * d_z_beta + gamma_fac * c_chris_Z - eta * beta): 0.;
        
         // ComplexScalarField RHS for matter variables (uses internal origin regularization and geometric couplings)
         CSF d_z_csf{d_z_phi_re, d_z_phi_im, d_z(v_K_phi_re, j), d_z(v_K_phi_im, j)};
@@ -1006,7 +1144,30 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
 
         rhs.states2[j].csf = csf_rhs;
 
-        //Gauge variable update using moving puncture evolution, unless evolve_shift is off in which case do not update beta
+        // RealScalarField RHS for massless real scalar (optional)
+        if (add_real_field)
+        {
+            RSF d_z_rsf{ d_z(v_psi, j), d_z(v_K_psi, j) };
+            // Second derivative needed only for psi
+            RSF d_zz_rsf{ d_zz(v_psi, j), 0.0 };
+
+            const RSF rsf_rhs = rsf_model.rhs_RSF(
+                slice_ptr->states2[j].rsf,
+                slice_ptr->states2[j].bssn,
+                d_z_rsf,
+                d_zz_rsf,
+                d_z_alpha,
+                d_z_chi,
+                chris_Zzz[j],
+                chris_Zww[j],
+                z);
+
+            rhs.states2[j].rsf = rsf_rhs;
+        }
+        else
+        {
+            rhs.states2[j].rsf = RSF{0.0, 0.0};
+        }
 
         //add supplementary terms if CCZ4 evolution is on
         if (use_CCZ4)
@@ -1037,150 +1198,17 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
                 rhs.theta[j] = 0.;
         }
 
-        //add damping in away from edges
-    if (damping_factor != 0. && j < n_gridpoints - 3 * res_fac_outer)
-            {
-        int res_fac = 1 << (slice_ptr->get_refinement_level(j, refinement_points) - 1);
-
-                // indices at which to take stencil (use fixed-size container to avoid per-iteration allocations)
-                std::array<int, 7> J = {j - 3 * res_fac, j - 2 * res_fac, j - 1 * res_fac, j, j + 1 * res_fac, j + 2 * res_fac, j + 3 * res_fac};
-
-                if (j < 3) //use symmetry across 0 to fill 7-point stencils
-                {
-                    for (int k = 0; k < 7; ++k)
-                        J[k] = std::max(-J[k], J[k]);
-                }
-
-                //account for odd parity of beta and contracted christoffels-- seems bad though?
-                /*if (j < 3)
-                {
-                    for (int k = 0; k < 3 - j; k++)
-                    {
-                        BSSNState s_inner = *sts[k];
-                        s_inner.beta *= -1.;
-                        s_inner.c_chris_Z *= -1.;
-                        *(sts[k]) = &s_inner;
-                    }
-                }*/
-
-                // precompute spatial step size for stencil and avoid pow in inner loop
-                const double h = dr * res_fac;
-                const double d_mult = damping_factor * ((h * h * h * h * h) / 64.0);
-
-                // direct references to avoid constructing temporary vectors on each point
-                State& sJ0 = slice_ptr->states2[J[0]];
-                State& sJ1 = slice_ptr->states2[J[1]];
-                State& sJ2 = slice_ptr->states2[J[2]];
-                State& sJ3 = slice_ptr->states2[J[3]];
-                State& sJ4 = slice_ptr->states2[J[4]];
-                State& sJ5 = slice_ptr->states2[J[5]];
-                State& sJ6 = slice_ptr->states2[J[6]];
-
-                State damping_corr = d_mult * sevenPointDeriv(h, 6, sJ0, sJ1, sJ2, sJ3, sJ4, sJ5, sJ6);
-
-                rhs.states2[j] = rhs.states2[j] + damping_corr;
-
-                if (use_CCZ4)
-                {
-                    double& tJ0 = slice_ptr->theta[J[0]];
-                    double& tJ1 = slice_ptr->theta[J[1]];
-                    double& tJ2 = slice_ptr->theta[J[2]];
-                    double& tJ3 = slice_ptr->theta[J[3]];
-                    double& tJ4 = slice_ptr->theta[J[4]];
-                    double& tJ5 = slice_ptr->theta[J[5]];
-                    double& tJ6 = slice_ptr->theta[J[6]];
-                    double theta_corr = d_mult * sevenPointDeriv<double>(h, 6, tJ0, tJ1, tJ2, tJ3, tJ4, tJ5, tJ6);
-                    rhs.theta[j] += theta_corr;
-
-                }
-            }
+        // add damping away from edges
+        if (damping_factor != 0. && j < n_gridpoints - 3 * res_fac_outer)
+            apply_damping_at_point(j, slice_ptr, rhs.states2, rhs.theta);
     }
 
-    int res_fac = res_fac_outer; //number of points skipped per slot in stencil
-
-    // asymptotic states and their derivatives where relevant
-    State asymp_state{}; // matter part zero by default
-    asymp_state.bssn = (BSSNState){chi_asymp(R - dr * res_fac), 1., 1., 0., 0., 0., 0., alpha_asymp(R - dr * res_fac), 0.};
-    State asymp_deriv{}; // r-derivative of asymptotic expansion (matter zero)
-    asymp_deriv.bssn = (BSSNState){d_chi_asymp(R - dr * res_fac), 0., 0., 0., 0., 0., 0., d_alpha_asymp(R - dr * res_fac), 0.};
-
-    //version without spatially varying asymptotics
-    if (!spatially_varying_BC)
-    {
-    asymp_state.bssn = (BSSNState){1., 1., 1., 0., 0., 0., 0., 1., 0.};
-    asymp_deriv.bssn = (BSSNState){0., 0., 0., 0., 0., 0., 0., 0., 0.};
-    }
-
-    //maybe adjust to account for purported 1/r^2 decay in K!
-    State N{};
-    N.bssn = (BSSNState){1., 1., 1., 1., 1., 1., 1., 1., 1.};
-    N.csf = (CSF){1., 1., 1., 1.};
-
-    //N = pow(R, (4. - D))  * N;
-    N = pow(R, (4. - D))  * N;
-
-
-    //outermost 5 active gridpoints
-    State& s1 = slice_ptr->states2[last_active_j - 4 * res_fac];
-    State& s2 = slice_ptr->states2[last_active_j - 3 * res_fac];
-    State& s3 = slice_ptr->states2[last_active_j - 2 * res_fac];
-    State& s4 = slice_ptr->states2[last_active_j - 1 * res_fac];
-    State& s5 = slice_ptr->states2[last_active_j];
-
-    //limiting characteristic speeds at infinity
-    // characteristic speeds
-    State char_speeds{};
-    double cs = sqrt(2. / s4.bssn.alpha);
-    char_speeds.bssn = (BSSNState){cs, 1., 1., 1., 1., cs, 1., cs, 1.};
-    char_speeds.csf = (CSF){1., 1., 1., 1.};
-
-    rhs.states2[last_active_j - res_fac] = (-1.) * char_speeds * ( p4_stencil(dr * res_fac, s1, s2, s3, s4, s5) + (0.5 * D - 1.) * N * (s4 - asymp_state) /  (dr * (last_active_j - res_fac)) - asymp_deriv);
-
-    //update variable asymptotic states to outermost edge
-    if (spatially_varying_BC)
-    {asymp_state.bssn.chi = chi_asymp(R);  asymp_state.bssn.alpha = alpha_asymp(R);
-    asymp_deriv.bssn.chi = d_chi_asymp(R);  asymp_deriv.bssn.alpha = d_alpha_asymp(R);}
-
-    rhs.states2[last_active_j] = (-1) * char_speeds * ( p5_stencil(dr * res_fac, s1, s2, s3, s4, s5) + (0.5 * D - 1.) * N * (s5 - asymp_state) / (dr * last_active_j) - asymp_deriv);
-
-
-    if (use_CCZ4)
-    {
-        double& t1 = slice_ptr->theta[last_active_j - 4 * res_fac];
-        double& t2 = slice_ptr->theta[last_active_j - 3 * res_fac];
-        double& t3 = slice_ptr->theta[last_active_j - 2 * res_fac];
-        double& t4 = slice_ptr->theta[last_active_j - 1 * res_fac];
-        double& t5 = slice_ptr->theta[last_active_j];
-
-        rhs.theta[last_active_j - res_fac] = -(p4_stencil(dr * res_fac, t1, t2, t3, t4, t5) + (0.5 * D - 1.) * t4 / (dr * (last_active_j - res_fac)));
-        rhs.theta[last_active_j] = -(p5_stencil(dr * res_fac, t1, t2, t3, t4, t5) + (0.5 * D - 1.) * t5 / (dr * (last_active_j)));
-    }
-
+    //apply Sommerfeld boundary conditions at outer boundary
+    sommerfeld_BC(rhs, res_fac_outer, slice_ptr);
     return rhs;
 }
 
-//enforce tracelessness of A
-void Spacetime::make_A_traceless(BSSNSlice* slice_ptr)
-{
-    double n = D - 2.;
-
-    for (int j = 0; j < n_gridpoints; j++)
-    {
-        if (!active_points[j]) //perform no computations on inactive points
-            continue;
-
-    const double h_zz = slice_ptr->states2[j].bssn.h_zz;
-    const double h_ww = slice_ptr->states2[j].bssn.h_ww;
-    const double A_zz = slice_ptr->states2[j].bssn.A_zz;
-    const double A_ww = slice_ptr->states2[j].bssn.A_ww;
-
-        double A = A_zz / h_zz + n * A_ww / h_ww;
-    slice_ptr->states2[j].bssn.A_zz = A_zz - h_zz * A / (D - 1.);
-    slice_ptr->states2[j].bssn.A_ww = A_ww - h_ww * A / (D - 1.);
-    }
-}
-
-//TODO: make these work for D =/= 4, and MR if this gets working
+//TODO: make these work with MR
 double Spacetime::slice_mass(BSSNSlice* slice_ptr)
 {
     const double n = D - 2;
@@ -1310,7 +1338,8 @@ void Spacetime:: write_current_slice(std::string file_name)
 
     data_file <<  std::setprecision (16) << (j + grid_offset) * dr << "   " << s.states2[j].bssn.chi << "    " << s.states2[j].bssn.h_zz << "    " << s.states2[j].bssn.h_ww  << "    " << s.states2[j].bssn.A_zz
         << "   " << s.states2[j].bssn.A_ww << "    " << s.states2[j].bssn.K << "    " << s.states2[j].bssn.c_chris_Z  << "    " << s.states2[j].csf.phi_re << "    " << s.states2[j].csf.phi_im
-        << "   " << s.states2[j].csf.K_phi_re << "    " << s.states2[j].csf.K_phi_im << "    " << s.states2[j].bssn.alpha << "    " << s.states2[j].bssn.beta << "    " << theta0 << endl;
+        << "   " << s.states2[j].csf.K_phi_re << "    " << s.states2[j].csf.K_phi_im << "    " << s.states2[j].bssn.alpha << "    " << s.states2[j].bssn.beta << "    " << theta0 
+        << "   " << s.states2[j].rsf.psi << "    " << s.states2[j].rsf.K_psi << endl;
     }
 }
 
@@ -1338,8 +1367,7 @@ void Spacetime:: write_diagnostics()
 
     const double& phi_re = current_slice_ptr->states2[j].csf.phi_re;
     const double& phi_im = current_slice_ptr->states2[j].csf.phi_im;
-
-        double A = sqrt(phi_re * phi_re + phi_im * phi_im);
+    double A = sqrt(phi_re * phi_re + phi_im * phi_im);
 
     data_file << std::setprecision (10) <<  (j + grid_offset) * dr << "   " << Ham[j] << "    " << Mom_Z[j]<< "    " << det_h[j]  << "    " << aux_test[j]
         << "    " << A << "    "  << d_zz(v_chi, j) << "    "  << d_zz(v_alpha, j)  << "    " << d_z(v_phi_re,j) << endl;
@@ -1394,6 +1422,10 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "one_log_fac = ", one_log_fac, quiet);
         fill_parameter(current_line, "stop_on_migrate = ", stop_on_migrate, quiet);
         fill_parameter(current_line, "cell_centered = ", cell_centered, quiet);
+        fill_parameter(current_line, "add_real_field = ", add_real_field, quiet);
+        fill_parameter(current_line, "real_amp = ", real_amp, quiet);
+        fill_parameter(current_line, "real_sigma = ", real_sigma, quiet);
+        fill_parameter(current_line, "real_center = ", real_center, quiet);
 
         fill_param_array(current_line, "refinement_points = ", refinement_points, quiet);
 
@@ -1476,15 +1508,30 @@ void Spacetime::kill_refinement_noise()
         int j3 = j4 - step;
         int j1 = j4 - 3 * step;
 
-        //average at points that seem to produce noise to hopefully kill error. should be only 2nd-order...
-    BSSNSlice& s1 = *current_slice_ptr;
-    s1.states2[j1] = 0.5 * (s1.states2[j1 - step] + s1.states2[j1 + step]);
-    s1.states2[j3] = 0.5 * (s1.states2[j3 - step] + s1.states2[j3 + step]);
+        // interpolate at mid-refinement boundary using cubic Lagrange polynomial
+        // Nodes around j1 are at j1-3*step, j1-step, j1+step, j1+3*step
+        // For uniform spacing, the weights at the center (x=0 relative to j1) are [-1/16, 9/16, 9/16, -1/16]
+        BSSNSlice& s1 = *current_slice_ptr;
+
+        const State& st1 = s1.states2[j1 - 3 * step];
+        const State& st2 = s1.states2[j1 - step];
+        const State& st3 = s1.states2[j1 + step];
+        const State& st4 = s1.states2[j1 + 3 * step];
+
+        s1.states2[j1] = (-1.0/16.0) * st1 + (9.0/16.0) * st2 + (9.0/16.0) * st3 + (-1.0/16.0) * st4;
+
+        // Repeat for j3 with the same symmetric stencil around j3
+        const State& tt1 = s1.states2[j3 - 3 * step];
+        const State& tt2 = s1.states2[j3 - step];
+        const State& tt3 = s1.states2[j3 + step];
+        const State& tt4 = s1.states2[j3 + 3 * step];
+
+        s1.states2[j3] = (-1.0/16.0) * tt1 + (9.0/16.0) * tt2 + (9.0/16.0) * tt3 + (-1.0/16.0) * tt4;
+
+        //s1.states2[j1] = 0.5 * (s1.states2[j1 - step] + s1.states2[j1 + step]);
+        //s1.states2[j3] = 0.5 * (s1.states2[j3 - step] + s1.states2[j3 + step]);
 
         start_point = j4;
-
-        //cout << "Success on level " << level << endl;
-
     }
 }
 
@@ -1527,7 +1574,7 @@ void Spacetime::compute_dtK(int time_index)
 
     for (int j = 0; j < n_gridpoints; j++)
     {
-    double z = (j + 0.5) * dr;
+        double z = (j + 0.5) * dr;
 
         if (z < R * (only_BS_violation ? (r_99 / R) : 0.9))
         {
@@ -1595,16 +1642,41 @@ void Spacetime::add_spacetime_pert(double a, double k, double center)
 
     for (int j = 0; j < n_gridpoints; j++)
     {
-    double phase = std::arg( std::complex<double>(s.states2[j].csf.phi_re, s.states2[j].csf.phi_im));
+        double phase = std::arg( std::complex<double>(s.states2[j].csf.phi_re, s.states2[j].csf.phi_im));
         double r = j * dr;
 
-    s.states2[j].csf.phi_re += cos(phase) * a * exp ( -pow (r - center, 2.) / k2);
-    s.states2[j].csf.phi_im += sin(phase) * a * exp ( -pow (r - center, 2.) / k2);
-    s.states2[j].csf.K_phi_re += 0.5 * sin(phase) * omega * a * exp ( -pow (r - center, 2.) / k2) / (2. * s.states2[j].bssn.alpha);
-    s.states2[j].csf.K_phi_im -= 0.5 * cos(phase) * omega * a * exp ( -pow (r - center, 2.) / k2) / (2. * s.states2[j].bssn.alpha);
+        s.states2[j].csf.phi_re += cos(phase) * a * exp ( -pow (r - center, 2.) / k2);
+        s.states2[j].csf.phi_im += sin(phase) * a * exp ( -pow (r - center, 2.) / k2);
+        s.states2[j].csf.K_phi_re += 0.5 * sin(phase) * omega * a * exp ( -pow (r - center, 2.) / k2) / (2. * s.states2[j].bssn.alpha);
+        s.states2[j].csf.K_phi_im -= 0.5 * cos(phase) * omega * a * exp ( -pow (r - center, 2.) / k2) / (2. * s.states2[j].bssn.alpha);
     }
 
     solve_initial_ham();
+}
+
+// Add a massless real scalar Gaussian to the provided slice.
+// psi(z) = real_amp * exp(-0.5 * ((z - real_center)/real_sigma)^2), K_psi(z) = 0
+void Spacetime::add_real_gaussian(BSSNSlice& slice)
+{
+    // Guard: if disabled or degenerate sigma, do nothing
+    if (!add_real_field || real_sigma <= 0.0 || real_amp == 0.0)
+        return;
+
+    const int N = n_gridpoints; // use current spacetime grid size
+    const double dr_local = slice.R / ((double)N - 1.0);
+    const double offset = 0.5 * (double)cell_centered; // consistent with grid_offset
+
+    const double inv_sigma2 = 1.0 / (real_sigma * real_sigma);
+
+    for (int j = 0; j < N; ++j)
+    {
+        const double z = (j + offset) * dr_local;
+        const double dz = z - real_center;
+        const double gauss = real_amp * exp(-0.5 * dz * dz * inv_sigma2);
+
+        slice.states2[j].rsf.psi = gauss;
+        slice.states2[j].rsf.K_psi= 0.0;
+    }
 }
 
 //read data from BosonStar to spacetime and construct initial time slice
@@ -1661,7 +1733,6 @@ void Spacetime::initialize(BosonStar& boson_star)
     if (BS_resolution_factor > 1 && start_time == 0 && !read_thinshell && !boson_star.gaussian_start)
     {
         boson_star.n_gridpoints = boson_star.n_gridpoints * BS_resolution_factor - BS_resolution_factor + 1;
-
         cout << " \nRe-solving BS at higher resolution with " << boson_star.n_gridpoints <<  endl;
 
         boson_star.solve();
@@ -1716,6 +1787,11 @@ void Spacetime::initialize(BosonStar& boson_star)
 
     cout << "Read BS data" << endl;
 
+    // Optionally add a real scalar field Gaussian before evolution
+    if (add_real_field && start_time == 0)
+        add_real_gaussian(slices[0]);
+
+    //solve Hamiltonian constraint directly in isotropic coords for initial slice if requested
     if (run_spacetime_solver && start_time == 0)
         solve_initial_ham();
 
@@ -1754,7 +1830,6 @@ void Spacetime::initialize(BosonStar& boson_star)
         slices[0].has_BH = 1;
     else slices[0].has_BH = 0;
 
-
     compute_auxiliary_quantities(current_slice_ptr);
     rho0_init = make_tangherlini ? 1. : rho[0];
     compute_diagnostics(current_slice_ptr);
@@ -1767,7 +1842,6 @@ void Spacetime::initialize(BosonStar& boson_star)
     std::ofstream dynamical_file{"dynamical_constants.dat"};
     dynamical_file << mass0 << "    " << charge0 << "    " << mass0 - mu * charge0;
     cout << "Dynamical N =" << charge0 << ", M = "  << mass0 << " and binding energy is " << mass0 - mu * charge0  << endl;
-
 }
 
 
@@ -1780,8 +1854,6 @@ void Spacetime::evolve()
 
     int num_timesteps = ceil(stop_time / dt);
     int last_checkpoint_time = 0;
-
-    // if(store_A0) A0_values.resize(num_timesteps);
 
     //write constraint norms at each timestep to file
     std::ofstream constraints_file{"constraint_norms.dat"};
@@ -1803,12 +1875,9 @@ void Spacetime::evolve()
         //fill out array until we've reached maximum number of stored slices, then update last element + rotate at end.
         int n = (time_step > max_stored_slices - 2) ? (max_stored_slices - 2) : time_step;
 
-        //if(store_A0)
-            //A0_values[time_step] = test_ctr;
-
         double phase_ctr, phase_last;
         if (time_step > 0) phase_last = phase_ctr;
-    phase_ctr = std::arg( std::complex<double>(slices[n].states2[0].csf.phi_re, slices[n].states2[0].csf.phi_im));
+        phase_ctr = std::arg( std::complex<double>(slices[n].states2[0].csf.phi_re, slices[n].states2[0].csf.phi_im));
 
         double omega_approx = (phase_ctr - phase_last) / dt;
 
@@ -1819,17 +1888,17 @@ void Spacetime::evolve()
         if (n > 0) compute_dtK(n);
         M = slice_mass(current_slice_ptr); // maybe remove if causes bad bdry oscillations?
 
-    double A0 = sqrt (pow(slices[n].states2[0].csf.phi_re,2) + pow(slices[n].states2[0].csf.phi_im,2));
-    double A1 = sqrt (pow(slices[n].states2[1].csf.phi_re,2) + pow(slices[n].states2[1].csf.phi_im,2));
-
-        double A_ctr =  (cell_centered) ? (A0- 0.5 * dr * (A1 - A0)) : A0; //just linearly extrapolate to r = 0 for now
+        double A0 = sqrt (pow(slices[n].states2[0].csf.phi_re,2) + pow(slices[n].states2[0].csf.phi_im,2));
+        double A1 = sqrt (pow(slices[n].states2[1].csf.phi_re,2) + pow(slices[n].states2[1].csf.phi_im,2));
+        double A_ctr =  (cell_centered) ? (A0- 0.5 * dr * (A1 - A0)) : A0; //just linearly extrapolate to r = 0 when cell-centered 
 
         if (time_step % write_CN_interval == 0) //write time-dependent diagnostics to constraint_norms.dat
-            constraints_file << std::setprecision (10) << start_time + dt * time_step << "   " << Ham_L2  << "   " << Mom_L2 <<  "   " << slices[n].states2[0].bssn.chi << "   "
+            constraints_file << std::setprecision (10) << start_time + dt * time_step << "   " << Ham_L2  
+            << "   " << Mom_L2 <<  "   " << slices[n].states2[0].bssn.chi << "   "
             << A_ctr << "   "  << phase_diff   << "   " <<  M << "   "  << slice_charge(current_slice_ptr)
             << "   " << dtK_L2 << "   " << omega_approx << "   " << slices[n].states2[0].bssn.alpha<<  endl;
 
-    slices[n + 1].states2.resize(n_gridpoints);
+        slices[n + 1].states2.resize(n_gridpoints);
         slices[n + 1].R = R;
         slices[n + 1].refinement_points = refinement_points;
         slices[n + 1].active_points = active_points;
@@ -1907,8 +1976,5 @@ void Spacetime::evolve()
             exit(1);
         }
     }
-
 }
-
-
 #endif /*EVOLUTIONVARIABLES*/

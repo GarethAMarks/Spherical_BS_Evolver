@@ -7,6 +7,7 @@
 #include <fstream>
 #include "BosonStar.h"
 #include "ComplexScalarField.h" // for CSF in composite State
+#include "RealScalarField.h"   // for RSF in composite State
 
 class ComplexScalarField; // forward declaration for friendship
 
@@ -26,7 +27,9 @@ enum bssn_var
     v_K_phi_im,
     v_alpha,
     v_beta,
-    v_theta //this isn't a BSSN var (CCZ4), but added for derivatives.
+    v_theta, //this isn't a BSSN var (CCZ4), but added for derivatives.
+    v_psi,
+    v_K_psi
 };
 
 //a set of BSSN evolution variables at a point in spacetime
@@ -49,6 +52,7 @@ struct BSSNState
 struct State {
     CSF csf;         // complex scalar field variables
     BSSNState bssn;  // geometric and gauge variables
+    RSF rsf;        // real scalar field variables if enabled
 };
 
 //the BSSN variables, along with some auxiliary quantities, on a single time slice.
@@ -115,10 +119,11 @@ class Spacetime
 //auxiliary variables held on a particular time slice-- CONVENTION: upper/lowercase r,w denote upstairs/downstairs indices where relevent
     private:
         friend class ComplexScalarField; // allow matter models to access potential V, dV
+        friend class RealScalarField;    // allow RSF to access spacetime internals (e.g., D, min_z)
 
-        // Matter model instance reused across evaluations to avoid per-point construction
+        // Matter model instances reused across evaluations to avoid per-point construction
         ComplexScalarField csf_model;
-
+        RealScalarField    rsf_model;
         BSSNSlice* current_slice_ptr; //pointer to current slice, updated on each time step
 
         double D;
@@ -177,8 +182,6 @@ class Spacetime
 
         bool store_A0;
         std::vector<double>  A0_values; // if store_A0 true will hold an array of central field amplitudes
-
-
         std::vector<int> refinement_points; //points at which refinement should be halved
         std::vector<bool> active_points; //determines whether each point needs to be updated; 1 if active 0 if not
 
@@ -249,8 +252,13 @@ class Spacetime
         bool make_tangherlini;
         bool wave_mode; //testing purposes only, converts to wave eq'n solver
 
-        void read_parameters(bool quiet = 0); //read auxiliary parameters
+        // Optional massless real scalar field configuration (injected before evolution)
+        bool add_real_field;   // whether to add a real scalar field pulse before evolution
+        double real_amp;       // amplitude of real field
+        double real_sigma;     // Gaussian width (sigma)
+        double real_center;    // Gaussian center position
 
+        void read_parameters(bool quiet = 0); //read auxiliary parameters
 
         //TODO: add checkpointing
 
@@ -266,11 +274,23 @@ class Spacetime
         void prepare_ham_solve(); //EXPERIMENTAL: try to return to pure isotropic coords + solve Ham constraint mid-run
         void resize_temp_arrays();
         void add_spacetime_pert(double a, double k, double center);
+        // Add a massless real scalar Gaussian to rsf on a slice (psi gaussian, K_psi=0)
+        void add_real_gaussian(BSSNSlice& slice);
 
         void fill_active_points();
         void fill_refinement_levels();
         void kill_refinement_noise();
         void compute_dtK(int time_index);
+
+        // Apply high-order damping at gridpoint j: updates rhs arrays in place
+        void apply_damping_at_point(int j,
+                        BSSNSlice* slice_ptr,
+                        std::vector<State>& rhs_states2,
+                        std::vector<double>& rhs_theta);
+
+        // Apply Sommerfeld-like outer boundary conditions to rhs
+        // Updates rhs.states2 at [last_active_j] and [last_active_j - res_fac]
+        void sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slice_ptr);
 
         double V(const double A);
         double dV(const double A);
@@ -281,12 +301,10 @@ class Spacetime
         double d_chi_asymp(double r);
         double d_alpha_asymp(double r);
 
-
         double d_z(bssn_var var, int index, int order); //just syntactic sugar to call d_z, d_zz on current slice
         double d_zz(bssn_var var, int index);
 
         double test_ctr;
-
 };
 
 

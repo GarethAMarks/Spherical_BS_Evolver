@@ -55,9 +55,6 @@ int main()
 
 void gauss_initialize(BosonStar& boson_star)
 {
-
-    //TODO NEXT: add proper logic for when to add perturbations + maybe start with random mini BS model chi + alpha or similar
-
     std::ofstream nm_file{"mass_charge.dat"};
 
     int num_gaussians = 1; //change this to produce a gaussian model cycle to explore 1-parameter families
@@ -72,12 +69,9 @@ void gauss_initialize(BosonStar& boson_star)
         boson_star.add_perturbation(boson_star.perturb_amp, boson_star.perturb_spread, 0.);
 
         if (!boson_star.fill_given_A(boson_star.omega, 0) )
-        {
-            //boson_star.solitonic = 0;
-            //boson_star.solve();
-            //boson_star
             boson_star.default_metric_vars();
-        }
+
+        
         boson_star.fill_isotropic_arrays();
         boson_star.write_isotropic();
         boson_star.write_field();

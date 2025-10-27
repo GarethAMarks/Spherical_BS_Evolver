@@ -6,4 +6,5 @@ g++ -Wall -fexceptions -g -I.  -c "LinearPerturbation.cpp" -o obj/Debug/LinearPe
 g++ -Wall -fexceptions -g -I.  -c "EvolutionVariables.cpp" -o obj/Debug/EvolutionVariables.o
 g++ -Wall -fexceptions -g -I.  -c "main.cpp" -o obj/Debug/main.o
 g++ -Wall -fexceptions -g -I.  -c "ComplexScalarField.cpp" -o obj/Debug/ComplexScalarField.o
-g++  -o BosonStarStability.o obj/Debug/BosonStar.o obj/Debug/LinearPerturbation.o obj/Debug/EvolutionVariables.o obj/Debug/main.o obj/Debug/mathutils.o obj/Debug/ComplexScalarField.o   -lm
+g++ -Wall -fexceptions -g -I.  -c "RealScalarField.cpp" -o obj/Debug/RealScalarField.o
+g++  -o BosonStarStability.o obj/Debug/BosonStar.o obj/Debug/LinearPerturbation.o obj/Debug/EvolutionVariables.o obj/Debug/main.o obj/Debug/mathutils.o obj/Debug/ComplexScalarField.o obj/Debug/RealScalarField.o  -lm
