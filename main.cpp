@@ -46,7 +46,14 @@ int main()
         st.initialize(boson_star);
         st.slices[0].write_slice();
         st.write_diagnostics();
-        st.evolve();
+        
+        if (st.critical_study)
+        {
+            double& tuning_param = st.real_amp; //example: tune the perturbation amplitude
+            st.tune_to_critical(tuning_param, st.hi_guess, st.lo_guess, &boson_star);
+        }
+        else
+            st.evolve();
     }
 
     cout << "Ending..."  << endl;

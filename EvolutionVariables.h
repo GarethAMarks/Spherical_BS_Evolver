@@ -69,7 +69,7 @@ class BSSNSlice
     double refinement_level;
 
     public:
-    std::vector<State> states2;    // composite state (geometry + matter) on this time slice
+        std::vector<State> states2;    // composite state (geometry + matter) on this time slice
         std::vector<double> theta; //array of theta-values, only to be allocated if CCZ4 is used
 
         std::vector<int> refinement_points; //points at which refinement should be halved; to be copied from spacetime version at start of each step
@@ -104,7 +104,8 @@ class Spacetime
         Spacetime();
         std::vector<BSSNSlice> slices;//vector of entire time slices
 
-        void initialize(BosonStar& boson_star);
+        
+        void initialize(BosonStar& boson_star, bool skip_read = false);// If skip_read is true, do not read BSParams.par again (use existing in-memory settings).
         void write_diagnostics();
         void evolve();
         void write_current_slice( std::string file_name = "SliceData.dat");
@@ -113,8 +114,20 @@ class Spacetime
         void halve_resolution();
         void fourier_transform_A0();
 
+        // Critical search: tune a member parameter by bisection so that hi is supercritical and lo is subcritical.
+        // The tuning_param reference should typically bind to a Spacetime member (e.g., a perturbation amplitude).
+        // in case initialize() overwrites it via params. Exits the program upon success or failure.
+        void tune_to_critical(double& tuning_param, double hi_guess, double lo_guess, BosonStar* bs);
+
         double slice_mass(BSSNSlice* slice_ptr);
         double slice_charge(BSSNSlice* slice_ptr);
+
+        bool critical_study; // whether to perform critical study analysis (bisection etc)
+        int critical_state; // to be tracked by critical study handler: 0 for subcritical, 1 for supercritical
+        double critical_eps; // tolerance for critical parameter
+        double hi_guess;
+        double lo_guess;
+        double real_amp;       // amplitude of real field
 
 //auxiliary variables held on a particular time slice-- CONVENTION: upper/lowercase r,w denote upstairs/downstairs indices where relevent
     private:
@@ -139,6 +152,7 @@ class Spacetime
         double shock_fac;
 
         bool stop_on_migrate;
+        double lapse_thresh; // central lapse threshold for BH formation trigger
 
         std::vector<double> h_WW;//inverse metric components
         std::vector<double> h_ZZ;
@@ -220,6 +234,8 @@ class Spacetime
         double dt;
         double dr;
 
+        double critical_time;
+
         int start_time;
         int checkpoint_time;
 
@@ -254,7 +270,6 @@ class Spacetime
 
         // Optional massless real scalar field configuration (injected before evolution)
         bool add_real_field;   // whether to add a real scalar field pulse before evolution
-        double real_amp;       // amplitude of real field
         double real_sigma;     // Gaussian width (sigma)
         double real_center;    // Gaussian center position
 
@@ -270,7 +285,7 @@ class Spacetime
         void update_outer_boundary(double time_step);
         void fix_initial_field_mom();
         std::vector<double> ham_init_rhs(double r, double chi, double eta);
-        void solve_initial_ham();
+        void solve_initial_ham(bool quiet = false);
         void prepare_ham_solve(); //EXPERIMENTAL: try to return to pure isotropic coords + solve Ham constraint mid-run
         void resize_temp_arrays();
         void add_spacetime_pert(double a, double k, double center);

@@ -390,14 +390,16 @@ void Spacetime::sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slic
     if (add_real_field)
         char_speeds.rsf = (RSF){1., 1.};
 
-    rhs.states2[last_active_j - res_fac] = (-1.) * char_speeds * ( p4_stencil(dr * res_fac, s1, s2, s3, s4, s5) + (0.5 * D - 1.) * N * (s4 - asymp_state) /  (dr * (last_active_j - res_fac)) - asymp_deriv);
+    rhs.states2[last_active_j - res_fac] = (-1.) * char_speeds * ( p4_stencil(dr * res_fac, s1, s2, s3, s4, s5) 
+                                         + (0.5 * D - 1.) * N * (s4 - asymp_state) /  (dr * (last_active_j - res_fac)) - asymp_deriv);
 
     //update variable asymptotic states to outermost edge
     if (spatially_varying_BC)
     {asymp_state.bssn.chi = chi_asymp(R);  asymp_state.bssn.alpha = alpha_asymp(R);
     asymp_deriv.bssn.chi = d_chi_asymp(R);  asymp_deriv.bssn.alpha = d_alpha_asymp(R);}
 
-    rhs.states2[last_active_j] = (-1) * char_speeds * ( p5_stencil(dr * res_fac, s1, s2, s3, s4, s5) + (0.5 * D - 1.) * N * (s5 - asymp_state) / (dr * last_active_j) - asymp_deriv);
+    rhs.states2[last_active_j] = (-1) * char_speeds * ( p5_stencil(dr * res_fac, s1, s2, s3, s4, s5) 
+                                 + (0.5 * D - 1.) * N * (s5 - asymp_state) / (dr * last_active_j) - asymp_deriv);
 
     if (use_CCZ4)
     {
@@ -407,8 +409,11 @@ void Spacetime::sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slic
         double& t4 = slice_ptr->theta[last_active_j - 1 * res_fac];
         double& t5 = slice_ptr->theta[last_active_j];
 
-        rhs.theta[last_active_j - res_fac] = -(p4_stencil(dr * res_fac, t1, t2, t3, t4, t5) + (0.5 * D - 1.) * t4 / (dr * (last_active_j - res_fac)));
-        rhs.theta[last_active_j] = -(p5_stencil(dr * res_fac, t1, t2, t3, t4, t5) + (0.5 * D - 1.) * t5 / (dr * (last_active_j)));
+        rhs.theta[last_active_j - res_fac] = -(p4_stencil(dr * res_fac, t1, t2, t3, t4, t5) 
+                                             + (0.5 * D - 1.) * t4 / (dr * (last_active_j - res_fac)));
+
+        rhs.theta[last_active_j] = -(p5_stencil(dr * res_fac, t1, t2, t3, t4, t5) 
+                                   + (0.5 * D - 1.) * t5 / (dr * (last_active_j)));
     }
 }
 
@@ -828,7 +833,7 @@ double Spacetime::d_alpha_asymp(double r)
 
  }
 
- void Spacetime::solve_initial_ham()
+ void Spacetime::solve_initial_ham(bool quiet)
  {
     if (!isotropic)
     {
@@ -840,7 +845,8 @@ double Spacetime::d_alpha_asymp(double r)
     double c1, c2, c3, c4, e1, e2, e3, e4;
     double eta = 0;
 
-    cout << "\n Starting initial Spacetime Hamiltonian constraint solver..." << endl;
+    if (!quiet)
+        cout << "\n Starting initial Spacetime Hamiltonian constraint solver..." << endl;
 
    for (int j = 0; j < n_gridpoints - 1; j++) //for (int j = n_gridpoints - 1; j > 0; j--)
     {
@@ -875,7 +881,8 @@ double Spacetime::d_alpha_asymp(double r)
         s.states2[j].bssn.alpha = sqrt(s.states2[j].bssn.chi);
 
 
-    cout << "Successfully ran constraint solver" << endl;
+    if (!quiet)
+        cout << "Successfully ran constraint solver" << endl;
 
  }
 
@@ -1426,6 +1433,12 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "real_amp = ", real_amp, quiet);
         fill_parameter(current_line, "real_sigma = ", real_sigma, quiet);
         fill_parameter(current_line, "real_center = ", real_center, quiet);
+        fill_parameter(current_line, "critical_study = ", critical_study, quiet);
+        fill_parameter(current_line, "critical_state = ", critical_state, quiet);
+        fill_parameter(current_line, "critical_eps = ", critical_eps, quiet);
+        fill_parameter(current_line, "lapse_thresh = ", lapse_thresh, quiet);
+        fill_parameter(current_line, "hi_guess = ", hi_guess, quiet);
+        fill_parameter(current_line, "lo_guess = ", lo_guess, quiet);
 
         fill_param_array(current_line, "refinement_points = ", refinement_points, quiet);
 
@@ -1651,7 +1664,7 @@ void Spacetime::add_spacetime_pert(double a, double k, double center)
         s.states2[j].csf.K_phi_im -= 0.5 * cos(phase) * omega * a * exp ( -pow (r - center, 2.) / k2) / (2. * s.states2[j].bssn.alpha);
     }
 
-    solve_initial_ham();
+    solve_initial_ham(run_quietly);
 }
 
 // Add a massless real scalar Gaussian to the provided slice.
@@ -1680,7 +1693,7 @@ void Spacetime::add_real_gaussian(BSSNSlice& slice)
 }
 
 //read data from BosonStar to spacetime and construct initial time slice
-void Spacetime::initialize(BosonStar& boson_star)
+void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
 {
     wave_mode = 0; //make 1 for MR testing purposes only
     //D = SPACEDIM + 1.;
@@ -1701,20 +1714,27 @@ void Spacetime::initialize(BosonStar& boson_star)
     r_99 = boson_star.r_99;
     BS_perturbed = boson_star.perturb;
 
-    gamma_fac = 0.75; // initialize to 3/4 by default (before params read) for backwards compatibility w/ older params files
-    spatially_varying_BC = 1; //as above
-    one_log_fac = 2.0; //as above
+    if (!skip_read)
+    {
+        // Initialize defaults prior to reading params for backwards compatibility
+        gamma_fac = 0.75; // 3/4 by default
+        spatially_varying_BC = 1;
+        one_log_fac = 2.0;
+    }
+    critical_state = 2;
 
-    refinement_points = {};
-    read_parameters();
+    if (!skip_read)
+    {
+        refinement_points = {};
+        read_parameters();
+    }
 
     if (D != 4.)
         spatially_varying_BC = 0; //only try this for D = 4 for now
 
     //cout << refinement_points.size() << endl;
-
-    if (refinement_points[0] <= 0) //signal to disable any refinement and use all points
-         refinement_points.clear();//refinement_points = {};
+    if (!refinement_points.empty() && refinement_points[0] <= 0) // disable refinement if sentinel present
+        refinement_points.clear();
 
     if (read_thinshell)
         BS_resolution_factor = 1;
@@ -1729,19 +1749,26 @@ void Spacetime::initialize(BosonStar& boson_star)
     fill_active_points();
     fill_refinement_levels();
 
+    // Cache original BosonStar grid so we can restore after temporary high-res solve
+    const int bs_n_gridpoints_orig = boson_star.n_gridpoints;
+    bool bumped_bs_resolution = false;
+
     //solve BS at higher resolution and read in data to first slice, if not starting in other mode (checkpoint / thinshell read / gaussian start)
     if (BS_resolution_factor > 1 && start_time == 0 && !read_thinshell && !boson_star.gaussian_start)
     {
         boson_star.n_gridpoints = boson_star.n_gridpoints * BS_resolution_factor - BS_resolution_factor + 1;
-        cout << " \nRe-solving BS at higher resolution with " << boson_star.n_gridpoints <<  endl;
+        
+        if (!run_quietly)
+            cout << " \nRe-solving BS at higher resolution with " << boson_star.n_gridpoints <<  endl;
 
-        boson_star.solve();
+        boson_star.solve(1);
         boson_star.write_field();
         boson_star.fill_isotropic_arrays();
         boson_star.write_isotropic();
 
         //using higher-res omega seems like an improvement
         omega = boson_star.omega;
+        bumped_bs_resolution = true;
     }
 
     if (read_thinshell && start_time == 0)
@@ -1778,14 +1805,20 @@ void Spacetime::initialize(BosonStar& boson_star)
     slices[0].refinement_points = refinement_points;
     slices[0].use_CCZ4 = use_CCZ4;
 
-    cout << "About to read" << endl;
+    //cout << "About to read" << endl;
 
     if (start_time == 0)
         slices[0].read_BS_data(boson_star, BS_resolution_factor, isotropic, cell_centered);
 
+    // Restore BosonStar gridpoints so repeated initialize() calls (e.g., during critical study)
+    // don't keep multiplying the resolution.
+    if (bumped_bs_resolution)
+        boson_star.n_gridpoints = bs_n_gridpoints_orig;
+
     grid_offset = 0.5 * (double)cell_centered;
 
-    cout << "Read BS data" << endl;
+    if (!run_quietly)
+        cout << "Read BS data" << endl;
 
     // Optionally add a real scalar field Gaussian before evolution
     if (add_real_field && start_time == 0)
@@ -1793,7 +1826,7 @@ void Spacetime::initialize(BosonStar& boson_star)
 
     //solve Hamiltonian constraint directly in isotropic coords for initial slice if requested
     if (run_spacetime_solver && start_time == 0)
-        solve_initial_ham();
+        solve_initial_ham(run_quietly);
 
     //cut off outermost 2 gripoints, where the christoffel symbols will be generally polluted by garbage due to not having data to take derivatives there. Might be better to just extrapolate long term.
     n_gridpoints -= 2 ;
@@ -1841,7 +1874,9 @@ void Spacetime::initialize(BosonStar& boson_star)
 
     std::ofstream dynamical_file{"dynamical_constants.dat"};
     dynamical_file << mass0 << "    " << charge0 << "    " << mass0 - mu * charge0;
-    cout << "Dynamical N =" << charge0 << ", M = "  << mass0 << " and binding energy is " << mass0 - mu * charge0  << endl;
+
+    if (!run_quietly)
+        cout << "Dynamical N =" << charge0 << ", M = "  << mass0 << " and binding energy is " << mass0 - mu * charge0  << endl;
 }
 
 
@@ -1850,7 +1885,9 @@ void Spacetime::evolve()
 {
     dr = R / (n_gridpoints - 1.0);
     dt = courant_factor * dr;
-    cout << "dr = " << dr << ", dt = " << dt <<  "   " << endl;
+    
+    if (!run_quietly)
+        cout << "dr = " << dr << ", dt = " << dt <<  "   " << endl;
 
     int num_timesteps = ceil(stop_time / dt);
     int last_checkpoint_time = 0;
@@ -1862,8 +1899,11 @@ void Spacetime::evolve()
         std::cerr << "constraint_norms.dat could not be opened for writing!\n";
         exit(1);
     }
+    double A0 = sqrt (pow(slices[0].states2[0].csf.phi_re,2) + pow(slices[0].states2[0].csf.phi_im,2));
 
-    cout <<" \n Will evolve with " << num_timesteps << " time steps \n" << endl;
+    if (!run_quietly)
+        cout <<" \n Will evolve with up to " << num_timesteps << " time steps \n" << endl;
+    
 
     //s_i are returned RHS's, t represents temporary RHS + current_slice quantities that must be stored so derivatives can be accessed
     BSSNSlice s1, s2, s3, s4, t1, t2, t3;
@@ -1888,9 +1928,9 @@ void Spacetime::evolve()
         if (n > 0) compute_dtK(n);
         M = slice_mass(current_slice_ptr); // maybe remove if causes bad bdry oscillations?
 
-        double A0 = sqrt (pow(slices[n].states2[0].csf.phi_re,2) + pow(slices[n].states2[0].csf.phi_im,2));
-        double A1 = sqrt (pow(slices[n].states2[1].csf.phi_re,2) + pow(slices[n].states2[1].csf.phi_im,2));
-        double A_ctr =  (cell_centered) ? (A0- 0.5 * dr * (A1 - A0)) : A0; //just linearly extrapolate to r = 0 when cell-centered 
+        double Ap0 = sqrt (pow(slices[n].states2[0].csf.phi_re,2) + pow(slices[n].states2[0].csf.phi_im,2));
+        double Ap1 = sqrt (pow(slices[n].states2[1].csf.phi_re,2) + pow(slices[n].states2[1].csf.phi_im,2));
+        double A_ctr =  (cell_centered) ? (Ap0- 0.5 * dr * (Ap1 - Ap0)) : Ap0; //just linearly extrapolate to r = 0 when cell-centered
 
         if (time_step % write_CN_interval == 0) //write time-dependent diagnostics to constraint_norms.dat
             constraints_file << std::setprecision (10) << start_time + dt * time_step << "   " << Ham_L2  
@@ -1975,6 +2015,120 @@ void Spacetime::evolve()
             cout << "Migration occurred on time step  " << time_step <<" at time t = " << time_step * dt << endl;
             exit(1);
         }
+
+        if (critical_study && slices[n + 1].states2[0].bssn.alpha < lapse_thresh)
+        {
+            cout << "Supercritical at time " << t << endl;
+            critical_state = 1;
+            critical_time = t;
+            break;
+        }
+
+        if (critical_study && A_ctr < A0 && t > 10.0) //wait some time to avoid initial transients
+        {
+            cout << "Subcritical at time " << t << endl;
+            critical_state = 0;
+            critical_time = t;
+            break;
+        }
     }
+}
+
+// Tune a parameter by bisection to bracket the critical threshold.
+// hi_guess must produce supercritical (critical_state = 1), lo_guess subcritical (critical_state = 0).
+// Will repeatedly initialize and evolve, restoring tuning_param after initialize in (likely) case it's a Spacetime member overwritten by params.
+void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double lo_guess, BosonStar* bs)
+{
+    std::ofstream subcritical_file{"subcritical.dat"};
+    std::ofstream supercritical_file{"supercritical.dat"};
+
+    subcritical_file << "#tuning_param   critical_time" << endl;
+    supercritical_file << "#tuning_param   critical_time" << endl;
+
+    if (bs == nullptr)
+    {
+        cerr << "ERROR: tune_to_critical called with null BosonStar pointer" << endl;
+        exit(1);
+    }
+
+    // Ensure we record critical outcomes during evolve()
+    critical_study = true;
+
+    auto run_with_param = [&](double val) -> int {
+        // Assign target value, initialize (which may overwrite), then restore
+        tuning_param = val;
+        double tmp = tuning_param;
+        cout << "Running with tuning_param = " << std::setprecision(16) << tuning_param << endl;
+
+        
+        // Skip re-reading parameters so tuned value persists into initial data seeding
+        initialize(*bs, /*skip_read=*/true);
+        tuning_param = tmp;
+        evolve();
+        if (critical_state != 0 && critical_state != 1)
+        {
+            cerr << "ERROR: evolve() ended with critical_state = " << critical_state
+                 << ", expected 0 (subcritical) or 1 (supercritical)." << endl;
+            exit(1);
+        }
+        return critical_state;
+    };
+
+    // Verify high guess is supercritical
+    int hi_state = run_with_param(hi_guess);
+    if (hi_state != 1)
+    {
+        cerr << "ERROR: hi_guess = " << std::setprecision(16) << hi_guess
+             << " did not produce supercritical outcome (critical_state = 1). Got critical_state = "
+             << hi_state << "." << endl;
+        exit(1);
+    }
+    supercritical_file << std::setprecision(16)
+                               << hi_guess<< "   " << critical_time << endl;
+
+    // Verify low guess is subcritical
+    int lo_state = run_with_param(lo_guess);
+    if (lo_state != 0)
+    {
+        cerr << "ERROR: lo_guess = " << std::setprecision(16) << lo_guess
+             << " did not produce subcritical outcome (critical_state = 0). Got critical_state = "
+             << lo_state << "." << endl;
+        exit(1);
+    }
+
+    subcritical_file << std::setprecision(16)
+                             << lo_guess << "   " << critical_time << endl;
+    double hi = hi_guess;
+    double lo = lo_guess;
+
+    // Bisection until interval smaller than tolerance
+    while (fabs(hi - lo) / lo > critical_eps)
+    {
+        double mid = 0.5 * (hi + lo);
+        int state = run_with_param(mid);
+        if (state == 1)
+        {
+            hi = mid;   // supercritical at mid -> reduce upper bound
+            supercritical_file << std::setprecision(16)
+                               << mid << "   " << critical_time << endl;
+        }
+        else if (state == 0)
+        {
+            lo = mid;   // subcritical at mid -> raise lower bound
+            subcritical_file << std::setprecision(16)
+                             << mid << "   " << critical_time << endl;
+        }
+        else
+        {
+            cerr << "ERROR: Unexpected critical_state during bisection: " << state << endl;
+            exit(1);
+        }
+    }
+
+    tuning_param = 0.5 * (hi + lo);
+    cout << std::setprecision(16)
+         << "Critical tuning complete. tuning_param = " << tuning_param
+         << ", bracket [" << lo << ", " << hi << "] with tol = " << critical_eps << endl;
+    exit(0);
 }
 #endif /*EVOLUTIONVARIABLES*/
