@@ -11,7 +11,7 @@ A_central = 0.06
 frequency_guess = 1.8
 freq_epsilon = 1e-19
 isotropic = 1
-r_match_fac = 0.765 #cutoff radius for BS construction
+r_match_fac = 0.85 #cutoff radius for BS construction
 
 #Dynamical perturbation params
 perturb = 0
@@ -24,7 +24,7 @@ enforced_freq = 0.9
 
 #grid params
 R = 200
-n_gridpoints = 2000
+n_gridpoints = 3200
 courant_factor = 0.4
 stop_time = 5000
 cell_centered = 0
@@ -32,11 +32,18 @@ BS_resolution_factor = 2 #raise BS resolution in ID solver by this factor
 
 refinement_points = -1 1200 #after these points, effective resolution will be halved. Set first value as 0 or negative for no refinement
 
-#Massless real scalar field params: 0.01322275, 0.0132227675
+#Massless real scalar field params: [0.01322275631129742, 0.01322275638580322]
 add_real_field = 1 #whether to add a real SF before evolution
-real_amp = 0.01322275375
+real_amp = 0.0132227531129742
 real_sigma = 5.0
 real_center = 20.0
+
+#params for critical threshold studies
+critical_study = 0
+hi_guess = 0.014
+lo_guess = 0.012
+critical_eps = 1e-8
+lapse_thresh = 0.2 #if central lapse goes below this, assumed BH formed
 
 #evolution parameters
 run_spacetime_solver = 1
@@ -69,7 +76,7 @@ checkpoint_time = 2000
 read_thinshell = 0 #if true will read outputs of Uli's thinshell code
 write_interval = 2
 write_CN_interval = 5
-run_quietly = 0
+run_quietly = 1
 make_tangherlini = 0
 store_A0 = 1
 thinshell_res_fac = 1
