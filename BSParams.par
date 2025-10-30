@@ -7,7 +7,7 @@ G = 1.0
 sigma = 0.06
 eigen = 0 #0 for ground state BS
 alpha_central = 0.5 #starting central lapse, will be rescaled
-A_central = 0.06
+A_central = 0.01
 frequency_guess = 1.8
 freq_epsilon = 1e-19
 isotropic = 1
@@ -24,7 +24,7 @@ enforced_freq = 0.9
 
 #grid params
 R = 200
-n_gridpoints = 3200
+n_gridpoints = 2000
 courant_factor = 0.4
 stop_time = 5000
 cell_centered = 0
@@ -34,16 +34,17 @@ refinement_points = -1 1200 #after these points, effective resolution will be ha
 
 #Massless real scalar field params: [0.01322275631129742, 0.01322275638580322]
 add_real_field = 1 #whether to add a real SF before evolution
-real_amp = 0.0132227531129742
+real_amp = 0.0637
 real_sigma = 5.0
 real_center = 20.0
 
 #params for critical threshold studies
-critical_study = 0
-hi_guess = 0.014
-lo_guess = 0.012
+do_ah_search = 1
+critical_study = 1
+hi_guess = 0.1
+lo_guess = 0.05
 critical_eps = 1e-8
-lapse_thresh = 0.2 #if central lapse goes below this, assumed BH formed
+lapse_thresh = 0.01 #if central lapse goes below this, assumed BH formed
 
 #evolution parameters
 run_spacetime_solver = 1

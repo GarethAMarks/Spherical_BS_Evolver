@@ -142,7 +142,6 @@ BSSNSlice operator*(double c, const BSSNSlice& slice)
     return return_slice;
 }
 
-
 //radial partial derivative of a given bssn var at index. Order is an optional argument that allows higher z-derivatives to be taken, default is 1.
 //should add chacks on refinement levels
 double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
@@ -1439,6 +1438,7 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "lapse_thresh = ", lapse_thresh, quiet);
         fill_parameter(current_line, "hi_guess = ", hi_guess, quiet);
         fill_parameter(current_line, "lo_guess = ", lo_guess, quiet);
+        fill_parameter(current_line, "do_ah_search = ", do_ah_search, quiet);
 
         fill_param_array(current_line, "refinement_points = ", refinement_points, quiet);
 
@@ -1696,7 +1696,7 @@ void Spacetime::add_real_gaussian(BSSNSlice& slice)
 void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
 {
     wave_mode = 0; //make 1 for MR testing purposes only
-    //D = SPACEDIM + 1.;
+    ah_radius = -1.;
     D = boson_star.D;
 
     //inherit parameters from BS
@@ -1728,6 +1728,10 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
         refinement_points = {};
         read_parameters();
     }
+
+    if (critical_study)
+        do_ah_search = 1;
+    
 
     if (D != 4.)
         spatially_varying_BC = 0; //only try this for D = 4 for now
@@ -1922,8 +1926,9 @@ void Spacetime::evolve()
         double omega_approx = (phase_ctr - phase_last) / dt;
 
         if (omega_approx < -M_PI / dt) omega_approx += 2 * M_PI / dt; //corrects jumps due to branch cuts
-        double phase_diff= phase_ctr - std::fmod(omega * dt * time_step, M_PI ); //difference between actual and expected phase at center of BS
-        if (phase_diff < 0.) phase_diff += M_PI;
+        
+        //double phase_diff= phase_ctr - std::fmod(omega * dt * time_step, M_PI ); //difference between actual and expected phase at center of BS
+        //if (phase_diff < 0.) phase_diff += M_PI;
 
         if (n > 0) compute_dtK(n);
         M = slice_mass(current_slice_ptr); // maybe remove if causes bad bdry oscillations?
@@ -1935,8 +1940,8 @@ void Spacetime::evolve()
         if (time_step % write_CN_interval == 0) //write time-dependent diagnostics to constraint_norms.dat
             constraints_file << std::setprecision (10) << start_time + dt * time_step << "   " << Ham_L2  
             << "   " << Mom_L2 <<  "   " << slices[n].states2[0].bssn.chi << "   "
-            << A_ctr << "   "  << phase_diff   << "   " <<  M << "   "  << slice_charge(current_slice_ptr)
-            << "   " << dtK_L2 << "   " << omega_approx << "   " << slices[n].states2[0].bssn.alpha<<  endl;
+            << A_ctr << "   "  << ah_radius << "   " <<  M << "   "  << slice_charge(current_slice_ptr)
+            << "   " << dtK_L2 << "   " << omega_approx << "   " << slices[n].states2[0].bssn.alpha <<  endl;
 
         slices[n + 1].states2.resize(n_gridpoints);
         slices[n + 1].R = R;
@@ -1973,12 +1978,20 @@ void Spacetime::evolve()
 
         //enforce that A is traceless
         current_slice_ptr = &slices[n + 1];
-        kill_refinement_noise(); //running this on every timestep appears to be best approach...
+        kill_refinement_noise(); //interpolate over refinement boundary noise before making A traceless
         make_A_traceless(current_slice_ptr);
 
         //enforce minimum chi
         for (State& st: slices[n + 1].states2)
             {if (st.bssn.chi < min_chi) st.bssn.chi = min_chi; }
+        
+        if (do_ah_search)
+        {   
+            double ah_radius_old = ah_radius;
+            ah_radius = apparent_horizon_search(current_slice_ptr);
+            if ( ah_radius_old < 0. && ah_radius > 0. && !critical_study)
+                cout << "Apparent horizon found at radius " << ah_radius << " at time " << t + dt << endl;
+        }
 
         if (time_step % write_interval == 0)
         {
@@ -1988,8 +2001,6 @@ void Spacetime::evolve()
         }
 
         //write checkpoint files
-        //TODO make this work for pre C++17
-
         if ((int)std::floor(t) % checkpoint_time == 0 && (int)std::floor(t) > last_checkpoint_time)
         {
             current_slice_ptr->write_slice("checkpoint" + std::to_string((int)std::floor(t)) + ".dat");
@@ -2016,15 +2027,16 @@ void Spacetime::evolve()
             exit(1);
         }
 
-        if (critical_study && slices[n + 1].states2[0].bssn.alpha < lapse_thresh)
+        if (critical_study && ah_radius > 0.) //use AH formation as supercritical indicator 
+        //(critical_study && slices[n + 1].states2[0].bssn.alpha < lapse_thresh)
         {
             cout << "Supercritical at time " << t << endl;
             critical_state = 1;
             critical_time = t;
             break;
         }
-
-        if (critical_study && A_ctr < A0 && t > 10.0) //wait some time to avoid initial transients
+        //wait some time to avoid initial transients, then use net central amplitude decrease as subcritical indicator
+        if (critical_study && A_ctr < A0 && t > 10.0) 
         {
             cout << "Subcritical at time " << t << endl;
             critical_state = 0;
@@ -2131,4 +2143,65 @@ void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double l
          << ", bracket [" << lo << ", " << hi << "] with tol = " << critical_eps << endl;
     exit(0);
 }
+
+// --------------------------
+// Apparent horizon search
+// --------------------------
+
+// Placeholder AH indicator at gridpoint j. This will be replaced with the actual expression
+// using BSSNState fields (e.g., expansion of outgoing null geodesics).
+double Spacetime::ah_indicator_at(const BSSNSlice* slice_ptr, int j) 
+{
+    // Access BSSN variables to avoid unused-variable warnings and as a cue for future implementation.
+    const BSSNState& s = slice_ptr->states2[j].bssn;
+    double z = (j + grid_offset) * dr;
+    if (z == 0.0)
+        z = 1e-12; // avoid division by zero at origin
+
+    double ah_indicator = sqrt(s.chi / s.h_zz) *
+                          (2. / z + (d_z(v_h_ww, j) - s.h_ww * d_z(v_chi, j) / s.chi) / s.h_ww)
+                          - (D - 2.) * (s.A_ww + s.K * s.h_ww / (D - 1.));
+
+    return ah_indicator;
+}
+
+// Scan slice for sign changes of the AH indicator and return outermost root radius. Returns -1.0 if no AH is found.
+double Spacetime::apparent_horizon_search(const BSSNSlice* slice_ptr)
+{
+    if (slice_ptr == nullptr || slice_ptr->states2.empty())
+        return -1.0;
+
+    const int N = static_cast<int>(slice_ptr->states2.size());
+    const double dr_local = slice_ptr->R / (static_cast<double>(N) - 1.0);
+    const double offset = 0.5 * static_cast<double>(cell_centered); // match grid_offset convention
+
+    double outermost_r = -1.0;
+
+    double f_prev = ah_indicator_at(slice_ptr, 0);
+    double r_prev = (0 + offset) * dr_local;
+
+    for (int j = 1; j < N; ++j)
+    {
+        double f_curr = ah_indicator_at(slice_ptr, j);
+        double r_curr = (j + offset) * dr_local;
+
+        // Exact zero at a node counts as a root
+        if (f_curr == 0.0)
+            outermost_r = r_curr;
+
+        // Look for sign changes indicating a crossing
+        if ((f_prev > 0.0 && f_curr < 0.0) || (f_prev < 0.0 && f_curr > 0.0))
+        {
+            // Linear interpolation to estimate root location within [r_prev, r_curr]
+            double r_zero = r_prev - f_prev * (r_curr - r_prev) / (f_curr - f_prev);
+            if (r_zero > outermost_r)
+                outermost_r = r_zero;
+        }
+
+        f_prev = f_curr;
+        r_prev = r_curr;
+    }
+    return outermost_r;
+}
+
 #endif /*EVOLUTIONVARIABLES*/

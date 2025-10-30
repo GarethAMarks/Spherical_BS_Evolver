@@ -90,10 +90,10 @@ class BSSNSlice
         double d_z(bssn_var var, int index, int order); //takes z derivative of a BSSN variable on the current slice centred on given index
         double d_zz(bssn_var var, int index);  //second z-derivative, basically syntactic sugar for d_z(var, index, 2)
 
-
     friend class Spacetime; //Spacetime should be able to access private BSSNSlice members
     friend BSSNSlice operator+(const BSSNSlice& slice1, const BSSNSlice& slice2);
     friend BSSNSlice operator*(double c, const BSSNSlice& slice);
+
 };
 
 //holds state information for entire spacetime, and auxiliary quantities on current slice.
@@ -113,6 +113,10 @@ class Spacetime
 
         void halve_resolution();
         void fourier_transform_A0();
+
+        // Apparent horizon search on a given slice.
+        // Returns -1 if not found; otherwise the outermost radius (code units) where the AH condition holds.
+        double apparent_horizon_search(const BSSNSlice* slice_ptr);
 
         // Critical search: tune a member parameter by bisection so that hi is supercritical and lo is subcritical.
         // The tuning_param reference should typically bind to a Spacetime member (e.g., a perturbation amplitude).
@@ -275,8 +279,6 @@ class Spacetime
 
         void read_parameters(bool quiet = 0); //read auxiliary parameters
 
-        //TODO: add checkpointing
-
         void auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j);
         void compute_auxiliary_quantities(BSSNSlice* slice_ptr, bool derivatives_computed = 0);
         BSSNSlice slice_rhs(BSSNSlice* slice_ptr);
@@ -304,8 +306,11 @@ class Spacetime
                         std::vector<double>& rhs_theta);
 
         // Apply Sommerfeld-like outer boundary conditions to rhs
-        // Updates rhs.states2 at [last_active_j] and [last_active_j - res_fac]
         void sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slice_ptr);
+
+        double ah_indicator_at(const BSSNSlice* slice_ptr, int j); // Helper for AH search.
+        double ah_radius; //stores radius of apparent horizon when found
+        double do_ah_search; //flag to enable/disable apparent horizon search each timestep
 
         double V(const double A);
         double dV(const double A);
