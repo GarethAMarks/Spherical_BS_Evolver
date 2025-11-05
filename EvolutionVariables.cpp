@@ -1438,6 +1438,7 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "lapse_thresh = ", lapse_thresh, quiet);
         fill_parameter(current_line, "hi_guess = ", hi_guess, quiet);
         fill_parameter(current_line, "lo_guess = ", lo_guess, quiet);
+        fill_parameter(current_line, "subcritical_time = ", subcritical_time, quiet);
         fill_parameter(current_line, "do_ah_search = ", do_ah_search, quiet);
 
         fill_param_array(current_line, "refinement_points = ", refinement_points, quiet);
@@ -1724,7 +1725,9 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
     critical_state = 2;
 
     if (!skip_read)
-    {
+    {   
+        // Default subcritical_time if not provided
+        subcritical_time = stop_time;
         refinement_points = {};
         read_parameters();
     }
@@ -2042,6 +2045,18 @@ void Spacetime::evolve()
             critical_state = 0;
             critical_time = t;
             break;
+        }
+
+        // Additional subcritical criterion: if no AH by subcritical_time, assume subcritical
+        if (critical_study && t >= subcritical_time)
+        {
+            if (ah_radius < 0.0)
+            {
+                cout << "Subcritical by time criterion at time " << t << endl;
+                critical_state = 0;
+                critical_time = t;
+                break;
+            }
         }
     }
 }
