@@ -84,21 +84,25 @@ T sevenPointDeriv(double step, int order, T f1, T f2, T f3, T f4, T f5, T f6, T 
 template <typename T>
 void fill_parameter (string& current_line, string line_start, T& parameter, bool quiet)
 {
-    if (current_line.find(line_start) != string::npos)
-    {
-        // Create a substring starting from the position right after line_start
-        size_t pos = current_line.find(line_start);
-        string rest_of_line = current_line.substr(pos + line_start.length());
+    // Strip inline comments starting with '#'
+    size_t hash = current_line.find('#');
+    if (hash != string::npos) current_line = current_line.substr(0, hash);
 
-        // Create a stringstream from the rest_of_line
-        std::stringstream ss(rest_of_line);
+    // Require exact prefix match at start of (trimmed) line to avoid partial matches
+    size_t pos = current_line.find_first_not_of(" \t");
+    if (pos == string::npos) return;
+    if (current_line.compare(pos, line_start.length(), line_start) != 0) return;
 
-        // Extract the double value from the stringstream
-        if (ss >> parameter) {
-            if (!quiet) std::cout << "Read in " << line_start << parameter << std::endl;
-        } else if (!(ss >> parameter)) {
-            std::cout << "WARNING: Failed to extract value for parameter " << line_start << std::endl;
-        }
+    // Substring starting immediately after the prefix
+    string rest_of_line = current_line.substr(pos + line_start.length());
+
+    std::stringstream ss(rest_of_line);
+    T value;
+    if (ss >> value) {
+        parameter = value;
+        if (!quiet) std::cout << "Read in " << line_start << parameter << std::endl;
+    } else {
+        std::cout << "WARNING: Failed to extract value for parameter " << line_start << std::endl;
     }
 }
 
@@ -106,35 +110,33 @@ void fill_parameter (string& current_line, string line_start, T& parameter, bool
 template <typename T>
 void fill_param_array (string& current_line, string line_start, std::vector<T>& param_array, bool quiet)
 {
-    if (current_line.find(line_start) != string::npos)
+    // Strip inline comments starting with '#'
+    size_t hash = current_line.find('#');
+    if (hash != string::npos) current_line = current_line.substr(0, hash);
+
+    // Require exact prefix match at start of (trimmed) line to avoid partial matches
+    size_t pos = current_line.find_first_not_of(" \t");
+    if (pos == string::npos) return;
+    if (current_line.compare(pos, line_start.length(), line_start) != 0) return;
+
+    string rest_of_line = current_line.substr(pos + line_start.length());
+
+    std::stringstream ss(rest_of_line);
+    T value;
+    while (ss >> value)
     {
-        // Create a substring starting from the position right after line_start
-        size_t pos = current_line.find(line_start);
-        string rest_of_line = current_line.substr(pos + line_start.length());
-
-        // Create a stringstream from the rest_of_line
-        std::stringstream ss(rest_of_line);
-
-        T value;
-
-        // Extract the double value from the stringstream
-        while (ss >> value)
-        {
-            param_array.push_back(value);
-        }
-        std::cout << "Read in " << line_start;
-
-        unsigned int k = 0;
-
-        while (!quiet && k < param_array.size() )
-        {
-            std::cout  << param_array[k] <<  ", ";
-            k++;
-        }
-        std::cout << std::endl;
-
-        if (param_array.size() == 0) std::cout << "WARNING: Failed to extract value for parameter array" << line_start << std::endl;
-
+        param_array.push_back(value);
     }
+    std::cout << "Read in " << line_start;
+
+    unsigned int k = 0;
+    while (!quiet && k < param_array.size() )
+    {
+        std::cout  << param_array[k] <<  ", ";
+        k++;
+    }
+    std::cout << std::endl;
+
+    if (param_array.size() == 0) std::cout << "WARNING: Failed to extract value for parameter array" << line_start << std::endl;
 }
 #endif /* MATHUTILS_HPP_ */
