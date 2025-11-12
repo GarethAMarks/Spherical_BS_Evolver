@@ -132,6 +132,7 @@ class Spacetime
         double hi_guess;
         double lo_guess;
         double real_amp;       // amplitude of real field
+        double sub_min_time;   // minimum time before declaring subcritical based on amplitude decrease
         double subcritical_time; // if no AH by this time, assume subcritical in critical study
 
 //auxiliary variables held on a particular time slice-- CONVENTION: upper/lowercase r,w denote upstairs/downstairs indices where relevent

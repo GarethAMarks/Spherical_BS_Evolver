@@ -23,7 +23,10 @@ using std::min;
 using std::max;
 using std::rotate;
 // Spacetime constructor: initialize reusable CSF model with this context
-Spacetime::Spacetime() : csf_model(this), rsf_model(this) {}
+Spacetime::Spacetime() : csf_model(this), rsf_model(this) {
+    // Default to historical behavior if not provided in params
+    sub_min_time = 10.0; // Default to historical behavior if not provided in params
+}
 
 //overloads for addition/ scalar multiplication of BSSNState sets and the slice arrays containing them
 // Forward declarations for BSSNState operators used by State operators below
@@ -1438,6 +1441,7 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "lapse_thresh = ", lapse_thresh, quiet);
         fill_parameter(current_line, "hi_guess = ", hi_guess, quiet);
         fill_parameter(current_line, "lo_guess = ", lo_guess, quiet);
+        fill_parameter(current_line, "sub_min_time = ", sub_min_time, quiet);
         fill_parameter(current_line, "subcritical_time = ", subcritical_time, quiet);
         fill_parameter(current_line, "do_ah_search = ", do_ah_search, quiet);
 
@@ -2039,7 +2043,7 @@ void Spacetime::evolve()
             break;
         }
         //wait some time to avoid initial transients, then use net central amplitude decrease as subcritical indicator
-        if (critical_study && A_ctr < A0 && t > 10.0) 
+        if (critical_study && A_ctr < A0 && t > sub_min_time) 
         {
             cout << "Subcritical at time " << t << endl;
             critical_state = 0;
