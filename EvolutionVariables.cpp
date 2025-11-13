@@ -26,6 +26,9 @@ using std::rotate;
 Spacetime::Spacetime() : csf_model(this), rsf_model(this) {
     // Default to historical behavior if not provided in params
     sub_min_time = 10.0; // Default to historical behavior if not provided in params
+    // Initialize scalar-field energies
+    E_phi = 0.0;
+    E_psi = 0.0;
 }
 
 //overloads for addition/ scalar multiplication of BSSNState sets and the slice arrays containing them
@@ -1265,6 +1268,87 @@ double Spacetime::slice_charge(BSSNSlice* slice_ptr)
     return charge;
 }
 
+// Compute energies E_phi (complex scalar) and E_psi (real scalar) by integrating
+// the corresponding rho contributions over the slice using the spherical volume measure.
+void Spacetime::compute_scalar_energies(BSSNSlice* slice_ptr)
+{
+    if (slice_ptr == nullptr || slice_ptr->states2.empty())
+    {
+        E_phi = 0.0;
+        E_psi = 0.0;
+        return;
+    }
+
+    // Local grid characteristics from the provided slice to avoid reliance on globals
+    const int N = static_cast<int>(slice_ptr->states2.size());
+    const double dr_local = slice_ptr->R / (static_cast<double>(N) - 1.0);
+    const double offset = 0.5 * static_cast<double>(cell_centered); // match grid_offset convention
+
+    // Surface area of the unit (D-2)-sphere
+    const double sphere_area = (D == 4.)
+        ? (4.0 * M_PI)
+        : (2.0 * std::pow(M_PI, 0.5 * (D - 1.)) / std::tgamma(0.5 * (D - 1.)));
+
+    double e_phi = 0.0;
+    double e_psi = 0.0;
+
+    // Integrate over inner 95% of the grid (to mirror other diagnostics that avoid boundary artifacts)
+    const int Jmax = static_cast<int>(0.95 * N) - 1;
+    for (int j = 0; j < Jmax; ++j)
+    {
+        if (!active_points[j])
+            continue;
+
+        const double z = (j + offset) * dr_local;
+        const BSSNState& bssn = slice_ptr->states2[j].bssn;
+        const double chi = std::max(min_chi, bssn.chi);
+
+        // Complex scalar field contribution
+        {
+            const CSF csf = slice_ptr->states2[j].csf;
+            const CSF d_z_csf{slice_ptr->d_z(v_phi_re, j), slice_ptr->d_z(v_phi_im, j), 0.0, 0.0};
+            const CSF d_zz_csf{0.0, 0.0, 0.0, 0.0};
+            const double rho_phi = csf_model.rho(csf, bssn, d_z_csf, d_zz_csf);
+            e_phi += dr_local * sphere_area * rho_phi * std::pow(z, D - 2.) * std::pow(chi, 0.5 * (1.0 - D));
+        }
+
+        // Real scalar field (optional)
+        if (add_real_field)
+        {
+            const RSF rsf = slice_ptr->states2[j].rsf;
+            const RSF d_z_rsf{slice_ptr->d_z(v_psi, j), slice_ptr->d_z(v_K_psi, j)};
+            const RSF d_zz_rsf{0.0, 0.0};
+            const double rho_psi = rsf_model.rho(rsf, bssn, d_z_rsf, d_zz_rsf);
+            e_psi += dr_local * sphere_area * rho_psi * std::pow(z, D - 2.) * std::pow(chi, 0.5 * (1.0 - D));
+        }
+    }
+
+    E_phi = e_phi;
+    E_psi = add_real_field ? e_psi : 0.0;
+}
+
+// Placeholder: 4D Ricci scalar at grid center (to be completed with the correct formula).
+// Uses the current slice; returns 0.0 if unavailable. The user will fill in the expression.
+double Spacetime::ricci_4_ctr() const
+{
+    if (current_slice_ptr == nullptr || n_gridpoints <= 0)
+        return 0.0;
+
+    const BSSNSlice& s = *current_slice_ptr;
+    (void)s; // suppress unused for now; the final implementation will use fields from s and auxiliaries
+
+    // Index and coordinate at the grid center. For vertex-centered grids, j=0 is at r=0.
+    const int j0 = 0;
+    const double r0 = (0 + grid_offset) * dr;
+    (void)j0; (void)r0;
+
+    // TODO: Insert the correct 4D Ricci scalar expression using BSSN variables and aux arrays.
+    // Likely ingredients: chi, h_zz, h_ww, A_zz, A_ww, K, R_zz, R_ww, D_zz_alpha, D_ww_alpha, etc.
+    // Ensure origin-regularized terms are handled consistent with min_z.
+
+    return 0.0;
+}
+
 //computes hamiltonian and momentum constraints and conformal metric determinant
 void Spacetime::compute_diagnostics (BSSNSlice* slice_ptr)
 {
@@ -1945,10 +2029,14 @@ void Spacetime::evolve()
         double A_ctr =  (cell_centered) ? (Ap0- 0.5 * dr * (Ap1 - Ap0)) : Ap0; //just linearly extrapolate to r = 0 when cell-centered
 
         if (time_step % write_CN_interval == 0) //write time-dependent diagnostics to constraint_norms.dat
+        {
+            compute_scalar_energies(current_slice_ptr);
             constraints_file << std::setprecision (10) << start_time + dt * time_step << "   " << Ham_L2  
             << "   " << Mom_L2 <<  "   " << slices[n].states2[0].bssn.chi << "   "
             << A_ctr << "   "  << ah_radius << "   " <<  M << "   "  << slice_charge(current_slice_ptr)
-            << "   " << dtK_L2 << "   " << omega_approx << "   " << slices[n].states2[0].bssn.alpha <<  endl;
+            << "   " << dtK_L2 << "   " << omega_approx << "   " << slices[n].states2[0].bssn.alpha <<
+            "   " << E_phi << "   " << E_psi << endl;
+        }
 
         slices[n + 1].states2.resize(n_gridpoints);
         slices[n + 1].R = R;

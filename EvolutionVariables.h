@@ -126,6 +126,8 @@ class Spacetime
         double slice_mass(BSSNSlice* slice_ptr);
         double slice_charge(BSSNSlice* slice_ptr);
 
+        double ricci_4_ctr() const; // Compute the 4D Ricci scalar at the grid center on the current slice.
+
         bool critical_study; // whether to perform critical study analysis (bisection etc)
         int critical_state; // to be tracked by critical study handler: 0 for subcritical, 1 for supercritical
         double critical_eps; // tolerance for critical parameter
@@ -134,6 +136,11 @@ class Spacetime
         double real_amp;       // amplitude of real field
         double sub_min_time;   // minimum time before declaring subcritical based on amplitude decrease
         double subcritical_time; // if no AH by this time, assume subcritical in critical study
+
+        double E_phi; // complex scalar field energy
+        double E_psi; // real scalar field energy
+        
+        void compute_scalar_energies(BSSNSlice* slice_ptr); // Compute scalar-field energies on a given slice and store in E_phi/E_psi
 
 //auxiliary variables held on a particular time slice-- CONVENTION: upper/lowercase r,w denote upstairs/downstairs indices where relevent
     private:
