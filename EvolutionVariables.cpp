@@ -2233,7 +2233,7 @@ void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double l
     }
 
     subcritical_file << std::setprecision(16)
-                             << lo_guess << "   " << critical_time << endl;
+                             << lo_guess << "   " << critical_time << "   " << ricci_4_ctr_max << endl;
     double hi = hi_guess;
     double lo = lo_guess;
 
