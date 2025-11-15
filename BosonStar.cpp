@@ -1285,8 +1285,6 @@ void BosonStar::enforce_continuity(int n) {
     cout << "Now X[1] = " << state[1].X << endl;
 }
 
-
-//TODO: resolving may need to only take place within [0,r_99];
 void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
 {
     read_parameters(0);

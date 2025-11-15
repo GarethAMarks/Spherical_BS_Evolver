@@ -1328,25 +1328,38 @@ void Spacetime::compute_scalar_energies(BSSNSlice* slice_ptr)
 }
 
 // Placeholder: 4D Ricci scalar at grid center (to be completed with the correct formula).
-// Uses the current slice; returns 0.0 if unavailable. The user will fill in the expression.
 double Spacetime::ricci_4_ctr() const
 {
     if (current_slice_ptr == nullptr || n_gridpoints <= 0)
         return 0.0;
 
     const BSSNSlice& s = *current_slice_ptr;
-    (void)s; // suppress unused for now; the final implementation will use fields from s and auxiliaries
 
-    // Index and coordinate at the grid center. For vertex-centered grids, j=0 is at r=0.
-    const int j0 = 0;
-    const double r0 = (0 + grid_offset) * dr;
-    (void)j0; (void)r0;
+    const double& chi0 = s.states2[0].bssn.chi;
+    const double& h_zz0 = s.states2[0].bssn.h_zz;
+    const double& h_ww0 = s.states2[0].bssn.h_ww;
+    const double& h_ZZ0 = h_ZZ[0];
+    const double& h_WW0 = h_WW[0];
+    const double& K0 = s.states2[0].bssn.K;
+    const double& A_zz0 = s.states2[0].bssn.A_zz;
+    const double& A_ww0 = s.states2[0].bssn.A_ww;
+    const double& alpha0 = s.states2[0].bssn.alpha;
+    double d_z_K0 = current_slice_ptr->d_z(v_K, 0);
+    const double& beta0 = s.states2[0].bssn.beta;
 
-    // TODO: Insert the correct 4D Ricci scalar expression using BSSN variables and aux arrays.
-    // Likely ingredients: chi, h_zz, h_ww, A_zz, A_ww, K, R_zz, R_ww, D_zz_alpha, D_ww_alpha, etc.
-    // Ensure origin-regularized terms are handled consistent with min_z.
+    const double K_zz0 = (A_zz0 + h_zz0 * K0 / (D - 1.)) / chi0;
+    const double K_ww0 = (A_ww0 + h_ww0 * K0 / (D - 1.)) / chi0;
 
-    return 0.0;
+    double d_tK0 = beta0 * d_z_K0 - chi0 * h_ZZ0 * D_zz_alpha[0] + alpha0 * h_ZZ0 * h_ZZ0 * A_zz0 * A_zz0 + alpha0 * K0 * K0  / (D - 1.)
+                            + (D - 2.) * h_WW0 * (alpha0 * A_ww0 * A_ww0 / h_ww0 - chi0 * D_ww_alpha[0]) + 8. * M_PI * alpha0 * (S[0] + (D - 3.) * rho[0]) / (D - 1.);
+    
+
+    const double ricci_3 = R_zz[0] * h_ZZ0 + (D - 2.) * R_ww[0] * h_WW0;
+    const double K_ijK_IJ = K_zz0 * K_zz0 * h_ZZ0 * h_ZZ0 + (D - 2.) * K_ww0 * K_ww0 * h_WW0 * h_WW0;
+    const double lap_alpha = chi0 * (h_ZZ0 * D_zz_alpha[0] + (D - 2.) * h_WW0 * D_ww_alpha[0]);                  
+
+    return ricci_3 + K0 * K0 + K_ijK_IJ
+        + 2. * (-lap_alpha - d_tK0 + beta0 * d_z_K0) / alpha0;
 }
 
 //computes hamiltonian and momentum constraints and conformal metric determinant
@@ -1931,7 +1944,7 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
 
     int n_old = n_gridpoints;
     n_gridpoints = round(cutoff_frac * n_gridpoints); //shrink domain by cutoff_frac, ideally to remove detritus in H
-    R = (R * (n_gridpoints - 1.0)) / (n_old - 1.0); //TODO: think about this
+    R = (R * (n_gridpoints - 1.0)) / (n_old - 1.0); //rescale R again to keep dr the same
 
     // Keep composite state vector in sync with the trimmed grid size
     slices[0].states2.resize(n_gridpoints);
@@ -2035,7 +2048,7 @@ void Spacetime::evolve()
             << "   " << Mom_L2 <<  "   " << slices[n].states2[0].bssn.chi << "   "
             << A_ctr << "   "  << ah_radius << "   " <<  M << "   "  << slice_charge(current_slice_ptr)
             << "   " << dtK_L2 << "   " << omega_approx << "   " << slices[n].states2[0].bssn.alpha <<
-            "   " << E_phi << "   " << E_psi << endl;
+            "   " << E_phi << "   " << E_psi << "   " << (critical_study ? ricci_4_ctr():0.0) << endl;
         }
 
         slices[n + 1].states2.resize(n_gridpoints);
@@ -2073,7 +2086,7 @@ void Spacetime::evolve()
 
         //enforce that A is traceless
         current_slice_ptr = &slices[n + 1];
-        kill_refinement_noise(); //interpolate over refinement boundary noise before making A traceless
+        kill_refinement_noise(); //interpolate over refinement boundary noise before making A traceless-- maybe add at each rk4 stage?
         make_A_traceless(current_slice_ptr);
 
         //enforce minimum chi
