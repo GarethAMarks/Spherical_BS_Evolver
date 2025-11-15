@@ -136,6 +136,7 @@ class Spacetime
         double real_amp;       // amplitude of real field
         double sub_min_time;   // minimum time before declaring subcritical based on amplitude decrease
         double subcritical_time; // if no AH by this time, assume subcritical in critical study
+        double ricci_4_ctr_max; //maximum 4D Ricci scalar at grid center over evolution, for critical study diagnostics
 
         double E_phi; // complex scalar field energy
         double E_psi; // real scalar field energy
@@ -151,6 +152,7 @@ class Spacetime
         ComplexScalarField csf_model;
         RealScalarField    rsf_model;
         BSSNSlice* current_slice_ptr; //pointer to current slice, updated on each time step
+        
 
         double D;
 

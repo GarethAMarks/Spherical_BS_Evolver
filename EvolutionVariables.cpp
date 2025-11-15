@@ -1993,6 +1993,7 @@ void Spacetime::evolve()
 {
     dr = R / (n_gridpoints - 1.0);
     dt = courant_factor * dr;
+    if (critical_study) ricci_4_ctr_max = 0.0;
     
     if (!run_quietly)
         cout << "dr = " << dr << ", dt = " << dt <<  "   " << endl;
@@ -2040,6 +2041,10 @@ void Spacetime::evolve()
         double Ap0 = sqrt (pow(slices[n].states2[0].csf.phi_re,2) + pow(slices[n].states2[0].csf.phi_im,2));
         double Ap1 = sqrt (pow(slices[n].states2[1].csf.phi_re,2) + pow(slices[n].states2[1].csf.phi_im,2));
         double A_ctr =  (cell_centered) ? (Ap0- 0.5 * dr * (Ap1 - Ap0)) : Ap0; //just linearly extrapolate to r = 0 when cell-centered
+        double ricci_4 = (critical_study ? ricci_4_ctr():0.0);
+
+        if (critical_study && ricci_4 > ricci_4_ctr_max)
+            ricci_4_ctr_max = ricci_4;
 
         if (time_step % write_CN_interval == 0) //write time-dependent diagnostics to constraint_norms.dat
         {
@@ -2048,7 +2053,7 @@ void Spacetime::evolve()
             << "   " << Mom_L2 <<  "   " << slices[n].states2[0].bssn.chi << "   "
             << A_ctr << "   "  << ah_radius << "   " <<  M << "   "  << slice_charge(current_slice_ptr)
             << "   " << dtK_L2 << "   " << omega_approx << "   " << slices[n].states2[0].bssn.alpha <<
-            "   " << E_phi << "   " << E_psi << "   " << (critical_study ? ricci_4_ctr():0.0) << endl;
+            "   " << E_phi << "   " << E_psi << "   " << ricci_4 << endl;
         }
 
         slices[n + 1].states2.resize(n_gridpoints);
@@ -2174,7 +2179,7 @@ void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double l
     std::ofstream subcritical_file{"subcritical.dat"};
     std::ofstream supercritical_file{"supercritical.dat"};
 
-    subcritical_file << "#tuning_param   critical_time" << endl;
+    subcritical_file << "#tuning_param   critical_time     ricci_4_max" << endl;
     supercritical_file << "#tuning_param   critical_time" << endl;
 
     if (bs == nullptr)
@@ -2192,7 +2197,6 @@ void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double l
         double tmp = tuning_param;
         cout << "Running with tuning_param = " << std::setprecision(16) << tuning_param << endl;
 
-        
         // Skip re-reading parameters so tuned value persists into initial data seeding
         initialize(*bs, /*skip_read=*/true);
         tuning_param = tmp;
@@ -2248,7 +2252,7 @@ void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double l
         {
             lo = mid;   // subcritical at mid -> raise lower bound
             subcritical_file << std::setprecision(16)
-                             << mid << "   " << critical_time << endl;
+                             << mid << "   " << critical_time << "   " << ricci_4_ctr_max << endl;
         }
         else
         {
