@@ -1354,8 +1354,8 @@ double Spacetime::ricci_4_ctr() const
                             + (D - 2.) * h_WW0 * (alpha0 * A_ww0 * A_ww0 / h_ww0 - chi0 * D_ww_alpha[0]) + 8. * M_PI * alpha0 * (S[0] + (D - 3.) * rho[0]) / (D - 1.);
     
 
-    const double ricci_3 = R_zz[0] * h_ZZ0 + (D - 2.) * R_ww[0] * h_WW0;
-    const double K_ijK_IJ = K_zz0 * K_zz0 * h_ZZ0 * h_ZZ0 + (D - 2.) * K_ww0 * K_ww0 * h_WW0 * h_WW0;
+    const double ricci_3 = chi0 * (R_zz[0] * h_ZZ0 + (D - 2.) * R_ww[0] * h_WW0);
+    const double K_ijK_IJ = chi0 * chi0 * (K_zz0 * K_zz0 * h_ZZ0 * h_ZZ0 + (D - 2.) * K_ww0 * K_ww0 * h_WW0 * h_WW0);
     const double lap_alpha = chi0 * (h_ZZ0 * D_zz_alpha[0] + (D - 2.) * h_WW0 * D_ww_alpha[0]);                  
 
     return ricci_3 + K0 * K0 + K_ijK_IJ
