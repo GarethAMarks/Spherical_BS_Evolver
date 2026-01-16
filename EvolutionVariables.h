@@ -126,7 +126,7 @@ class Spacetime
         double slice_mass(BSSNSlice* slice_ptr);
         double slice_charge(BSSNSlice* slice_ptr);
 
-        double ricci_4_ctr() const; // Compute the 4D Ricci scalar at the grid center on the current slice.
+        double ricci_4_val(int j) const; // Compute the 4D Ricci scalar at a grid point
 
         bool critical_study; // whether to perform critical study analysis (bisection etc)
         int critical_state; // to be tracked by critical study handler: 0 for subcritical, 1 for supercritical
@@ -137,13 +137,14 @@ class Spacetime
         double sub_min_time;   // minimum time before declaring subcritical based on amplitude decrease
         double subcritical_time; // if no AH by this time, assume subcritical in critical study
         double ricci_4_ctr_max; //maximum 4D Ricci scalar at grid center over evolution, for critical study diagnostics
+        bool fill_subcritical; //whether to add additional subcritical runs after tuning complete
 
         double E_phi; // complex scalar field energy
         double E_psi; // real scalar field energy
         
         void compute_scalar_energies(BSSNSlice* slice_ptr); // Compute scalar-field energies on a given slice and store in E_phi/E_psi
 
-//auxiliary variables held on a particular time slice-- CONVENTION: upper/lowercase r,w denote upstairs/downstairs indices where relevent
+    //auxiliary variables held on a particular time slice-- CONVENTION: upper/lowercase r,w denote upstairs/downstairs indices where relevent
     private:
         friend class ComplexScalarField; // allow matter models to access potential V, dV
         friend class RealScalarField;    // allow RSF to access spacetime internals (e.g., D, min_z)
@@ -153,7 +154,6 @@ class Spacetime
         RealScalarField    rsf_model;
         BSSNSlice* current_slice_ptr; //pointer to current slice, updated on each time step
         
-
         double D;
 
         bool use_CCZ4; //0 for BSSN, 1 for CCZ4
@@ -283,6 +283,8 @@ class Spacetime
         bool make_tangherlini;
         bool wave_mode; //testing purposes only, converts to wave eq'n solver
 
+        bool adaptive_timestep; // whether to use adaptive timestep based on refinement level
+
         // Optional massless real scalar field configuration (injected before evolution)
         bool add_real_field;   // whether to add a real scalar field pulse before evolution
         double real_sigma;     // Gaussian width (sigma)
@@ -292,7 +294,7 @@ class Spacetime
 
         void auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j);
         void compute_auxiliary_quantities(BSSNSlice* slice_ptr, bool derivatives_computed = 0);
-        BSSNSlice slice_rhs(BSSNSlice* slice_ptr);
+        BSSNSlice slice_rhs(BSSNSlice* slice_ptr, int skipped_levels = 0);
         void make_A_traceless(BSSNSlice* slice_ptr);
         void compute_diagnostics(BSSNSlice* slice_ptr);
         void update_outer_boundary(double time_step);
@@ -304,6 +306,18 @@ class Spacetime
         void add_spacetime_pert(double a, double k, double center);
         // Add a massless real scalar Gaussian to rsf on a slice (psi gaussian, K_psi=0)
         void add_real_gaussian(BSSNSlice& slice);
+
+    // Compute RK4 update slice with optional outer refinement-level preservation.
+    // If skipped_levels == 0, update_slice is set to (dt/6)*(s1 + 2*s2 + 2*s3 + s4).
+    // If skipped_levels > 0, the outermost 'skipped_levels' refinement levels keep their
+    // existing values in update_slice, while interior points are set to the RK4 combination.
+    void get_update_slice(const BSSNSlice& s1,
+                  const BSSNSlice& s2,
+                  const BSSNSlice& s3,
+                  const BSSNSlice& s4,
+                  BSSNSlice& update_slice,
+                  double dt,
+                  int skipped_levels);
 
         void fill_active_points();
         void fill_refinement_levels();

@@ -26,6 +26,7 @@ using std::rotate;
 Spacetime::Spacetime() : csf_model(this), rsf_model(this) {
     // Default to historical behavior if not provided in params
     sub_min_time = 10.0; // Default to historical behavior if not provided in params
+    adaptive_timestep = false;
     // Initialize scalar-field energies
     E_phi = 0.0;
     E_psi = 0.0;
@@ -149,7 +150,7 @@ BSSNSlice operator*(double c, const BSSNSlice& slice)
 }
 
 //radial partial derivative of a given bssn var at index. Order is an optional argument that allows higher z-derivatives to be taken, default is 1.
-//should add chacks on refinement levels
+//should add checks on refinement levels
 double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
 {
     // Use composite state vector size for grid length to ensure compatibility with RK temp slices
@@ -1042,7 +1043,7 @@ void Spacetime::compute_auxiliary_quantities(BSSNSlice* slice_ptr, bool derivati
 }
 
 //returns a slice corresponding to the RHS of the BSSN evolution equations. Also computes needed auxiliary quantities first
-BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
+BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
 {
     double n = D - 2.;
 
@@ -1056,12 +1057,11 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
     rhs.states2.resize(n_gridpoints); // composite State vector (initialized to zeros)
 
     int max_ref = (refinement_levels.size() == 0 ) ? 1 : refinement_levels[refinement_levels.size() - 1]; //refinement level at outermost bdry
-    // Precompute 2^(max_ref-1) using bit shift (max_ref >= 1) for hot-loop conditions and stencils
     const int res_fac_outer = (max_ref > 0) ? (1 << (max_ref - 1)) : 1;
 
     for (int j = 0; j < n_gridpoints - 2; j++)
     {
-        if (!active_points[j])//perform no calculations and skip on inactive points
+        if (!active_points[j] || refinement_levels[j] > max_ref - skipped_levels)//perform no calculations and skip on inactive points
             continue;
 
         double z = (j + grid_offset) * dr;
@@ -1217,6 +1217,8 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr)
 
     //apply Sommerfeld boundary conditions at outer boundary
     sommerfeld_BC(rhs, res_fac_outer, slice_ptr);
+
+    kill_refinement_noise(); //EXPERIMENTAL: do refinement boundary interpolation at each RHS update
     return rhs;
 }
 
@@ -1327,36 +1329,37 @@ void Spacetime::compute_scalar_energies(BSSNSlice* slice_ptr)
     E_psi = add_real_field ? e_psi : 0.0;
 }
 
-// Placeholder: 4D Ricci scalar at grid center (to be completed with the correct formula).
-double Spacetime::ricci_4_ctr() const
+//compute the 4D Ricci scalar at a grid point on the current slice
+double Spacetime::ricci_4_val(int j) const
 {
     if (current_slice_ptr == nullptr || n_gridpoints <= 0)
         return 0.0;
 
     const BSSNSlice& s = *current_slice_ptr;
 
-    const double& chi0 = s.states2[0].bssn.chi;
-    const double& h_zz0 = s.states2[0].bssn.h_zz;
-    const double& h_ww0 = s.states2[0].bssn.h_ww;
-    const double& h_ZZ0 = h_ZZ[0];
-    const double& h_WW0 = h_WW[0];
-    const double& K0 = s.states2[0].bssn.K;
-    const double& A_zz0 = s.states2[0].bssn.A_zz;
-    const double& A_ww0 = s.states2[0].bssn.A_ww;
-    const double& alpha0 = s.states2[0].bssn.alpha;
-    double d_z_K0 = current_slice_ptr->d_z(v_K, 0);
-    const double& beta0 = s.states2[0].bssn.beta;
+    const double& chi0 = s.states2[j].bssn.chi;
+    const double& h_zz0 = s.states2[j].bssn.h_zz;
+    const double& h_ww0 = s.states2[j].bssn.h_ww;
+    const double& h_ZZ0 = h_ZZ[j];
+    const double& h_WW0 = h_WW[j];
+    const double& K0 = s.states2[j].bssn.K;
+    const double& A_zz0 = s.states2[j].bssn.A_zz;
+    const double& A_ww0 = s.states2[j].bssn.A_ww;
+    const double& alpha0 = s.states2[j].bssn.alpha;
+    double d_z_K0 = current_slice_ptr->d_z(v_K, j);
+    const double& beta0 = s.states2[j].bssn.beta;
 
     const double K_zz0 = (A_zz0 + h_zz0 * K0 / (D - 1.)) / chi0;
     const double K_ww0 = (A_ww0 + h_ww0 * K0 / (D - 1.)) / chi0;
 
-    double d_tK0 = beta0 * d_z_K0 - chi0 * h_ZZ0 * D_zz_alpha[0] + alpha0 * h_ZZ0 * h_ZZ0 * A_zz0 * A_zz0 + alpha0 * K0 * K0  / (D - 1.)
-                            + (D - 2.) * h_WW0 * (alpha0 * A_ww0 * A_ww0 / h_ww0 - chi0 * D_ww_alpha[0]) + 8. * M_PI * alpha0 * (S[0] + (D - 3.) * rho[0]) / (D - 1.);
-    
+    double d_tK0 = beta0 * d_z_K0 - chi0 * h_ZZ0 * D_zz_alpha[j] + alpha0 * h_ZZ0 * h_ZZ0 * A_zz0 * A_zz0 
+                    + alpha0 * K0 * K0  / (D - 1.)
+                    + (D - 2.) * h_WW0 * (alpha0 * A_ww0 * A_ww0 / h_ww0 - chi0 * D_ww_alpha[j]) 
+                    + 8. * M_PI * alpha0 * (S[j] + (D - 3.) * rho[j]) / (D - 1.);
 
-    const double ricci_3 = chi0 * (R_zz[0] * h_ZZ0 + (D - 2.) * R_ww[0] * h_WW0);
+    const double ricci_3 = chi0 * (R_zz[j] * h_ZZ0 + (D - 2.) * R_ww[j] * h_WW0);
     const double K_ijK_IJ = chi0 * chi0 * (K_zz0 * K_zz0 * h_ZZ0 * h_ZZ0 + (D - 2.) * K_ww0 * K_ww0 * h_WW0 * h_WW0);
-    const double lap_alpha = chi0 * (h_ZZ0 * D_zz_alpha[0] + (D - 2.) * h_WW0 * D_ww_alpha[0]);                  
+    const double lap_alpha = chi0 * (h_ZZ0 * D_zz_alpha[j] + (D - 2.) * h_WW0 * D_ww_alpha[j]);
 
     return ricci_3 + K0 * K0 + K_ijK_IJ
         + 2. * (-lap_alpha - d_tK0 + beta0 * d_z_K0) / alpha0;
@@ -1385,7 +1388,7 @@ void Spacetime::compute_diagnostics (BSSNSlice* slice_ptr)
     const double A_zz = slice_ptr->states2[j].bssn.A_zz;
     const double A_ww = slice_ptr->states2[j].bssn.A_ww;
     const double K = slice_ptr->states2[j].bssn.K;
-        //const double beta = slice_ptr->states2[j].bssn.beta;
+    //const double beta = slice_ptr->states2[j].bssn.beta;
 
         if (chi < min_chi)
             chi = min_chi;
@@ -1476,7 +1479,7 @@ void Spacetime:: write_diagnostics()
     double A = sqrt(phi_re * phi_re + phi_im * phi_im);
 
     data_file << std::setprecision (10) <<  (j + grid_offset) * dr << "   " << Ham[j] << "    " << Mom_Z[j]<< "    " << det_h[j]  << "    " << aux_test[j]
-        << "    " << A << "    "  << d_zz(v_chi, j) << "    "  << d_zz(v_alpha, j)  << "    " << d_z(v_phi_re,j) << endl;
+        << "    " << A << "    " << ricci_4_val(j) << endl;  //<< d_zz(v_chi, j) << "    "  << d_zz(v_alpha, j)  << "    " << d_z(v_phi_re,j) << endl;
     }
 
     //cout << "Wrote diagnostics" << endl;
@@ -1507,6 +1510,7 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "write_CN_interval = ", write_CN_interval, quiet);
         fill_parameter(current_line, "BS_resolution_factor = ", BS_resolution_factor, quiet);
         fill_parameter(current_line, "evolve_shift = ", evolve_shift, quiet);
+        fill_parameter(current_line, "adaptive_timestep = ", adaptive_timestep, quiet);
         fill_parameter(current_line, "make_tangherlini = ", make_tangherlini, quiet);
         fill_parameter(current_line, "store_A0 = ", store_A0, quiet);
         fill_parameter(current_line, "run_quietly = ", run_quietly, quiet);
@@ -1541,12 +1545,60 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "sub_min_time = ", sub_min_time, quiet);
         fill_parameter(current_line, "subcritical_time = ", subcritical_time, quiet);
         fill_parameter(current_line, "do_ah_search = ", do_ah_search, quiet);
+        fill_parameter(current_line, "fill_subcritical = ", fill_subcritical, quiet);
 
         fill_param_array(current_line, "refinement_points = ", refinement_points, quiet);
 
     }
-
     cout << sigma_BSSN << eta << endl;
+}
+
+// Build the RK4 update slice with optional preservation of outer refinement levels.
+void Spacetime::get_update_slice(const BSSNSlice& s1,
+                                 const BSSNSlice& s2,
+                                 const BSSNSlice& s3,
+                                 const BSSNSlice& s4,
+                                 BSSNSlice& update_slice,
+                                 double dt,
+                                 int skipped_levels)
+{
+    // Compute RK4 combination into a temporary slice
+    BSSNSlice combo = (dt / 6.0) * (s1 + 2.0 * s2 + 2.0 * s3 + s4);
+
+    // Ensure update_slice structural fields are consistent
+    update_slice.R = combo.R;
+    update_slice.has_BH = combo.has_BH;
+    update_slice.refinement_points = combo.refinement_points;
+    update_slice.use_CCZ4 = combo.use_CCZ4;
+    update_slice.states2.resize(combo.states2.size());
+    if (update_slice.use_CCZ4)
+        update_slice.theta.resize(combo.theta.size());
+
+    if (skipped_levels <= 0 || refinement_levels.empty())
+    {
+        // No preservation requested or no refinement present: copy entire combo
+        update_slice = combo;
+        return;
+    }
+
+    // Determine the maximum refinement level at the outer boundary
+    const int max_ref = refinement_levels.back();
+    const int N = static_cast<int>(combo.states2.size());
+
+    // Preserve existing values in update_slice for outermost 'skipped_levels' levels
+    for (int j = 0; j < N; ++j)
+    {
+        const bool in_outer_levels = (refinement_levels[j] > max_ref - skipped_levels);
+
+        if (!in_outer_levels)
+        {
+            // Use RK4 combo for interior points
+            update_slice.states2[j] = combo.states2[j];
+            if (update_slice.use_CCZ4)
+                update_slice.theta[j] = combo.theta[j];
+        }
+        // else: leave update_slice[j] as-is (preserve existing values)
+    }
 }
 
 //halves number of gridpoints while keeping R. Should only be called before evolving!
@@ -1765,7 +1817,6 @@ void Spacetime::add_spacetime_pert(double a, double k, double center)
         s.states2[j].csf.K_phi_re += 0.5 * sin(phase) * omega * a * exp ( -pow (r - center, 2.) / k2) / (2. * s.states2[j].bssn.alpha);
         s.states2[j].csf.K_phi_im -= 0.5 * cos(phase) * omega * a * exp ( -pow (r - center, 2.) / k2) / (2. * s.states2[j].bssn.alpha);
     }
-
     solve_initial_ham(run_quietly);
 }
 
@@ -1956,7 +2007,7 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
     if (start_time > 0)
         slices[0].read_checkpoint(start_time, n_gridpoints);
 
-    //n_gridpoints and R should not change after this point!!!
+    //NOTE: n_gridpoints and R should not change after this point!!!
 
     //resize all auxiliary/diagnostic arrays as appropriate
     resize_temp_arrays();
@@ -2008,22 +2059,41 @@ void Spacetime::evolve()
         std::cerr << "constraint_norms.dat could not be opened for writing!\n";
         exit(1);
     }
+
+    constraints_file << "#time"<< "   " << "Ham_L2" 
+            << "   " << "Mom_L2"<<  "   " << "chi_central" << "   "
+            << "A_central" << "   "  << "AH radius" << "   " <<  "M_ADM" << "   "  << "Noether charge"
+            << "   " << "Central dK/dt" << "   " << "freq_central" << "   " << "lapse_central" <<
+            "   " << "complex field energy" << "   " << "real field energy" << "   " << "central 4D ricci scalar" << "   " << "phi_re_central"<< endl;
+
     double A0 = sqrt (pow(slices[0].states2[0].csf.phi_re,2) + pow(slices[0].states2[0].csf.phi_im,2));
 
-    if (!run_quietly)
-        cout <<" \n Will evolve with up to " << num_timesteps << " time steps \n" << endl;
-    
-
+    if (!run_quietly) cout <<" \n Will evolve with up to " << num_timesteps << " time steps \n" << endl;
+        
     //s_i are returned RHS's, t represents temporary RHS + current_slice quantities that must be stored so derivatives can be accessed
-    BSSNSlice s1, s2, s3, s4, t1, t2, t3;
+    BSSNSlice s1, s2, s3, s4, t1, t2, t3, update_slice;
 
     for (int time_step = 0; time_step < num_timesteps; time_step++)
     {
         double t = start_time + time_step * dt;
 
+        int skipped_levels = 0;
+
+        //work out how many outer refinement levels to skip updating based on current time step
+        if (adaptive_timestep && !refinement_points.empty() && time_step > 0)
+        {
+            int skipped_levels = refinement_levels.back() - 1;
+            int skip = time_step;
+            while (skip % 2 == 0 && skipped_levels > 0)
+            {
+                skip /= 2;
+                skipped_levels--;
+            }
+            //cout << "Skipping " << skipped_levels << " refinement levels at time step " << time_step << endl;
+        }
+
         //fill out array until we've reached maximum number of stored slices, then update last element + rotate at end.
         int n = (time_step > max_stored_slices - 2) ? (max_stored_slices - 2) : time_step;
-
         double phase_ctr, phase_last;
         if (time_step > 0) phase_last = phase_ctr;
         phase_ctr = std::arg( std::complex<double>(slices[n].states2[0].csf.phi_re, slices[n].states2[0].csf.phi_im));
@@ -2041,7 +2111,7 @@ void Spacetime::evolve()
         double Ap0 = sqrt (pow(slices[n].states2[0].csf.phi_re,2) + pow(slices[n].states2[0].csf.phi_im,2));
         double Ap1 = sqrt (pow(slices[n].states2[1].csf.phi_re,2) + pow(slices[n].states2[1].csf.phi_im,2));
         double A_ctr =  (cell_centered) ? (Ap0- 0.5 * dr * (Ap1 - Ap0)) : Ap0; //just linearly extrapolate to r = 0 when cell-centered
-        double ricci_4 = (critical_study ? ricci_4_ctr():0.0);
+        double ricci_4 = (critical_study ? ricci_4_val(0):0.0);
 
         if (critical_study && ricci_4 > ricci_4_ctr_max)
             ricci_4_ctr_max = ricci_4;
@@ -2053,7 +2123,7 @@ void Spacetime::evolve()
             << "   " << Mom_L2 <<  "   " << slices[n].states2[0].bssn.chi << "   "
             << A_ctr << "   "  << ah_radius << "   " <<  M << "   "  << slice_charge(current_slice_ptr)
             << "   " << dtK_L2 << "   " << omega_approx << "   " << slices[n].states2[0].bssn.alpha <<
-            "   " << E_phi << "   " << E_psi << "   " << ricci_4 << endl;
+            "   " << E_phi << "   " << E_psi << "   " << ricci_4 << "   " << slices[n].states2[0].csf.phi_re << endl;
         }
 
         slices[n + 1].states2.resize(n_gridpoints);
@@ -2070,24 +2140,26 @@ void Spacetime::evolve()
         //evaluate intermediate RK4 quantities
         current_slice_ptr = &slices[n];
 
-        s1 = slice_rhs(current_slice_ptr);
+        s1 = slice_rhs(current_slice_ptr, skipped_levels);
         t1 = slices[n]  + (0.5 * dt) * s1;
 
         compute_diagnostics(current_slice_ptr); //do this here so current_slice_ptr is in right place and auxiliary quantities computed
 
         current_slice_ptr = &t1; //must update current_slice_ptr before calling slice_rhs or derivatives will not work properly! Should consider better approach...
-        s2 = slice_rhs(current_slice_ptr);
+        s2 = slice_rhs(current_slice_ptr, skipped_levels);
         t2 = slices[n] + (0.5 * dt) * s2;
 
         current_slice_ptr = &t2;
-        s3 = slice_rhs(current_slice_ptr);
+        s3 = slice_rhs(current_slice_ptr, skipped_levels);
         t3 = slices[n] + dt * s3;
 
         current_slice_ptr = &t3;
-        s4 = slice_rhs(current_slice_ptr);
+        s4 = slice_rhs(current_slice_ptr, skipped_levels);
 
         //update slice
-        slices[n + 1] = slices[n] + (dt / 6.) * (s1 + 2. * s2 + 2. * s3 + s4);
+        get_update_slice(s1, s2, s3, s4, update_slice, dt, skipped_levels);
+        //update_slice = (dt / 6.) * (s1 + 2. * s2 + 2. * s3 + s4);
+        slices[n + 1] = slices[n] + update_slice;
 
         //enforce that A is traceless
         current_slice_ptr = &slices[n + 1];
@@ -2265,15 +2337,27 @@ void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double l
     cout << std::setprecision(16)
          << "Critical tuning complete. tuning_param = " << tuning_param
          << ", bracket [" << lo << ", " << hi << "] with tol = " << critical_eps << endl;
+
+
+    if (fill_subcritical)
+    {
+        double step = critical_eps;
+        // Fill in subcritical data points for plotting
+        while (fabs(step) < fabs(0.01 * tuning_param))
+        {
+            subcritical_file <<"#Critical tuning finished here!" << endl;
+            double sub_val = tuning_param - step;
+            run_with_param(sub_val);
+            subcritical_file << std::setprecision(16)
+                             << sub_val << "   " << critical_time << "   " << ricci_4_ctr_max << endl;
+            step *= 2.0;
+        }
+    }
+
     exit(0);
 }
 
-// --------------------------
-// Apparent horizon search
-// --------------------------
-
-// Placeholder AH indicator at gridpoint j. This will be replaced with the actual expression
-// using BSSNState fields (e.g., expansion of outgoing null geodesics).
+//Expansion for AH search
 double Spacetime::ah_indicator_at(const BSSNSlice* slice_ptr, int j) 
 {
     // Access BSSN variables to avoid unused-variable warnings and as a cue for future implementation.
