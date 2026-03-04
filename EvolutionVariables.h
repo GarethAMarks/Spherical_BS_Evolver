@@ -138,6 +138,7 @@ class Spacetime
         double subcritical_time; // if no AH by this time, assume subcritical in critical study
         double ricci_4_ctr_max; //maximum 4D Ricci scalar at grid center over evolution, for critical study diagnostics
         bool fill_subcritical; //whether to add additional subcritical runs after tuning complete
+        double A_thresh; //if A_ctr larger than this, designate supercritial.
 
         double E_phi; // complex scalar field energy
         double E_psi; // real scalar field energy

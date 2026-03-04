@@ -24,9 +24,10 @@ using std::max;
 using std::rotate;
 // Spacetime constructor: initialize reusable CSF model with this context
 Spacetime::Spacetime() : csf_model(this), rsf_model(this) {
-    // Default to historical behavior if not provided in params
-    sub_min_time = 10.0; // Default to historical behavior if not provided in params
+    
+    sub_min_time = 10.0; 
     adaptive_timestep = false;
+    A_thresh = 10000000.0; // Default to a very large value if not provided in params.
     // Initialize scalar-field energies
     E_phi = 0.0;
     E_psi = 0.0;
@@ -1355,8 +1356,11 @@ double Spacetime::ricci_4_val(int j) const
     double d_tK0 = beta0 * d_z_K0 - chi0 * h_ZZ0 * D_zz_alpha[j] + alpha0 * h_ZZ0 * h_ZZ0 * A_zz0 * A_zz0 
                     + alpha0 * K0 * K0  / (D - 1.)
                     + (D - 2.) * h_WW0 * (alpha0 * A_ww0 * A_ww0 / h_ww0 - chi0 * D_ww_alpha[j]) 
-                    + 8. * M_PI * alpha0 * (S[j] + (D - 3.) * rho[j]) / (D - 1.);
+                    + 8. * M_PI * alpha0 * (S[j] + (D - 3.) * rho[j]) / (D - 2.);
 
+    //beta * d_z_K - chi * inv_hzz * D_zz_alpha[j] + alpha * inv_hzz * inv_hzz * A_zz * A_zz + alpha * K * K * invDm1
+                            //+ n * inv_hww * (alpha * A_ww * A_ww / h_ww - chi * D_ww_alpha[j]) + 8. * M_PI * alpha * (S[j] + (D - 3.) * rho[j]) / n;
+        
     const double ricci_3 = chi0 * (R_zz[j] * h_ZZ0 + (D - 2.) * R_ww[j] * h_WW0);
     const double K_ijK_IJ = chi0 * chi0 * (K_zz0 * K_zz0 * h_ZZ0 * h_ZZ0 + (D - 2.) * K_ww0 * K_ww0 * h_WW0 * h_WW0);
     const double lap_alpha = chi0 * (h_ZZ0 * D_zz_alpha[j] + (D - 2.) * h_WW0 * D_ww_alpha[j]);
@@ -1546,6 +1550,7 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "subcritical_time = ", subcritical_time, quiet);
         fill_parameter(current_line, "do_ah_search = ", do_ah_search, quiet);
         fill_parameter(current_line, "fill_subcritical = ", fill_subcritical, quiet);
+        fill_parameter(current_line, "A_thresh = ", A_thresh, quiet);
 
         fill_param_array(current_line, "refinement_points = ", refinement_points, quiet);
 
@@ -2212,7 +2217,7 @@ void Spacetime::evolve()
             exit(1);
         }
 
-        if (critical_study && ah_radius > 0.) //use AH formation as supercritical indicator 
+        if (critical_study && (ah_radius > 0. || A_ctr > A_thresh)) //use AH formation or central amplitude as supercritical indicator 
         //(critical_study && slices[n + 1].states2[0].bssn.alpha < lapse_thresh)
         {
             cout << "Supercritical at time " << t << endl;

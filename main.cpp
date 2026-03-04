@@ -101,10 +101,11 @@ void compute_linear_perturbation(BosonStar& boson_star, double A0, double dA, do
 
     //lp.rk4_solve(-0.00001, 0.0235);
     //lp.get_best_gamma(-4.5e-5);
-    //lp.get_chi_sq();
     //lp.get_chi_sq_newton();
 
     lp.read_parameters(0);
+    //lp.get_chi_sq();
+    //lp.get_best_gamma(4.5e-5);
     lp.pert_cycle(A0, dA, n_stars); //lp.pert_cycle(0.098, 0.0005, 200);
     cout << "Noether charge perturbation is " << lp.get_noether_perturbation() << endl;
     lp.write_pert();
