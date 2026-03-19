@@ -86,6 +86,7 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "alpha_central = ", alpha_central, quiet);
         fill_parameter(current_line, "A_central = ", A_central, quiet);
         fill_parameter(current_line, "frequency_guess = ", frequency_guess, quiet);
+        fill_parameter(current_line, "T_inf = ", T_inf, quiet);
         fill_parameter(current_line, "freq_epsilon = ", freq_epsilon, quiet);
         fill_parameter(current_line, "isotropic = ", isotropic, quiet);
         fill_parameter(current_line, "r_match_fac = ", r_match_fac, quiet);
@@ -126,6 +127,30 @@ FieldState BosonStar::state_RHS(const double radius, const long double frequency
 
     double F1 = 4. * M_PI * G * r * s.X * s.X / (D - 2.);
 
+    double P_new = 0.; //correction to the pressure from finite temperature
+    double n_new = 0.; //correction to the number density from finite temperature
+    double s_new = 0.; //correction to the entropy density from finite temperature
+    double X_corr = 0.; //correction to X from finite temperature
+    double phi_corr = 0.; //correction to phi from finite temperature
+
+    if (T_inf > 0.)
+    {
+        //double mu_chem = frequency / exp(s.phi); 
+        double c_ph = s.A * s.A * ddV(s.A) 
+                      / (s.A * s.A * ddV(s.A + 2 * frequency * frequency / (exp(2 * s.phi)))); //phonon speed
+        P_new = M_PI * M_PI * c_ph * T_inf * T_inf * T_inf * T_inf / 90.
+                / pow( 1. - (1. - c_ph * c_ph) , 2.);
+
+        s_new = 2. * M_PI * M_PI * c_ph * T_inf * T_inf * T_inf / 45.
+                / pow( 1. - (1. - c_ph * c_ph) , 2.);
+        
+        n_new = 2. * M_PI * M_PI * c_ph * T_inf * T_inf * T_inf * T_inf / 45.
+                / pow( 1. - (1. - c_ph * c_ph) , 2.) * (1 - c_ph * c_ph); //NOTE: factor alpha / omega canceled with X_corr to avoid div by 0
+        
+        X_corr = 4. * M_PI * r  * s.X * s.X * s.X *(r * n_new - P_new + s_new * T_inf / exp(s.phi));
+        phi_corr = 4. * M_PI * r  * s.X * s.X * P_new;
+    }
+
     //zero out terms that should be zeroed at origin as eta = 0, X = 1 there
     if (radius == 0.)
         {T1 = 0; T3 = 0;}
@@ -136,17 +161,17 @@ FieldState BosonStar::state_RHS(const double radius, const long double frequency
     //in the asymptotic region, evolve phi and X normally but do not update A, eta (these will be hard-coded to asymptotic expressions)
     if (asymptotic_region)
     {
-        return  FieldState{0., s.X * ( F1 * (T2 + V(s.A)) - T1 ), dPhi, 0.};
+        return  FieldState{0., s.X * ( F1 * (T2 + V(s.A)) - T1 ) + X_corr, dPhi + phi_corr, 0.};
     }
     else if (given_A) //return RHS of field state variables outside of asymptotic region, A excepted
     {
-        return  FieldState{0, s.X * ( F1 * (T2 + V(s.A)) - T1 ), dPhi,
+        return  FieldState{0, s.X * ( F1 * (T2 + V(s.A)) - T1 ) + X_corr, dPhi + phi_corr,
         static_cast<double>(eta_corr *(-(D - 2.) * T3 - s.eta * dPhi + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi)))) };
     }
 
     else //return RHS of field state variables outside of asymptotic region
     {
-        return  FieldState {s.X * s.eta, s.X * ( F1 * (T2 + V(s.A)) - T1 ), dPhi,
+        return  FieldState {s.X * s.eta, s.X * ( F1 * (T2 + V(s.A)) - T1 ) + X_corr, dPhi + phi_corr,
         static_cast<double>(eta_corr * (-(D - 2.) * T3 - s.eta * dPhi + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi))))};
     }
 }
@@ -1289,6 +1314,8 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
 {
     read_parameters(0);
     ofstream data_file{"BosonStars.dat"};
+    // write header describing each column (commented with #)
+    data_file << "# A_central  M  r_99  noether_charge  binding_energy  omega  omega_pre_rescale  phi0  c4  cmax\n";
     omega_pre_rescale = frequency_guess;
 
     //initial # of gridpoints (we'll increase for larger models)
@@ -1300,7 +1327,7 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
     // mini BS: {0.3, 0.375, 0.425, 0.475, 0.525, 0.575, 0.62, 0.66, 0.7, 0.73} is good with n_gridpoints = 2000 from patams file
     //sigma = 0.2: {0.25,0.325,0.375, 0.425, 0.475, 0.525, 0.575};
     //sigma = 0.1: {0.05, 0.15, 0.2, 0.25,0.325,0.375, 0.425, 0.475, 0.525, 0.575};
-    vector<double> refine_thresholds{0.25,0.325,0.375, 0.425, 0.475, 0.525, 0.575};
+    vector<double> refine_thresholds{0.3, 0.375, 0.425, 0.475, 0.525, 0.575, 0.62, 0.66, 0.7, 0.73};
     //bool passed_last_threshold; //set to 1 after last threshold reached
 
     //frequency from previous guess for use in update

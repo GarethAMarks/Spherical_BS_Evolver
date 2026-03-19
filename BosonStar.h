@@ -97,6 +97,7 @@ class BosonStar
         double binding_energy; //M - mu*N
         double noether_charge;
         double compactness;
+        double T_inf; //asymptotic temperature
         double r_99; //solved radius containing 99% of mass
         bool gaussian_start;
         bool perturb;
