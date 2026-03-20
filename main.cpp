@@ -24,8 +24,8 @@ int main()
     BosonStar boson_star{};
     boson_star.read_parameters();
 
-    boson_star.solve();
-    //boson_star.rk4_solve(boson_star.dA);
+    //boson_star.solve();
+    boson_star.rk4_solve(boson_star.dA);
     boson_star.write_field();
     exit(0);
     if (boson_star.isotropic)

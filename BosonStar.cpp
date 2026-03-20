@@ -183,8 +183,8 @@ FieldState BosonStar::state_RHS(const double radius, const long double frequency
         X_corr =  4. * M_PI * r  * s.X * s.X * s.X *(ups_corr + n_new - P_new + s_new * T_inf / exp(s.phi));
         phi_corr = 4. * M_PI * r  * s.X * s.X * P_new;
 
-        eta_Tcorr = s.X * M_PI * M_PI * T_inf * T_inf * T_inf * T_inf * (1 -  c_ph * c_ph) / exp(4. * s.phi)
-                    / (30. * pow(c_ph , 3.) * s.A);
+        eta_Tcorr = s.X * M_PI * M_PI * T_inf * T_inf * T_inf * T_inf * (1 -  c_ph * c_ph) * (1 -  c_ph * c_ph) / exp(4. * s.phi)
+                    / (60. * pow(c_ph , 5.) * s.A);
 
 
         //cout << "c_ph = " << c_ph << ", P_new = " << P_new << ", s_new = " << s_new << ", n_new = " << n_new << ", X_corr = " << X_corr << ", phi_corr = " << phi_corr << endl;
@@ -430,7 +430,7 @@ int BosonStar::count_zero_crossings()
     {
         if ((state[j].A == 0.) || (state[j].A > 0. && state[j - 1].A < 0.) || (state[j].A < 0. && state[j - 1].A > 0.)
             || (fabs(state[j].A) < 2.* fabs(state[j - 1].A - state[j - 2].A ) && state[j].A < state[0].A  ) //alternative check condition near discontinuities
-            || state[j].A < 0.001 * state[0].A //will restrict us to ground state, but should be OK for now
+            || state[j].A < 0.005 * state[0].A //will restrict us to ground state, but should be OK for now
             )
             {zero_crossings++;}
     }
