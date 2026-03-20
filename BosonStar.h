@@ -143,6 +143,7 @@ class BosonStar
         void add_perturbation(double a, double k, double center);
 
         void cycle_models(int n_stars, double A_0, double delta_A);
+        int get_smallest_amp_index();
 
 
 

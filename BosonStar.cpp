@@ -9,6 +9,7 @@
 #include "mathutils.h"
 #include <sstream>
 #include<iomanip>
+#include <cmath>
 
 using namespace std;
 
@@ -17,6 +18,32 @@ using namespace std;
 FieldState operator+(const FieldState& s1, const FieldState& s2)
 {
     return FieldState{s1.A + s2.A, s1.X + s2.X, s1.phi + s2.phi, s1.eta + s2.eta};
+}
+
+// Return index of smallest scalar field amplitude A in `state`, ignoring index 0 and any NaN values.
+// Returns -1 if no valid index found.
+int BosonStar::get_smallest_amp_index()
+{
+    if (state.size() <= 1) return -1;
+
+    int best_idx = -1;
+    double best_val = 0.0;
+    bool found = false;
+
+    for (size_t i = 1; i < state.size(); ++i)
+    {
+        double A = state[i].A;
+        if (std::isnan(A)) continue;
+        if (!found || A < best_val)
+        {
+            best_val = A;
+            best_idx = static_cast<int>(i);
+            found = true;
+        }
+    }
+    if (best_idx == -1)
+        cerr << "WARNING: No valid scalar field amplitude A found in state array." << endl;
+    return best_idx;
 }
 
 FieldState operator-(const FieldState& s1, const FieldState& s2)
@@ -133,22 +160,34 @@ FieldState BosonStar::state_RHS(const double radius, const long double frequency
     double X_corr = 0.; //correction to X from finite temperature
     double phi_corr = 0.; //correction to phi from finite temperature
 
-    if (T_inf > 0.)
+    double eta_Tcorr = 0.; //correction to eta from finite temperature, should be zero at r = 0
+
+    if (T_inf >= 0.)
     {
         //double mu_chem = frequency / exp(s.phi); 
-        double c_ph = s.A * s.A * ddV(s.A) 
-                      / (s.A * s.A * ddV(s.A + 2 * frequency * frequency / (exp(2 * s.phi)))); //phonon speed
-        P_new = M_PI * M_PI * c_ph * T_inf * T_inf * T_inf * T_inf / 90.
-                / pow( 1. - (1. - c_ph * c_ph) , 2.);
+        double c_ph = sqrt(s.A * s.A * ddV(s.A) 
+                      / (s.A * s.A * ddV(s.A) + 2. * frequency * frequency / (exp(2 * s.phi)))); //phonon speed
 
-        s_new = 2. * M_PI * M_PI * c_ph * T_inf * T_inf * T_inf / 45.
-                / pow( 1. - (1. - c_ph * c_ph) , 2.);
+        P_new = M_PI * M_PI * T_inf * T_inf * T_inf * T_inf / exp(4. * s.phi) / 90.
+                / pow( c_ph , 3.);
+
+        s_new = 2. * M_PI * M_PI * T_inf * T_inf * T_inf / exp(3. * s.phi) / 45.
+                / pow( c_ph , 3.);
         
-        n_new = 2. * M_PI * M_PI * c_ph * T_inf * T_inf * T_inf * T_inf / 45.
-                / pow( 1. - (1. - c_ph * c_ph) , 2.) * (1 - c_ph * c_ph); //NOTE: factor alpha / omega canceled with X_corr to avoid div by 0
+        n_new = 2. * M_PI * M_PI * T_inf * T_inf * T_inf * T_inf / exp(4. * s.phi) / 45.
+                / pow( c_ph , 5.) * (1. - c_ph * c_ph); //NOTE: factor alpha / omega canceled with X_corr to avoid div by 0
         
-        X_corr = 4. * M_PI * r  * s.X * s.X * s.X *(r * n_new - P_new + s_new * T_inf / exp(s.phi));
+        double ups_corr = -2. * M_PI * M_PI * T_inf * T_inf * T_inf * T_inf / exp(4. * s.phi) / 45.
+                          / pow(c_ph , 5.) * (1. - c_ph * c_ph) * (1. - 0.75 * c_ph * c_ph); 
+
+        X_corr =  4. * M_PI * r  * s.X * s.X * s.X *(ups_corr + n_new - P_new + s_new * T_inf / exp(s.phi));
         phi_corr = 4. * M_PI * r  * s.X * s.X * P_new;
+
+        eta_Tcorr = s.X * M_PI * M_PI * T_inf * T_inf * T_inf * T_inf * (1 -  c_ph * c_ph) / exp(4. * s.phi)
+                    / (30. * pow(c_ph , 3.) * s.A);
+
+
+        //cout << "c_ph = " << c_ph << ", P_new = " << P_new << ", s_new = " << s_new << ", n_new = " << n_new << ", X_corr = " << X_corr << ", phi_corr = " << phi_corr << endl;
     }
 
     //zero out terms that should be zeroed at origin as eta = 0, X = 1 there
@@ -161,7 +200,7 @@ FieldState BosonStar::state_RHS(const double radius, const long double frequency
     //in the asymptotic region, evolve phi and X normally but do not update A, eta (these will be hard-coded to asymptotic expressions)
     if (asymptotic_region)
     {
-        return  FieldState{0., s.X * ( F1 * (T2 + V(s.A)) - T1 ) + X_corr, dPhi + phi_corr, 0.};
+        return  FieldState{0., s.X * ( F1 * (T2 + V(s.A)) - T1 ) /*+ X_corr*/, dPhi /*+ phi_corr*/, 0.};
     }
     else if (given_A) //return RHS of field state variables outside of asymptotic region, A excepted
     {
@@ -172,7 +211,8 @@ FieldState BosonStar::state_RHS(const double radius, const long double frequency
     else //return RHS of field state variables outside of asymptotic region
     {
         return  FieldState {s.X * s.eta, s.X * ( F1 * (T2 + V(s.A)) - T1 ) + X_corr, dPhi + phi_corr,
-        static_cast<double>(eta_corr * (-(D - 2.) * T3 - s.eta * dPhi + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi))))};
+        static_cast<double>(eta_corr * (-(D - 2.) * T3 - s.eta * dPhi 
+                            + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi))) + eta_Tcorr)};
     }
 }
 
@@ -386,9 +426,12 @@ int BosonStar::count_zero_crossings()
     int zero_crossings = 0;
 
     //check for zero crossings up to blowup point (neglecting one extra point as we sometimes get spurious zero crossings on explosion)
-    for (int j = 1; j < blowup_point - 1; j++)
+    for (int j = 2; j < blowup_point - 1; j++)
     {
-        if ((state[j].A == 0.) || (state[j].A > 0. && state[j - 1].A < 0.) || (state[j].A < 0. && state[j - 1].A > 0.) )
+        if ((state[j].A == 0.) || (state[j].A > 0. && state[j - 1].A < 0.) || (state[j].A < 0. && state[j - 1].A > 0.)
+            || (fabs(state[j].A) < 2.* fabs(state[j - 1].A - state[j - 2].A ) && state[j].A < state[0].A  ) //alternative check condition near discontinuities
+            || state[j].A < 0.001 * state[0].A //will restrict us to ground state, but should be OK for now
+            )
             {zero_crossings++;}
     }
 
@@ -484,11 +527,14 @@ bool BosonStar:: fill_asymptotic(bool quiet)
 
     int min_index = find_last_minimum();
 
-    if (min_index == -1 && !quiet)
+    if (min_index == -1 && !quiet /*&& T_inf <= 0.*/)
         cerr << "ERROR: No local minimum in |A| found for A_central = " << A_central << endl;
 
-    if (min_index == -1)
+    if (min_index == -1 /*&& T_inf <= 0.*/)
         return 0;
+
+    //if (T_inf > 0.)
+      //  min_index = get_smallest_amp_index();
 
     //double r_match_fac = 0.75;
     int j_match = round( r_match_fac * min_index); //index at which matching takes place
@@ -500,23 +546,9 @@ bool BosonStar:: fill_asymptotic(bool quiet)
 
     double phi_match = state[j_match].phi; //match values in current gauge
     double A_match = state[j_match].A;
-    //double eta_match = state[j_match].eta;
-    //double deta_match = (state[j_match].eta - state[j_match - 1].eta) / dr; //estimate for derivative of eta at r_match, used to crudely fit exponential falloff for eta to first order
 
     //ensures continuity of A
     double A_factor = A_match * exp(sqrt( mu * mu - pow(omega / exp(phi_match), 2)) * r_match) * pow(r_match, 0.5*(D - 2.));
-
-    //fit exponential of form B * exp(-k * r) to eta in exponential region. If eta is already zero, just keep it there (will likely not happen in practice)
-    /*double k;  , B;
-    if (eta_match != 0.)
-    {
-        k = abs(deta_match / eta_match);
-        B = exp(k * r_match) * eta_match;
-    }
-    else
-    {
-        k = 0.; B = 0.;
-    }*/
 
     FieldState s1, s2, s3, s4;
     for (int j = j_match; j < n_gridpoints - 1; j++)
@@ -596,7 +628,6 @@ void BosonStar::rescale_lapse (double phi_shift)
 bool BosonStar::solve(bool quiet)
 {
     find_frequency(quiet);
-
     return fill_asymptotic(quiet);
 }
 
