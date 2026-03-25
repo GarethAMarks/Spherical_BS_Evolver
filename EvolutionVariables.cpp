@@ -478,6 +478,7 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
 
     // Build contiguous arrays and their splines
     tk::spline s_X, s_A, s_phi, s_psi_iso, s_A_iso, s_phi_iso, s_pert, s_pert_iso;
+    tk::spline s_rsf_iso, s_rsf;
     if (isotropic) {
         if (!boson_star.psi_iso_array.empty()) {
             s_psi_iso.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
@@ -490,6 +491,10 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
         if (!boson_star.phi_iso_array.empty()) {
             s_phi_iso.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
             s_phi_iso.set_points(X_nodes, boson_star.phi_iso_array, tk::spline::cspline);
+        }
+        if (boson_star.add_real_field && !boson_star.rsf_iso_array.empty()) {
+            s_rsf_iso.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
+            s_rsf_iso.set_points(X_nodes, boson_star.rsf_iso_array, tk::spline::cspline);
         }
         if (boson_star.perturb && !boson_star.pert_iso_array.empty()) {
             s_pert_iso.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
@@ -511,6 +516,12 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
         if (boson_star.perturb && !boson_star.pert_array.empty()) {
             s_pert.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
             s_pert.set_points(X_nodes, boson_star.pert_array, tk::spline::cspline);
+        }
+        if (boson_star.add_real_field && !boson_star.rsf_array.empty()) {
+            std::vector<double> bs_rsf(N_bs);
+            for (int k = 0; k < N_bs; ++k) bs_rsf[k] = boson_star.rsf_array[k];
+            s_rsf.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
+            s_rsf.set_points(X_nodes, bs_rsf, tk::spline::cspline);
         }
     }
 
@@ -565,6 +576,25 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
             states2[j].bssn.beta = 0.;
         }
 
+        // Real scalar field initial data (psi). If boson_star requests a real field, interpolate
+        // from its isotropic or areal arrays into states2.rsf.psi. Leave K_psi = 0.
+        if (boson_star.add_real_field) {
+            if (isotropic) {
+                if (!boson_star.rsf_iso_array.empty())
+                    states2[j].rsf.psi = s_rsf_iso(z);
+                else
+                    states2[j].rsf.psi = 0.0;
+            } else {
+                if (!boson_star.rsf_array.empty())
+                    states2[j].rsf.psi = s_rsf(z);
+                else
+                    states2[j].rsf.psi = 0.0;
+            }
+        } else {
+            states2[j].rsf.psi = 0.0;
+        }
+        states2[j].rsf.K_psi = 0.0;
+
         //starting BS real means its momentum is imaginary (with 0 starting shift)
     states2[j].csf.K_phi_re = 0.;
 
@@ -605,8 +635,6 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
         if (isotropic)
             states2[j].bssn.c_chris_Z = 0.;
     }
-
-    // Legacy states removed: no mirroring
 }
 
 //writes BSSN evolution variables from a particular slice to text file
@@ -1985,8 +2013,8 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
         cout << "Read BS data" << endl;
 
     // Optionally add a real scalar field Gaussian before evolution
-    if (add_real_field && start_time == 0)
-        add_real_gaussian(slices[0]);
+    //if (add_real_field && start_time == 0)
+    //    add_real_gaussian(slices[0]);
 
     //solve Hamiltonian constraint directly in isotropic coords for initial slice if requested
     if (run_spacetime_solver && start_time == 0)
@@ -2273,6 +2301,16 @@ void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double l
         tuning_param = val;
         double tmp = tuning_param;
         cout << "Running with tuning_param = " << std::setprecision(16) << tuning_param << endl;
+
+        if (!bs->solve()) //re-solve BS now that real perturbation is added at initial phase.
+        {
+            cout << "solve failed; assuming supercritical for tuning_param = " << std::setprecision(16) << tuning_param << endl;
+            return 1;
+        }
+        //cout << "Real amplitude: " << bs->real_amp << endl;
+
+        // Ensure isotropic arrays (and rsf_iso) reflect the newly solved BS state so initialize/read_BS_data sees updated profiles
+        bs->fill_isotropic_arrays();
 
         // Skip re-reading parameters so tuned value persists into initial data seeding
         initialize(*bs, /*skip_read=*/true);

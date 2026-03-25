@@ -103,6 +103,12 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "mirror_gaussian = ", mirror_gaussian, quiet);
         fill_parameter(current_line, "gaussian_start = ", gaussian_start, quiet);
 
+        // Optional real scalar field parameters
+        fill_parameter(current_line, "add_real_field = ", add_real_field, quiet);
+        fill_parameter(current_line, "real_amp = ", real_amp, quiet);
+        fill_parameter(current_line, "real_sigma = ", real_sigma, quiet);
+        fill_parameter(current_line, "real_center = ", real_center, quiet);
+
         fill_parameter(current_line, "enforced_freq = ", enforced_freq, quiet);
         fill_parameter(current_line, "pert_only = ", pert_only, quiet);
         fill_parameter(current_line, "cycle_only = ", cycle_only, quiet);
@@ -181,9 +187,90 @@ FieldState BosonStar::state_expansion(const double radius, long double frequency
                         };
 }
 
+// Skeleton RHS for evolution including a real scalar field. User will fill physics here.
+FieldState BosonStar::rsf_RHS(const double radius, long double frequency, FieldState s)
+{
+    //enforce minimum radius epsilon if needed
+    double epsilon = 0.0000001;
+    double r = ((radius == 0.) ? epsilon : radius);
+    double rsf_deriv = -real_amp * (r - real_center) / (real_sigma * real_sigma)
+                            * exp(-0.5 * (r - real_center) * (r - real_center) / (real_sigma * real_sigma));
+    FieldState return_state = state_RHS(radius, frequency, s, 0, 0); //get the RHS contributions from the complex scalar field alone, to preserve these in the solve for X and phi below
+    
+    return_state.phi += 4. * M_PI / (D - 2.) * r * rsf_deriv * rsf_deriv; //add contribution of real scalar field to X' RHS
+    return_state.X += 4. * M_PI * r * s.X / (D - 2.) * rsf_deriv * rsf_deriv; 
+    
+    return return_state;
+}
+
+// Fill rsf_array from real_* parameters and re-solve for metric variables X and phi
+// while preserving state.A and state.eta. Returns true on success, false if NaNs
+// were encountered during the RK4 solve.
+bool BosonStar::resolve_with_rsf()
+{
+    // Ensure rsf_array has correct size
+    rsf_array.resize(n_gridpoints);
+
+    double dr = R / (n_gridpoints - 1);
+
+    // Guard against degenerate sigma
+    if (real_sigma == 0.0)
+    {
+        for (int j = 0; j < n_gridpoints; ++j) rsf_array[j] = 0.0;
+    }
+    else
+    {
+        for (int j = 0; j < n_gridpoints; ++j)
+        {
+            double r = j * dr;
+            rsf_array[j] = real_amp * exp(-0.5 * (r - real_center) * (r - real_center) / (real_sigma * real_sigma));
+        }
+    }
+
+    // Store original A and eta to preserve them after the metric solve
+    std::vector<double> A_vals(n_gridpoints), eta_vals(n_gridpoints), X_vals(n_gridpoints);
+    for (int j = 0; j < n_gridpoints; ++j)
+    {
+        A_vals[j] = state[j].A;
+        eta_vals[j] = state[j].eta;
+        X_vals[j] = state[j].X;
+    }
+
+    // RK4-like solve for X and phi using rsf_RHS as RHS provider
+    FieldState s1, s2, s3, s4;
+
+    for (int j = 0; j < n_gridpoints - 1; ++j)
+    {
+        double r = j * dr;
+
+        s1 = rsf_RHS(r, omega, state[j]);
+        s2 = rsf_RHS(r + dr / 2., omega, state[j] + 0.5 * dr * s1);
+        s3 = rsf_RHS(r + dr / 2., omega, state[j] + 0.5 * dr * s2);
+        s4 = rsf_RHS(r + dr, omega, state[j] + dr * s3);
+
+        // update full state but we'll restore A and eta below
+        state[j + 1] = state[j] + (dr / 6.0) * (s1 + 2.0 * s2 + 2.0 * s3 + s4);
+
+        // Restore original matter values
+        state[j + 1].A = A_vals[j + 1];
+        state[j + 1].eta = eta_vals[j + 1] * X_vals[j + 1] / state[j + 1].X; 
+
+        if (isnan(state[j].A) || isnan(state[j].X) || isnan(state[j].phi) || isnan(state[j].eta))
+        {
+            //cerr << "State values have become nan on step " << j << endl;
+            return false;
+        }
+    }
+
+    //offset all phi values by phi_shift, equivalent to rescaling lapse by exp(phi_shift), and store new combined mass
+    double phi_shift = -log(state[n_gridpoints - 1].X) - state[n_gridpoints - 1].phi;
+    rescale_lapse (phi_shift);
+    M_total = m(n_gridpoints - 1);
+    return true;
+}
+
 void BosonStar::rk4_solve (const long double freq)
 {
-
     state = {FieldState{A_central, 1.0, log(alpha_central), 0.0 }};
     radius_array = {0.};
 
@@ -297,14 +384,24 @@ void BosonStar::write_field(string filename)
         exit(1);
     }
 
-    for (int j = 0; j < n_gridpoints; j++)
+    // Header
+    data_file << "# r A X phi eta m";
+    if (add_real_field) data_file << " rsf";
+    data_file << "\n";
+
+    for (int j = 0; j < n_gridpoints - 1; ++j)
     {
-        data_file << std::setprecision (10) << radius_array[j] << "   " << state[j].A << "    " << state[j].X << "    " << state[j].phi << "    " << state[j].eta << "    " << m(j) << endl;
+        data_file << std::setprecision (10) << radius_array[j] << "   " << state[j].A << "    " << state[j].X << "    " << state[j].phi << "    " << state[j].eta << "    " << m(j);
+        if (add_real_field)
+        {
+            double rsf_val = 0.0;
+            if (rsf_array.size() >= static_cast<size_t>(n_gridpoints)) rsf_val = rsf_array[j];
+            data_file << "    " << rsf_val;
+        }
+        data_file << std::endl;
     }
-
-
+    
 }
-
 void BosonStar::double_resolution()
 {
     n_gridpoints = 2 * n_gridpoints - 1;
@@ -571,8 +668,16 @@ void BosonStar::rescale_lapse (double phi_shift)
 bool BosonStar::solve(bool quiet)
 {
     find_frequency(quiet);
+    bool success = fill_asymptotic(quiet);
+    
+    if (add_real_field)
+    {
+        bool rsf_ok = resolve_with_rsf();
+        if (!rsf_ok)
+            return false;
+    }
 
-    return fill_asymptotic(quiet);
+    return success;
 }
 
 //returns the noether charge associated with the model. Must have computed model + frequency first (polar)
@@ -730,6 +835,7 @@ void BosonStar::fill_isotropic_arrays()
     psi_iso_array.resize(n_gridpoints);
     phi_iso_array.resize(n_gridpoints);
     A_iso_array.resize(n_gridpoints);
+    if (add_real_field) rsf_iso_array.resize(n_gridpoints);
 
     if (perturb)
     { pert_iso_array.resize(n_gridpoints);
@@ -790,6 +896,13 @@ void BosonStar::fill_isotropic_arrays()
 
             phi_iso_array[j] = cubic_interp(r_areal_array[j], state[j0].phi, state[j0 + 1].phi, state[j0 + 2].phi, state[j0 + 3].phi, j0, dr );
             A_iso_array[j] = cubic_interp(r_areal_array[j], state[j0].A, state[j0 + 1].A, state[j0 + 2].A, state[j0 + 3].A, j0, dr );
+            if (add_real_field)
+            {
+                if (rsf_array.size() >= static_cast<size_t>(n_gridpoints))
+                    rsf_iso_array[j] = cubic_interp(r_areal_array[j], rsf_array[j0], rsf_array[j0 + 1], rsf_array[j0 + 2], rsf_array[j0 + 3], j0, dr );
+                else
+                    rsf_iso_array[j] = 0.0;
+            }
             f = cubic_interp(r_areal_array[j], f_array[j0], f_array[j0 + 1], f_array[j0 + 2], f_array[j0 + 3], j0, dr );
 
             if (perturb) pert_iso_array[j] = cubic_interp(r_areal_array[j], pert_array[j0], pert_array[j0 + 1], pert_array[j0 + 2], pert_array[j0 + 3], j0, dr );
@@ -801,6 +914,13 @@ void BosonStar::fill_isotropic_arrays()
 
             phi_iso_array[j] = state[n_gridpoints - 1].phi  + (r_areal_array[j] - R) * (state[n_gridpoints - 1].phi - state[n_gridpoints - 2].phi ) / dr;
             A_iso_array[j] = state[n_gridpoints - 1].A  + (r_areal_array[j] - R) * (state[n_gridpoints - 1].A - state[n_gridpoints - 2].A ) / dr;
+            if (add_real_field)
+            {
+                if (rsf_array.size() >= static_cast<size_t>(n_gridpoints))
+                    rsf_iso_array[j] = rsf_array[n_gridpoints - 1]  + (r_areal_array[j] - R) * (rsf_array[n_gridpoints - 1] - rsf_array[n_gridpoints - 2] ) / dr;
+                else
+                    rsf_iso_array[j] = 0.0;
+            }
             f = f_array[n_gridpoints - 1]  + (r_areal_array[j] - R) * (f_array[n_gridpoints - 1] - f_array[n_gridpoints - 2] ) / dr;
 
             if (perturb) pert_iso_array[j] = pert_array[n_gridpoints - 1]  + (r_areal_array[j] - R) * (pert_array[n_gridpoints - 1] - pert_array[n_gridpoints - 2] ) / dr;
@@ -837,11 +957,27 @@ void BosonStar::write_isotropic()
         exit(1);
     }
 
+    // Header
+    data_file << "# r r_iso r_areal psi_iso A_iso phi_lap X_lap";
+    if (add_real_field) data_file << " rsf_iso";
+    data_file << "\n";
+
     for (int j = 1; j < n_gridpoints - 1; j++)
     {
+        double phi_lap = (-2. * phi_iso_array[j] + phi_iso_array[j - 1] + phi_iso_array[j + 1] ) / (dr * dr);
+        double X_lap = (-2. * state[j].X + state[j - 1].X + state[j + 1].X ) / (dr * dr);
+
         data_file << std::setprecision (10) << radius_array[j] << "   " << r_iso_array[j] << "    " << r_areal(j) << "    " << psi_iso_array[j]  <<  "    " << A_iso_array[j]  <<  "    "
-        << (-2. * phi_iso_array[j] + phi_iso_array[j - 1] + phi_iso_array[j + 1] ) / (dr * dr) <<  "    "
-        << (-2. * state[j].X + state[j - 1].X + state[j + 1].X ) / (dr * dr) << endl;
+        << phi_lap <<  "    " << X_lap;
+
+        if (add_real_field)
+        {
+            double rsf_iso_val = 0.0;
+            if (rsf_iso_array.size() >= static_cast<size_t>(n_gridpoints)) rsf_iso_val = rsf_iso_array[j];
+            data_file << "    " << rsf_iso_val;
+        }
+
+        data_file << std::endl;
     }
 }
 

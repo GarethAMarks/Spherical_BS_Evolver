@@ -49,10 +49,12 @@ class BosonStar
         std::vector<double> phi_iso_array; // log(lapse) in isotropic coords
         std::vector<double> psi_iso_array; // conformal factor in isotropic coords
         std::vector<double> A_iso_array; // field amplitude in isotropic coords
+        std::vector<double> rsf_iso_array; // real scalar field (psi) in isotropic coords
         std::vector<double> pert_iso_array; // field amplitude of perturbation in isotropic coords
         std::vector<double> pert_array; // field amplitude of perturbation in isotropic coords
 
         std::vector<double> r_iso_array; // isotropic radii given in terms of areal indices
+        std::vector<double> rsf_array; // real scalar field (psi) on areal grid
 
 
         double V (const double p);
@@ -94,6 +96,7 @@ class BosonStar
         long double omega_pre_rescale; //frequency before rescaling to enforce lapse BC, suitable
         long double omega; //solved frequency
         double M; //solved mass
+        double M_total; //mass including rsf contribution, if applicable
         double binding_energy; //M - mu*N
         double noether_charge;
         double compactness;
@@ -103,6 +106,11 @@ class BosonStar
         double perturb_amp; //amplitude, center and st. dev. of gaussian perturbation
         double perturb_spread;
         double perturb_center;
+        // Optional massless real scalar field initial profile (injected before evolution)
+        bool add_real_field = false; // whether to add a real scalar field to initial data
+        double real_amp = 0.0;      // amplitude of the real scalar Gaussian
+        double real_sigma = 0.0;    // width (sigma) of the Gaussian
+        double real_center = 0.0;   // center position of the Gaussian
         bool mirror_gaussian; //if true, add an equal and opposite gaussian 2 standard deviations outside the original.
         double enforced_freq; //enforced frequency for arbitrary scalar cloud starts
 
@@ -142,6 +150,10 @@ class BosonStar
         void add_perturbation(double a, double k, double center);
 
         void cycle_models(int n_stars, double A_0, double delta_A);
+        
+    // Real scalar field helpers
+    bool resolve_with_rsf(); // fill rsf_array and re-solve for X and phi keeping A and eta fixed; returns true on success
+    FieldState rsf_RHS(const double radius, long double frequency, FieldState s);
 
 
 
