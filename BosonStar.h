@@ -31,6 +31,8 @@ class BosonStar
         double mu; //scalar mass
         double lambda; //interaction term coefficient
         bool solitonic; //1 for solitonic BS, 0 for mini
+        bool toy_model; //toy model toggle (read from params)
+        bool fit_asymptotics; //if false, use hard-cutoff asymptotic enforcement (for finite-temp fitting)
         double G;
         double sigma;
         int eigen; //desired eigenvalue, 0 for ground state

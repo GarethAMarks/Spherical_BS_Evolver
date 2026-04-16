@@ -1,18 +1,20 @@
 #BS params
 D = 4
 mu = 1.0
-lambda = 10
+lambda = 0
 solitonic = 0 #if false will use mini BS potential
 G = 1.0 
 sigma = 0.2
 eigen = 0 #0 for ground state BS
 alpha_central = 0.5 #starting central lapse, will be rescaled
-A_central = 0.05
-frequency_guess = 1.8
-freq_epsilon = 1e-5
+A_central = 0.01
+frequency_guess = 1.0
+freq_epsilon = 1e-19
 isotropic = 1
 r_match_fac = 0.85 #cutoff radius for BS construction
-T_inf = 1e-5 #asymptotic temperature
+T_inf = 1 #asymptotic temperature
+toy_model = 1
+fit_asymptotics = 1
 
 #Dynamical perturbation params
 perturb = 0
@@ -77,7 +79,7 @@ start_time = 0
 checkpoint_time = 2000
 
 read_thinshell = 0 #if true will read outputs of Uli's thinshell code
-write_interval = 2a
+write_interval = 2
 write_CN_interval = 5
 run_quietly = 1
 make_tangherlini = 0
@@ -97,7 +99,7 @@ chi_epsilon = 1e-8
 cutoff_radius = 50
 
 #model cycling params: for model construction/ linear perturbations
-cycle_only = 0 #if 1 will only cycle thru model construction. Priority over pert_only!
+cycle_only = 1 #if 1 will only cycle thru model construction. Priority over pert_only!
 A0 = 0.00025 #initial central amp
-dA = 0.6 #0.57694 #step central amp
+dA = 8.5 #0.570633 #-0.5706 #step central amp
 n_stars = 2000 #number of BS models to cycle thru

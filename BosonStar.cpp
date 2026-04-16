@@ -107,6 +107,8 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "mu = ", mu, quiet);
         fill_parameter(current_line, "lambda = ", lambda, quiet);
         fill_parameter(current_line, "solitonic = ", solitonic, quiet);
+        fill_parameter(current_line, "toy_model = ", toy_model, quiet);
+        fill_parameter(current_line, "fit_asymptotics = ", fit_asymptotics, quiet);
         fill_parameter(current_line, "G = ", G, quiet);
         fill_parameter(current_line, "sigma = ", sigma, quiet);
         fill_parameter(current_line, "eigen = ", eigen, quiet);
@@ -159,35 +161,61 @@ FieldState BosonStar::state_RHS(const double radius, const long double frequency
     double s_new = 0.; //correction to the entropy density from finite temperature
     double X_corr = 0.; //correction to X from finite temperature
     double phi_corr = 0.; //correction to phi from finite temperature
+    double ups_corr = 0.; //correction to ups from finite temperature
 
     double eta_Tcorr = 0.; //correction to eta from finite temperature, should be zero at r = 0
 
-    if (T_inf >= 0.)
-    {
-        //double mu_chem = frequency / exp(s.phi); 
-        double c_ph = sqrt(s.A * s.A * ddV(s.A) 
-                      / (s.A * s.A * ddV(s.A) + 2. * frequency * frequency / (exp(2 * s.phi)))); //phonon speed
+    if (T_inf > 0.)
+    {  
+        double mu_chem = frequency / exp(s.phi);
+        double T = T_inf / exp(s.phi);
 
-        P_new = M_PI * M_PI * T_inf * T_inf * T_inf * T_inf / exp(4. * s.phi) / 90.
-                / pow( c_ph , 3.);
+        if (toy_model)
+        {   
+            double mass_fac = pow(0.5 * mu / M_PI, 1.5);
+            double exp_fac = exp((mu_chem - mu ) / T);
 
-        s_new = 2. * M_PI * M_PI * T_inf * T_inf * T_inf / exp(3. * s.phi) / 45.
-                / pow( c_ph , 3.);
+            P_new = mass_fac * pow(T, 2.5) * exp_fac; 
+            
+
+            s_new = mass_fac * (2.5 * pow(T, 1.5) + (mu  - mu_chem) * sqrt(T) ) * exp_fac;
+                
+
+            n_new = mass_fac * pow(T, 1.5) * exp_fac;
+        }
+        else
+        {
+            //double mu_chem = frequency / exp(s.phi); 
+            double c_ph = sqrt(s.A * s.A * ddV(s.A) 
+                        / (s.A * s.A * ddV(s.A) + 2. * frequency * frequency / (exp(2 * s.phi)))); //phonon speed
+
+            P_new = M_PI * M_PI * pow(T, 4.) / 90.
+                    / pow( c_ph , 3.);
+
+            s_new = (2. / 45.) * M_PI * M_PI * pow(T, 3.)
+                    / pow( c_ph , 3.);
+            
+            n_new = (2. / 45.) * M_PI * M_PI * pow(T, 4.)  * (1. - c_ph * c_ph)
+                    / pow( c_ph , 5.) ; //NOTE: factor alpha / omega canceled with X_corr to avoid div by 0
+            
+            ups_corr = -(2. / 45.) * M_PI * M_PI * pow(T, 4.) 
+                            / pow(c_ph , 5.) * (1. - c_ph * c_ph) * (1. - 0.75 * c_ph * c_ph); 
+
+            //eta_Tcorr = s.X * M_PI * M_PI * pow(T, 4.) * (1 -  c_ph * c_ph) * (1 -  c_ph * c_ph)
+            //         / (60. * pow(c_ph , 5.) * s.A);
+            eta_Tcorr = (1. / 30.) * s.X * s.A * M_PI * M_PI * pow(T, 4.) * mu_chem * mu_chem 
+                        / (lambda * pow(s.A, 4.) * sqrt(lambda * s.A * s.A / (lambda * s.A * s.A + mu_chem * mu_chem)));
+
+
+            //cout << "c_ph = " << c_ph << ", P_new = " << P_new << ", s_new = " << s_new << ", n_new = " << n_new << ", X_corr = " << X_corr << ", phi_corr = " << phi_corr << endl;
+
+        }
         
-        n_new = 2. * M_PI * M_PI * T_inf * T_inf * T_inf * T_inf / exp(4. * s.phi) / 45.
-                / pow( c_ph , 5.) * (1. - c_ph * c_ph); //NOTE: factor alpha / omega canceled with X_corr to avoid div by 0
-        
-        double ups_corr = -2. * M_PI * M_PI * T_inf * T_inf * T_inf * T_inf / exp(4. * s.phi) / 45.
-                          / pow(c_ph , 5.) * (1. - c_ph * c_ph) * (1. - 0.75 * c_ph * c_ph); 
+        double toy_fix = toy_model ? mu_chem : 1;
 
-        X_corr =  4. * M_PI * r  * s.X * s.X * s.X *(ups_corr + n_new - P_new + s_new * T_inf / exp(s.phi));
+        X_corr =  4. * M_PI * r  * s.X * s.X * s.X *(ups_corr -P_new + s_new * T + toy_fix * n_new );
         phi_corr = 4. * M_PI * r  * s.X * s.X * P_new;
-
-        eta_Tcorr = s.X * M_PI * M_PI * T_inf * T_inf * T_inf * T_inf * (1 -  c_ph * c_ph) * (1 -  c_ph * c_ph) / exp(4. * s.phi)
-                    / (60. * pow(c_ph , 5.) * s.A);
-
-
-        //cout << "c_ph = " << c_ph << ", P_new = " << P_new << ", s_new = " << s_new << ", n_new = " << n_new << ", X_corr = " << X_corr << ", phi_corr = " << phi_corr << endl;
+         
     }
 
     //zero out terms that should be zeroed at origin as eta = 0, X = 1 there
@@ -196,11 +224,11 @@ FieldState BosonStar::state_RHS(const double radius, const long double frequency
 
     double dPhi = T1 + F1 * (T2 - V(s.A));
     double eta_corr = (radius == 0.) ? (1. / (D - 1.)) : 1.;
-
+     
     //in the asymptotic region, evolve phi and X normally but do not update A, eta (these will be hard-coded to asymptotic expressions)
     if (asymptotic_region)
     {
-        return  FieldState{0., s.X * ( F1 * (T2 + V(s.A)) - T1 ) /*+ X_corr*/, dPhi /*+ phi_corr*/, 0.};
+        return  FieldState{0., s.X * ( F1 * (T2 + V(s.A)) - T1 ) /*+ X_corr*/, dPhi /*+ phi_corr*/, 0.}; //always omit corrections in the asymptotic region
     }
     else if (given_A) //return RHS of field state variables outside of asymptotic region, A excepted
     {
@@ -252,6 +280,9 @@ void BosonStar::rk4_solve (const long double freq)
     state = {FieldState{A_central, 1.0, log(alpha_central), 0.0 }};
     radius_array = {0.};
 
+    double min_A = A_central;
+    bool hit_minimum = false;
+
     blowup_point = n_gridpoints; //make this 1 larger than max possible value to start, in case solution does not break
 
     state.resize(n_gridpoints);
@@ -260,7 +291,6 @@ void BosonStar::rk4_solve (const long double freq)
     //cout << " \nInitialized state "  << endl;
 
     double dr = R / (n_gridpoints - 1);
-    //double dt = dr * courant_factor;
 
     //inter-level state values for RK4 evolution
     FieldState s1, s2, s3, s4;
@@ -270,64 +300,25 @@ void BosonStar::rk4_solve (const long double freq)
     {
         double r = j * dr;
 
-        //something like this may be strictly necessary, but it doesnt seem important at current order of expansion.
-        if (D > 100. && j < 1.)
-        {
-            s1 = state_RHS(r, freq, state[j], 0);
+        s1 = state_RHS(r, freq, state[j], 0);
+        s2 = state_RHS(r + dr / 2., freq, state[j] + 0.5 * dr * s1, 0);
+        s3 = state_RHS(r + dr / 2., freq, state[j] + 0.5 * dr * s2, 0);
+        s4 = state_RHS(r + dr, freq, state[j] + dr * s3, 0);
 
-            FieldState t1 = state[j] + 0.5 * dr * s1;
-            FieldState r2_state = state_expansion(r + 0.5 * dr, freq);
-            t1.X =  r2_state.X;
-            t1.phi = r2_state.phi;
+        //update state variables and radius array
+        state[j + 1] = state[j] + (dr / 6.) * (s1 + 2 * s2 + 2 * s3 + s4);
+        radius_array[j + 1] = (j + 1) * dr;
+        if (state[j + 1].A < min_A && !hit_minimum) min_A = state[j + 1].A;
 
-            s2 = state_RHS(r + dr / 2., freq, t1, 0);
-
-            FieldState t2 = state[j] + 0.5 * dr * s2;
-            t2.X =  r2_state.X;
-            t2.phi = r2_state.phi;
-
-            s3 = state_RHS(r + dr / 2., freq, t2, 0);
-
-            FieldState t3 = state[j] + 0.5 * dr * s3;
-            FieldState r_state = state_expansion(r + dr, freq);
-            t3.X =  r_state.X;
-            t3.phi = r_state.phi;
-
-            s4 = state_RHS(r + dr, freq, t3, 0);
-
-            //update state variables and radius array
-            state[j + 1] = state[j] + (dr / 6.) * (s1 + 2 * s2 + 2 * s3 + s4);
-            radius_array[j + 1] = (j + 1) * dr;
-
-        }
-        else
-        {
-            s1 = state_RHS(r, freq, state[j], 0);
-            s2 = state_RHS(r + dr / 2., freq, state[j] + 0.5 * dr * s1, 0);
-            s3 = state_RHS(r + dr / 2., freq, state[j] + 0.5 * dr * s2, 0);
-            s4 = state_RHS(r + dr, freq, state[j] + dr * s3, 0);
-
-            //update state variables and radius array
-            state[j + 1] = state[j] + (dr / 6.) * (s1 + 2 * s2 + 2 * s3 + s4);
-            radius_array[j + 1] = (j + 1) * dr;
-        }
-
-
-        //use series expansions for X, Phi near origin for D > 4: this seems to be sufficient for now
-        if (D > 4. && j < 1.)
-        {
-            FieldState small_state = state_expansion(r + dr, freq);
-
-            // replace near-origin values with small-radius series expansion
-            state[j + 1].X = small_state.X;
-            state[j + 1].phi = small_state.phi;
-        }
+        if (state[j + 1].A > state[j].A && !hit_minimum)
+            hit_minimum = true;
 
         //cout << "A = " << state[j].A << ", X = " << state[j].X << ", phi = " << state[j].phi << ", eta = " << state[j].A << ", m = " <<  r  / 2. * (1 - (1 / (state[j].X * state[j].X)))<< endl;
 
         if (isnan(state[j].A) || isnan(state[j].X) || isnan(state[j].phi) || isnan(state[j].eta))
         {
             //cerr << "State values have become nan on step " << j << endl;
+            //cout  << "min_A = " << min_A << endl;
             blowup_point = j;
             return;
         }
@@ -429,8 +420,8 @@ int BosonStar::count_zero_crossings()
     for (int j = 2; j < blowup_point - 1; j++)
     {
         if ((state[j].A == 0.) || (state[j].A > 0. && state[j - 1].A < 0.) || (state[j].A < 0. && state[j - 1].A > 0.)
-            || (fabs(state[j].A) < 2.* fabs(state[j - 1].A - state[j - 2].A ) && state[j].A < state[0].A  ) //alternative check condition near discontinuities
-            || state[j].A < 0.005 * state[0].A //will restrict us to ground state, but should be OK for now
+            || (!toy_model && fabs(state[j].A) < 2.* fabs(state[j - 1].A - state[j - 2].A ) && state[j].A < state[0].A) //alternative check condition near discontinuities
+            //|| state[j].A < 0.005 * state[0].A //will restrict us to ground state, but should be OK for now
             )
             {zero_crossings++;}
     }
@@ -490,7 +481,7 @@ long double BosonStar::find_frequency(bool quiet)
 
     }
 
-    omega = lower_guess; //use lower_guess for frequency so we are guarenteed to have right # zero crossings in principle...
+    omega = (!fit_asymptotics) ? upper_guess : lower_guess; //use lower_guess for frequency so we are guarenteed to have right # zero crossings in principle...
     rk4_solve(omega);
 
     if (count_zero_crossings() != eigen)
@@ -498,10 +489,8 @@ long double BosonStar::find_frequency(bool quiet)
 
 
     if (!quiet) cout << " \nFound solution in eigenstate " << eigen  << " with frequency " << static_cast<double>(omega) << endl;
-
-    return lower_guess;
-
-
+    
+    return omega;
 }
 
 //returns the index of the last minimum of |A|, searching inwards from the blowup point.
@@ -527,14 +516,41 @@ bool BosonStar:: fill_asymptotic(bool quiet)
 
     int min_index = find_last_minimum();
 
-    if (min_index == -1 && !quiet /*&& T_inf <= 0.*/)
+    // If we are NOT fitting asymptotics (fit_asymptotics == false), choose cutoff differently:
+    // - find first index with state.A < 0 and cut off after the previous point
+    // - if no negative crossing exists, fall back to the globally minimal A
+    if (!fit_asymptotics)
+    {
+        int first_neg = -1;
+        for (int k = 1; k < n_gridpoints; ++k)
+        {
+            if (state[k].A < 0.)
+            {
+                first_neg = k;
+                break;
+            }
+        }
+
+        if (first_neg != -1)
+        {
+            // cut off after previous point
+            min_index = std::max(0, first_neg - 1);
+        }
+        else
+        {
+            // no negative crossing: use globally minimal A (ignoring index 0)
+            int idx = get_smallest_amp_index();
+            if (idx != -1)
+                min_index = idx;
+            // else keep whatever find_last_minimum returned (may be -1)
+        }
+    }
+
+    if (min_index == -1 && !quiet)
         cerr << "ERROR: No local minimum in |A| found for A_central = " << A_central << endl;
 
-    if (min_index == -1 /*&& T_inf <= 0.*/)
+    if (min_index == -1)
         return 0;
-
-    //if (T_inf > 0.)
-      //  min_index = get_smallest_amp_index();
 
     //double r_match_fac = 0.75;
     int j_match = round( r_match_fac * min_index); //index at which matching takes place
@@ -555,20 +571,43 @@ bool BosonStar:: fill_asymptotic(bool quiet)
     {
         long double r = j * dr;
 
-        s1 = state_RHS(r, omega, state[j], 1);
-        s2 = state_RHS(r + dr / 2.,  omega, state[j] + 0.5 * dr * s1, 1);
-        s3 = state_RHS(r + dr / 2.,  omega, state[j] + 0.5 * dr * s2, 1);
-        s4 = state_RHS(r + dr,  omega, state[j] + dr * s3, 1);
+    // If we are NOT fitting asymptotics (fit_asymptotics == false) we enforce A=eta=0 after cutoff.
+    if (!fit_asymptotics)
+        {
+            // Use a temporary state with A=eta=0 when evaluating RHS so phi and X evolve without scalar contribution.
+            FieldState s_temp = state[j];
+            s_temp.A = 0.;
+            s_temp.eta = 0.;
 
-        //update state variables and radius array
-        state[j + 1] = state[j] + (dr / 6.) * (s1 + 2 * s2 + 2 * s3 + s4);
-        radius_array[j + 1] = (j + 1) * dr;
+            s1 = state_RHS(r, omega, s_temp, 1);
+            s2 = state_RHS(r + dr / 2.,  omega, s_temp + 0.5 * dr * s1, 1);
+            s3 = state_RHS(r + dr / 2.,  omega, s_temp + 0.5 * dr * s2, 1);
+            s4 = state_RHS(r + dr,  omega, s_temp + dr * s3, 1);
 
-        //cout << A_factor * exp(-sqrt( 1 - pow(omega / exp(phi_match), 2)) * radius_array[j + 1]) / radius_array[j + 1]  << endl;
+            // Update only phi and X via RK4 result; we'll then enforce A=eta=0 explicitly.
+            FieldState updated = state[j] + (dr / 6.) * (s1 + 2 * s2 + 2 * s3 + s4);
+            state[j + 1].X = updated.X;
+            state[j + 1].phi = updated.phi;
+            // Enforce vanishing scalar field and its derivative
+            state[j + 1].A = 0.;
+            state[j + 1].eta = 0.;
+            radius_array[j + 1] = (j + 1) * dr;
+        }
+        else
+        {
+            s1 = state_RHS(r, omega, state[j], 1);
+            s2 = state_RHS(r + dr / 2.,  omega, state[j] + 0.5 * dr * s1, 1);
+            s3 = state_RHS(r + dr / 2.,  omega, state[j] + 0.5 * dr * s2, 1);
+            s4 = state_RHS(r + dr,  omega, state[j] + dr * s3, 1);
 
-        //fix asymptotic values for A, eta
-        state[j + 1].A = A_factor * exp(-sqrt( mu * mu - pow(omega / exp(phi_match), 2)) * radius_array[j + 1]) / pow(radius_array[j + 1], 0.5*(D - 2.));
-        state[j + 1].eta = - (0.5*(D - 2.) /radius_array[j + 1] + sqrt( mu * mu - pow(omega / exp(phi_match), 2)) ) * state[j + 1].A;
+            //update state variables and radius array
+            state[j + 1] = state[j] + (dr / 6.) * (s1 + 2 * s2 + 2 * s3 + s4);
+            radius_array[j + 1] = (j + 1) * dr;
+
+            //fix asymptotic values for A, eta
+            state[j + 1].A = A_factor * exp(-sqrt( mu * mu - pow(omega / exp(phi_match), 2)) * radius_array[j + 1]) / pow(radius_array[j + 1], 0.5*(D - 2.));
+            state[j + 1].eta = - (0.5*(D - 2.) /radius_array[j + 1] + sqrt( mu * mu - pow(omega / exp(phi_match), 2)) ) * state[j + 1].A;
+        }
 
         //cout << "A = " << state[j].A << ", X = " << state[j].X << ", phi = " << state[j].phi << ", eta = " << state[j].A << ", m = " <<  r  / 2. * (1 - (1 / (state[j].X * state[j].X)))<< endl;
 
