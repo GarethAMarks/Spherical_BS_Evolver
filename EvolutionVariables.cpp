@@ -1485,7 +1485,7 @@ void Spacetime:: write_current_slice(std::string file_name)
 }
 
 //writes diagnostic quantities to output file
-void Spacetime:: write_diagnostics()
+void Spacetime:: write_diagnostics(std::string file_name)
 {
     int length = (current_slice_ptr->states2).size();
 
@@ -1493,11 +1493,11 @@ void Spacetime:: write_diagnostics()
     vector<double>& aux_test = rho;
 
     double dr = R / ((double)length - 1.0);
-    std::ofstream data_file{"Diagnostics.dat"};
+    std::ofstream data_file{file_name};
 
      if (!data_file)
     {
-        std::cerr << "Diagnostics.dat could not be opened for writing!\n";
+        std::cerr << file_name << " could not be opened for writing!\n";
         exit(1);
     }
 
@@ -1579,6 +1579,7 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "do_ah_search = ", do_ah_search, quiet);
         fill_parameter(current_line, "fill_subcritical = ", fill_subcritical, quiet);
         fill_parameter(current_line, "A_thresh = ", A_thresh, quiet);
+        fill_parameter(current_line, "dump_time = ", dump_time, quiet);
 
         fill_param_array(current_line, "refinement_points = ", refinement_points, quiet);
 
@@ -2084,6 +2085,7 @@ void Spacetime::evolve()
 
     int num_timesteps = ceil(stop_time / dt);
     int last_checkpoint_time = 0;
+    int last_dump_time = 0;
 
     //write constraint norms at each timestep to file
     std::ofstream constraints_file{"constraint_norms.dat"};
@@ -2224,6 +2226,19 @@ void Spacetime::evolve()
             current_slice_ptr->write_slice("checkpoint" + std::to_string((int)std::floor(t)) + ".dat");
             last_checkpoint_time = (int)std::floor(t);
             cout << "Wrote checkpoint at t = " << last_checkpoint_time << endl;
+        }
+
+        //write dump files at multiples of dump_time
+        if (dump_time > 0)
+        {
+            int current_dump = (int)(std::floor(t) / dump_time) * dump_time;
+            if (current_dump > last_dump_time)
+            {
+                std::string tag = std::to_string(current_dump);
+                write_current_slice("SliceData_" + tag + ".dat");
+                write_diagnostics("Diagnostics_" + tag + ".dat");
+                last_dump_time = current_dump;
+            }
         }
 
         //cycles slice array back by one so that last entry can be overwritten

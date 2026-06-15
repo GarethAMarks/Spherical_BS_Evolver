@@ -55,7 +55,7 @@ int main()
         else
             st.evolve();
     }
-
+    cout <<  "c4 = " << boson_star.get_c4() << endl; 
     cout << "Ending..."  << endl;
     return 0;
 }

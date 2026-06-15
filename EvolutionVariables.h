@@ -106,7 +106,7 @@ class Spacetime
 
         
         void initialize(BosonStar& boson_star, bool skip_read = false);// If skip_read is true, do not read BSParams.par again (use existing in-memory settings).
-        void write_diagnostics();
+        void write_diagnostics(std::string file_name = "Diagnostics.dat");
         void evolve();
         void write_current_slice( std::string file_name = "SliceData.dat");
         //void read_isotropic_data();
@@ -254,6 +254,7 @@ class Spacetime
 
         int start_time;
         int checkpoint_time;
+        int dump_time = 0;
 
         //inherited BS parameters
         double sigma;
