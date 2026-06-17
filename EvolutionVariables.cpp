@@ -1397,6 +1397,17 @@ double Spacetime::ricci_4_val(int j) const
         + 2. * (-lap_alpha - d_tK0 + beta0 * d_z_K0) / alpha0;
 }
 
+double Spacetime::ricci_4_matter(int j) const
+{
+    if (current_slice_ptr == nullptr || n_gridpoints <= 0)
+        return 0.0;
+
+    const BSSNSlice& s = *current_slice_ptr;
+    double T = S[j] - rho[j];
+
+    return -8. * M_PI * T;
+}
+
 //computes hamiltonian and momentum constraints and conformal metric determinant
 void Spacetime::compute_diagnostics (BSSNSlice* slice_ptr)
 {
@@ -1511,7 +1522,7 @@ void Spacetime:: write_diagnostics(std::string file_name)
     double A = sqrt(phi_re * phi_re + phi_im * phi_im);
 
     data_file << std::setprecision (10) <<  (j + grid_offset) * dr << "   " << Ham[j] << "    " << Mom_Z[j]<< "    " << det_h[j]  << "    " << aux_test[j]
-        << "    " << A << "    " << ricci_4_val(j) << endl;  //<< d_zz(v_chi, j) << "    "  << d_zz(v_alpha, j)  << "    " << d_z(v_phi_re,j) << endl;
+        << "    " << A << "    " << ricci_4_val(j)  << "    " << ricci_4_matter(j) << endl;  //<< d_zz(v_chi, j) << "    "  << d_zz(v_alpha, j)  << "    " << d_z(v_phi_re,j) << endl;
     }
 
     //cout << "Wrote diagnostics" << endl;
@@ -2146,7 +2157,7 @@ void Spacetime::evolve()
         double Ap0 = sqrt (pow(slices[n].states2[0].csf.phi_re,2) + pow(slices[n].states2[0].csf.phi_im,2));
         double Ap1 = sqrt (pow(slices[n].states2[1].csf.phi_re,2) + pow(slices[n].states2[1].csf.phi_im,2));
         double A_ctr =  (cell_centered) ? (Ap0- 0.5 * dr * (Ap1 - Ap0)) : Ap0; //just linearly extrapolate to r = 0 when cell-centered
-        double ricci_4 = (critical_study ? ricci_4_val(0):0.0);
+        double ricci_4 = (critical_study ? ricci_4_matter(0):0.0);
 
         if (critical_study && ricci_4 > ricci_4_ctr_max)
             ricci_4_ctr_max = ricci_4;

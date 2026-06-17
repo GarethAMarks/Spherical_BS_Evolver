@@ -127,6 +127,7 @@ class Spacetime
         double slice_charge(BSSNSlice* slice_ptr);
 
         double ricci_4_val(int j) const; // Compute the 4D Ricci scalar at a grid point
+        double ricci_4_matter(int j) const; // Compute the 4D Ricci scalar via R = -8*Pi*T
 
         bool critical_study; // whether to perform critical study analysis (bisection etc)
         int critical_state; // to be tracked by critical study handler: 0 for subcritical, 1 for supercritical
