@@ -1408,6 +1408,21 @@ double Spacetime::ricci_4_matter(int j) const
     return cabs(-8. * M_PI * T);
 }
 
+double Spacetime::get_ah_mass() const
+{
+    if (ah_radius < 0.0 || current_slice_ptr == nullptr || n_gridpoints <= 0)
+        return 0.0;
+
+    const double dr_local = R / ((double)n_gridpoints - 1.0);
+    int j = (int)std::round(ah_radius / dr_local - grid_offset);
+    j = std::max(0, std::min(j, n_gridpoints - 1));
+
+    const double chi0   = current_slice_ptr->states2[j].bssn.chi;
+    const double h_ww0  = current_slice_ptr->states2[j].bssn.h_ww;
+
+    return 0.5 * std::sqrt(chi0 * h_ww0) * ah_radius;
+}
+
 //computes hamiltonian and momentum constraints and conformal metric determinant
 void Spacetime::compute_diagnostics (BSSNSlice* slice_ptr)
 {
@@ -2110,7 +2125,7 @@ void Spacetime::evolve()
             << "   " << "Mom_L2"<<  "   " << "chi_central" << "   "
             << "A_central" << "   "  << "AH radius" << "   " <<  "M_ADM" << "   "  << "Noether charge"
             << "   " << "Central dK/dt" << "   " << "freq_central" << "   " << "lapse_central" <<
-            "   " << "complex field energy" << "   " << "real field energy" << "   " << "central 4D ricci scalar" << "   " << "phi_re_central"<< endl;
+            "   " << "complex field energy" << "   " << "real field energy" << "   " << "central 4D ricci scalar" << "   " << "phi_re_central" << "   " << "AH mass" << endl;
 
     double A0 = sqrt (pow(slices[0].states2[0].csf.phi_re,2) + pow(slices[0].states2[0].csf.phi_im,2));
 
@@ -2169,7 +2184,7 @@ void Spacetime::evolve()
             << "   " << Mom_L2 <<  "   " << slices[n].states2[0].bssn.chi << "   "
             << A_ctr << "   "  << ah_radius << "   " <<  M << "   "  << slice_charge(current_slice_ptr)
             << "   " << dtK_L2 << "   " << omega_approx << "   " << slices[n].states2[0].bssn.alpha <<
-            "   " << E_phi << "   " << E_psi << "   " << ricci_4 << "   " << slices[n].states2[0].csf.phi_re << endl;
+            "   " << E_phi << "   " << E_psi << "   " << ricci_4 << "   " << slices[n].states2[0].csf.phi_re << "   " << get_ah_mass() << endl;
         }
 
         slices[n + 1].states2.resize(n_gridpoints);
