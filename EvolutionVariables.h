@@ -338,7 +338,6 @@ class Spacetime
         void sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slice_ptr);
 
         double ah_indicator_at(const BSSNSlice* slice_ptr, int j); // Helper for AH search.
-        double get_ah_mass() const;
         double ah_radius; //stores radius of apparent horizon when found
         double do_ah_search; //flag to enable/disable apparent horizon search each timestep
 
