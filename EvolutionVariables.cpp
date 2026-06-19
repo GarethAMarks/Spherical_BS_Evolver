@@ -1405,7 +1405,7 @@ double Spacetime::ricci_4_matter(int j) const
     const BSSNSlice& s = *current_slice_ptr;
     double T = S[j] - rho[j];
 
-    return -8. * M_PI * T;
+    return cabs(-8. * M_PI * T);
 }
 
 //computes hamiltonian and momentum constraints and conformal metric determinant
