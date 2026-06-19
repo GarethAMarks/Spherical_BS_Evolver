@@ -128,6 +128,7 @@ class Spacetime
 
         double ricci_4_val(int j) const; // Compute the 4D Ricci scalar at a grid point
         double ricci_4_matter(int j) const; // Compute the 4D Ricci scalar via R = -8*Pi*T
+        double get_ah_mass() const;
 
         bool critical_study; // whether to perform critical study analysis (bisection etc)
         int critical_state; // to be tracked by critical study handler: 0 for subcritical, 1 for supercritical
@@ -337,13 +338,14 @@ class Spacetime
         void sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slice_ptr);
 
         double ah_indicator_at(const BSSNSlice* slice_ptr, int j); // Helper for AH search.
+        double get_ah_mass() const;
         double ah_radius; //stores radius of apparent horizon when found
         double do_ah_search; //flag to enable/disable apparent horizon search each timestep
 
         double V(const double A);
         double dV(const double A);
 
-        double chi_asymp(double r);
+        double chi_asymp(double r); 
         double alpha_asymp(double r);
 
         double d_chi_asymp(double r);
