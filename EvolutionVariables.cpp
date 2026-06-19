@@ -1420,7 +1420,7 @@ double Spacetime::get_ah_mass() const
     const double chi0   = current_slice_ptr->states2[j].bssn.chi;
     const double h_ww0  = current_slice_ptr->states2[j].bssn.h_ww;
 
-    return 0.5 * std::sqrt(chi0 * h_ww0) * ah_radius;
+    return 0.5 * std::sqrt(h_ww0 / chi0) * ah_radius;
 }
 
 //computes hamiltonian and momentum constraints and conformal metric determinant
