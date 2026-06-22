@@ -1414,11 +1414,13 @@ double Spacetime::get_ah_mass() const
         return 0.0;
 
     const double dr_local = R / ((double)n_gridpoints - 1.0);
-    int j = (int)std::round(ah_radius / dr_local - grid_offset);
-    j = std::max(0, std::min(j, n_gridpoints - 1));
+    const double frac_idx = ah_radius / dr_local - grid_offset;
+    const int j0 = std::max(0, std::min((int)std::floor(frac_idx), n_gridpoints - 2));
+    const int j1 = j0 + 1;
+    const double lam = frac_idx - j0;
 
-    const double chi0   = current_slice_ptr->states2[j].bssn.chi;
-    const double h_ww0  = current_slice_ptr->states2[j].bssn.h_ww;
+    const double chi0  = (1.0 - lam) * current_slice_ptr->states2[j0].bssn.chi  + lam * current_slice_ptr->states2[j1].bssn.chi;
+    const double h_ww0 = (1.0 - lam) * current_slice_ptr->states2[j0].bssn.h_ww + lam * current_slice_ptr->states2[j1].bssn.h_ww;
 
     return 0.5 * std::sqrt(h_ww0 / chi0) * ah_radius;
 }
