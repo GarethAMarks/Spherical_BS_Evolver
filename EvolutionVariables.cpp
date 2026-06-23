@@ -1529,6 +1529,7 @@ void Spacetime:: write_diagnostics(std::string file_name)
         exit(1);
     }
 
+    ricci_4_grid_max = 0.0;
     for (int j = 0; j < length - 2; j++)
     {
         if (!active_points[j]) //perform no computations on inactive points
@@ -1537,9 +1538,11 @@ void Spacetime:: write_diagnostics(std::string file_name)
     const double& phi_re = current_slice_ptr->states2[j].csf.phi_re;
     const double& phi_im = current_slice_ptr->states2[j].csf.phi_im;
     double A = sqrt(phi_re * phi_re + phi_im * phi_im);
+    double r4m = ricci_4_matter(j);
+    if (r4m > ricci_4_grid_max) ricci_4_grid_max = r4m;
 
     data_file << std::setprecision (10) <<  (j + grid_offset) * dr << "   " << Ham[j] << "    " << Mom_Z[j]<< "    " << det_h[j]  << "    " << aux_test[j]
-        << "    " << A << "    " << ricci_4_val(j)  << "    " << ricci_4_matter(j) << endl;  //<< d_zz(v_chi, j) << "    "  << d_zz(v_alpha, j)  << "    " << d_z(v_phi_re,j) << endl;
+        << "    " << A << "    " << ricci_4_val(j)  << "    " << r4m << endl;  //<< d_zz(v_chi, j) << "    "  << d_zz(v_alpha, j)  << "    " << d_z(v_phi_re,j) << endl;
     }
 
     //cout << "Wrote diagnostics" << endl;
@@ -2174,7 +2177,7 @@ void Spacetime::evolve()
         double Ap0 = sqrt (pow(slices[n].states2[0].csf.phi_re,2) + pow(slices[n].states2[0].csf.phi_im,2));
         double Ap1 = sqrt (pow(slices[n].states2[1].csf.phi_re,2) + pow(slices[n].states2[1].csf.phi_im,2));
         double A_ctr =  (cell_centered) ? (Ap0- 0.5 * dr * (Ap1 - Ap0)) : Ap0; //just linearly extrapolate to r = 0 when cell-centered
-        double ricci_4 = (critical_study ? ricci_4_matter(0):0.0);
+        double ricci_4 = (critical_study ? ricci_4_grid_max : 0.0);
 
         if (critical_study && ricci_4 > ricci_4_ctr_max)
             ricci_4_ctr_max = ricci_4;

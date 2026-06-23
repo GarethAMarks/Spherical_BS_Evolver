@@ -139,6 +139,7 @@ class Spacetime
         double sub_min_time;   // minimum time before declaring subcritical based on amplitude decrease
         double subcritical_time; // if no AH by this time, assume subcritical in critical study
         double ricci_4_ctr_max; //maximum 4D Ricci scalar at grid center over evolution, for critical study diagnostics
+        double ricci_4_grid_max = 0.0; //maximum of ricci_4_matter over the whole grid, updated by write_diagnostics
         bool fill_subcritical = false; //whether to add additional subcritical runs after tuning complete
         double A_thresh; //if A_ctr larger than this, designate supercritial.
 
