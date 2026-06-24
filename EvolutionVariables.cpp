@@ -2179,7 +2179,7 @@ void Spacetime::evolve()
         double A_ctr =  (cell_centered) ? (Ap0- 0.5 * dr * (Ap1 - Ap0)) : Ap0; //just linearly extrapolate to r = 0 when cell-centered
         double ricci_4 = (critical_study ? ricci_4_grid_max : 0.0);
 
-        if (critical_study && ricci_4 > ricci_4_ctr_max)
+        if (critical_study && ricci_4 > ricci_4_ctr_max && t > 10)
             ricci_4_ctr_max = ricci_4;
 
         if (time_step % write_CN_interval == 0) //write time-dependent diagnostics to constraint_norms.dat
