@@ -2456,8 +2456,8 @@ double Spacetime::ah_indicator_at(const BSSNSlice* slice_ptr, int j)
         z = 1e-12; // avoid division by zero at origin
 
     double ah_indicator = sqrt(s.chi / s.h_zz) *
-                          (2. / z + (d_z(v_h_ww, j) - s.h_ww * d_z(v_chi, j) / s.chi) / s.h_ww)
-                          - (D - 2.) * (s.A_ww + s.K * s.h_ww / (D - 1.));
+                          (2. / z + (d_z(v_h_ww, j) - s.h_ww * d_z(v_chi, j) / s.chi) / (s.h_ww * s.chi))
+                          - (D - 2.) * (s.A_ww + s.K * s.h_ww / (D - 1.)) * (1. / (s.h_ww * s.chi));
 
     return ah_indicator;
 }
