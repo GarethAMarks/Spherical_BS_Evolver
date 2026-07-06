@@ -1425,6 +1425,7 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
 {
     read_parameters(0);
     ofstream data_file{"BosonStars.dat"};
+    data_file << "# A_central M r_99 noether_charge binding_energy omega omega_unrescaled phi0 C4 Cmax\n";
     omega_pre_rescale = frequency_guess;
 
     //initial # of gridpoints (we'll increase for larger models)
@@ -1436,7 +1437,7 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
     // mini BS: {0.3, 0.375, 0.425, 0.475, 0.525, 0.575, 0.62, 0.66, 0.7, 0.73} is good with n_gridpoints = 2000 from patams file
     //sigma = 0.2: {0.25,0.325,0.375, 0.425, 0.475, 0.525, 0.575};
     //sigma = 0.1: {0.05, 0.15, 0.2, 0.25,0.325,0.375, 0.425, 0.475, 0.525, 0.575};
-    vector<double> refine_thresholds{0.25,0.325,0.375, 0.425, 0.475, 0.525, 0.575};
+    vector<double> refine_thresholds{0.3, 0.375, 0.425, 0.475, 0.525, 0.575, 0.62, 0.66, 0.7, 0.73};
     //bool passed_last_threshold; //set to 1 after last threshold reached
 
     //frequency from previous guess for use in update
