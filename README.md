@@ -4,7 +4,7 @@ C++ code for constructing and evolving spherical boson star solutions. The core 
 
 - **Family construction**: sweep over central field amplitudes to build sequences of boson star models, writing ADM mass, radius, Noether charge, binding energy, frequency, and compactness to `BosonStars.dat`.
 - **Radial oscillation frequencies**: linearised perturbation solver (`LinearPerturbation`) computes radial mode frequencies around a given background star.
-- **Dynamical evolution in spherical symmetry**: full BSSN (or CCZ4) evolution in spherical symmetry using a modified cartoon method, with Kreiss-Oliger dissipation, adaptive mesh refinement via manual refinement points, and optional shift evolution.
+- **Dynamical evolution in spherical symmetry**: full BSSN (or CCZ4) evolution in spherical symmetry using a modified cartoon method, with Kreiss-Oliger dissipation, fixed mesh refinement, and optional shift evolution.
 - **Critical phenomena**: bisection search over initial data parameters to locate the black-hole formation threshold.
 
 ---
