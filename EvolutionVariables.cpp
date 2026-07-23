@@ -1600,6 +1600,7 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "real_sigma = ", real_sigma, quiet);
         fill_parameter(current_line, "real_center = ", real_center, quiet);
         fill_parameter(current_line, "critical_study = ", critical_study, quiet);
+        fill_parameter(current_line, "critical_gaussian_start = ", critical_gaussian_start, quiet);
         fill_parameter(current_line, "critical_state = ", critical_state, quiet);
         fill_parameter(current_line, "critical_eps = ", critical_eps, quiet);
         fill_parameter(current_line, "lapse_thresh = ", lapse_thresh, quiet);
@@ -2348,15 +2349,32 @@ void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double l
         double tmp = tuning_param;
         cout << "Running with tuning_param = " << std::setprecision(16) << tuning_param << endl;
 
-        if (!bs->solve()) //re-solve BS now that real perturbation is added at initial phase.
+        if (critical_gaussian_start)
         {
-            cout << "solve failed; assuming supercritical for tuning_param = " << std::setprecision(16) << tuning_param << endl;
-            return 1;
-        }
-        //cout << "Real amplitude: " << bs->real_amp << endl;
+            // Gaussian scalar cloud initial data path: perturb_amp is the tuning param,
+            // real scalar field is disabled.
+            bs->add_real_field = false;
+            bs->clear_BS();
+            bs->omega = bs->enforced_freq;
+            bs->add_perturbation(bs->perturb_amp, bs->perturb_spread, 0.);
 
-        // Ensure isotropic arrays (and rsf_iso) reflect the newly solved BS state so initialize/read_BS_data sees updated profiles
-        bs->fill_isotropic_arrays();
+            if (!bs->fill_given_A(bs->omega, 0))
+                bs->default_metric_vars();
+
+            bs->fill_isotropic_arrays();
+        }
+        else
+        {
+            if (!bs->solve()) //re-solve BS now that real perturbation is added at initial phase.
+            {
+                cout << "solve failed; assuming supercritical for tuning_param = " << std::setprecision(16) << tuning_param << endl;
+                return 1;
+            }
+            //cout << "Real amplitude: " << bs->real_amp << endl;
+
+            // Ensure isotropic arrays (and rsf_iso) reflect the newly solved BS state so initialize/read_BS_data sees updated profiles
+            bs->fill_isotropic_arrays();
+        }
 
         // Skip re-reading parameters so tuned value persists into initial data seeding
         initialize(*bs, /*skip_read=*/true);

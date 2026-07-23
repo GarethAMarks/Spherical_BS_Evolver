@@ -108,6 +108,7 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "real_amp = ", real_amp, quiet);
         fill_parameter(current_line, "real_sigma = ", real_sigma, quiet);
         fill_parameter(current_line, "real_center = ", real_center, quiet);
+        fill_parameter(current_line, "write_column_files = ", write_column_files, quiet);
 
         fill_parameter(current_line, "enforced_freq = ", enforced_freq, quiet);
         fill_parameter(current_line, "pert_only = ", pert_only, quiet);
@@ -400,7 +401,27 @@ void BosonStar::write_field(string filename)
         }
         data_file << std::endl;
     }
-    
+
+    if (write_column_files)
+    {
+        std::ofstream A_file{"A.dat"};
+        std::ofstream m_file{"m.dat"};
+        std::ofstream phi_file{"Phi.dat"};
+
+        if (!A_file || !m_file || !phi_file)
+        {
+            std::cerr << "A.dat, m.dat, or Phi.dat could not be opened for writing!\n";
+            exit(1);
+        }
+
+        for (int j = 0; j < n_gridpoints - 1; ++j)
+        {
+            A_file   << std::setprecision(10) << radius_array[j] << "   " << state[j].A   << std::endl;
+            m_file   << std::setprecision(10) << radius_array[j] << "   " << m(j)         << std::endl;
+            phi_file << std::setprecision(10) << radius_array[j] << "   " << state[j].phi << std::endl;
+        }
+    }
+
 }
 void BosonStar::double_resolution()
 {

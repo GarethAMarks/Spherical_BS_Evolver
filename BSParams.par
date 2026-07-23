@@ -23,8 +23,8 @@ gaussian_start = 0
 enforced_freq = 0.9
 
 #grid params
-R = 100
-n_gridpoints = 1500
+R = 200
+n_gridpoints = 2000
 courant_factor = 0.4
 stop_time = 1000
 cell_centered = 0
@@ -42,6 +42,7 @@ real_center = 50.0
 #params for critical threshold studies
 do_ah_search = 1
 critical_study = 0
+critical_gaussian_start = 0 #if 1 (with critical_study), tune perturb_amp via gauss_initialize instead of tuning real_amp
 hi_guess = 0.05
 lo_guess = 0.001
 critical_eps = 1e-12
@@ -78,6 +79,8 @@ start_time = 0
 checkpoint_time = 2000
 dump_time = 100
 
+write_column_files = 0 #if 1, also write A.dat, m.dat, Phi.dat alongside BSdata.dat
+
 read_thinshell = 0 #if true will read outputs of Uli's thinshell code
 write_interval = 1
 write_CN_interval = 5
@@ -102,9 +105,9 @@ noether_epsilon = 1e-5
 dynamic_cutoff = 0
 
 #model cycling params: for model construction/ linear perturbations
-cycle_only = 0 #if 1 will only cycle thru model construction. Priority over pert_only!
+cycle_only = 1 #if 1 will only cycle thru model construction. Priority over pert_only!
 A0 = 0.001 #initial central amp
-dA = 0.00025 #step central amp
-n_stars = 3000 #number of BS models to cycle thru
+dA = 0.0005 #step central amp
+n_stars = 1800 #number of BS models to cycle thru
 
 

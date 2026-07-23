@@ -131,6 +131,7 @@ class Spacetime
         double get_ah_mass() const;
 
         bool critical_study; // whether to perform critical study analysis (bisection etc)
+        bool critical_gaussian_start = false; // if true (with critical_study), tune perturb_amp using gauss_initialize sequence instead of real_amp
         int critical_state; // to be tracked by critical study handler: 0 for subcritical, 1 for supercritical
         double critical_eps; // tolerance for critical parameter
         double hi_guess;

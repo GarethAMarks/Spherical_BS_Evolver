@@ -122,6 +122,7 @@ class BosonStar
 
         bool cycle_only = 0;
         bool pert_only = 0;
+        bool write_column_files = 0;
 
         BosonStar() = default;
         //BosonStar(const BosonStar& boson_star); //copy constructor(don't seem to need for now)

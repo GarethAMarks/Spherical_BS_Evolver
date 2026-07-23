@@ -49,8 +49,17 @@ int main()
         
         if (st.critical_study)
         {
-            double& tuning_param = boson_star.real_amp; //example: tune the perturbation amplitude
-            st.tune_to_critical(tuning_param, st.hi_guess, st.lo_guess, &boson_star);
+            if (st.critical_gaussian_start)
+            {
+                boson_star.add_real_field = false;
+                double& tuning_param = boson_star.perturb_amp;
+                st.tune_to_critical(tuning_param, st.hi_guess, st.lo_guess, &boson_star);
+            }
+            else
+            {
+                double& tuning_param = boson_star.real_amp; //example: tune the perturbation amplitude
+                st.tune_to_critical(tuning_param, st.hi_guess, st.lo_guess, &boson_star);
+            }
         }
         else
             st.evolve();
