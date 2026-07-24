@@ -84,7 +84,7 @@ void gauss_initialize(BosonStar& boson_star)
         boson_star.omega = boson_star.enforced_freq;
         boson_star.add_perturbation(boson_star.perturb_amp, boson_star.perturb_spread, 0.);
 
-        if (!boson_star.fill_given_A(boson_star.omega, 0) )
+        //if (!boson_star.fill_given_A(boson_star.omega, 0) )
             boson_star.default_metric_vars();
 
         
