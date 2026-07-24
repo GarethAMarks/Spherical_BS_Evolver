@@ -2378,6 +2378,8 @@ void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double l
 
         // Skip re-reading parameters so tuned value persists into initial data seeding
         initialize(*bs, /*skip_read=*/true);
+        if (run_spacetime_solver)
+            solve_initial_ham(run_quietly);
         tuning_param = tmp;
         evolve();
         if (critical_state != 0 && critical_state != 1)
