@@ -2358,7 +2358,7 @@ void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double l
             bs->omega = bs->enforced_freq;
             bs->add_perturbation(bs->perturb_amp, bs->perturb_spread, 0.);
 
-            if (!bs->fill_given_A(bs->omega, 0))
+            //if (!bs->fill_given_A(bs->omega, 0))
                 bs->default_metric_vars();
 
             bs->fill_isotropic_arrays();
