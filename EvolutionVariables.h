@@ -132,6 +132,9 @@ class Spacetime
 
         bool critical_study; // whether to perform critical study analysis (bisection etc)
         bool critical_gaussian_start = false; // if true (with critical_study), tune perturb_amp using gauss_initialize sequence instead of real_amp
+        double past_super_time = 0.0; // if > 0, continue evolving this long after horizon detection before ending a supercritical run
+        double super_ah_radius = 0.0; // AH radius captured at end of supercritical run (past_super_time after detection)
+        double super_M = 0.0; // ADM mass captured at end of supercritical run
         int critical_state; // to be tracked by critical study handler: 0 for subcritical, 1 for supercritical
         double critical_eps; // tolerance for critical parameter
         double hi_guess;

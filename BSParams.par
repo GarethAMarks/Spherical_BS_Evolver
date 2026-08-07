@@ -2,7 +2,7 @@
 D = 4
 mu = 1.0
 lambda = 0
-solitonic = 0 #if false will use mini BS potential
+solitonic = 1 #if false will use mini BS potential
 G = 1.0 
 sigma = 0.2
 eigen = 0 #0 for ground state BS
@@ -23,8 +23,8 @@ gaussian_start = 0
 enforced_freq = 0.9
 
 #grid params
-R = 200
-n_gridpoints = 2000
+R = 100
+n_gridpoints = 3000
 courant_factor = 0.4
 stop_time = 1000
 cell_centered = 0
@@ -43,6 +43,7 @@ real_center = 50.0
 do_ah_search = 1
 critical_study = 0
 critical_gaussian_start = 0 #if 1 (with critical_study), tune perturb_amp via gauss_initialize instead of tuning real_amp
+past_super_time = 0 #if > 0, continue evolving this long after AH detection before ending a supercritical run; also logs AH radius + ADM mass at that final time in supercritical.dat
 hi_guess = 0.05
 lo_guess = 0.001
 critical_eps = 1e-12

@@ -1601,6 +1601,7 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "real_center = ", real_center, quiet);
         fill_parameter(current_line, "critical_study = ", critical_study, quiet);
         fill_parameter(current_line, "critical_gaussian_start = ", critical_gaussian_start, quiet);
+        fill_parameter(current_line, "past_super_time = ", past_super_time, quiet);
         fill_parameter(current_line, "critical_state = ", critical_state, quiet);
         fill_parameter(current_line, "critical_eps = ", critical_eps, quiet);
         fill_parameter(current_line, "lapse_thresh = ", lapse_thresh, quiet);
@@ -2118,6 +2119,9 @@ void Spacetime::evolve()
     int num_timesteps = ceil(stop_time / dt);
     int last_checkpoint_time = 0;
     int last_dump_time = 0;
+    double super_detect_time = -1.0; //time at which supercriticality was first detected; -1 means not yet detected
+    super_ah_radius = 0.0;
+    super_M = 0.0;
 
     //write constraint norms at each timestep to file
     std::ofstream constraints_file{"constraint_norms.dat"};
@@ -2292,13 +2296,23 @@ void Spacetime::evolve()
             exit(1);
         }
 
-        if (critical_study && (ah_radius > 0. || A_ctr > A_thresh)) //use AH formation or central amplitude as supercritical indicator 
+        if (critical_study && (ah_radius > 0. || A_ctr > A_thresh)) //use AH formation or central amplitude as supercritical indicator
         //(critical_study && slices[n + 1].states2[0].bssn.alpha < lapse_thresh)
         {
-            cout << "Supercritical at time " << t << endl;
-            critical_state = 1;
-            critical_time = t;
-            break;
+            if (super_detect_time < 0.0)
+            {
+                cout << "Supercritical at time " << t << endl;
+                critical_state = 1;
+                critical_time = t;
+                super_detect_time = t;
+            }
+
+            if (past_super_time <= 0.0 || t >= super_detect_time + past_super_time)
+            {
+                super_ah_radius = ah_radius;
+                super_M = M;
+                break;
+            }
         }
         //wait some time to avoid initial transients, then use net central amplitude decrease as subcritical indicator
         if (critical_study && A_ctr < A0 && t > sub_min_time) 
@@ -2332,7 +2346,7 @@ void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double l
     std::ofstream supercritical_file{"supercritical.dat"};
 
     subcritical_file << "#tuning_param   critical_time     ricci_4_max" << endl;
-    supercritical_file << "#tuning_param   critical_time" << endl;
+    supercritical_file << "#tuning_param   critical_time   ah_radius_final   M_final" << endl;
 
     if (bs == nullptr)
     {
@@ -2401,7 +2415,7 @@ void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double l
         exit(1);
     }
     supercritical_file << std::setprecision(16)
-                               << hi_guess<< "   " << critical_time << endl;
+                               << hi_guess<< "   " << critical_time << "   " << super_ah_radius << "   " << super_M << endl;
 
     // Verify low guess is subcritical
     int lo_state = run_with_param(lo_guess);
@@ -2427,7 +2441,7 @@ void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double l
         {
             hi = mid;   // supercritical at mid -> reduce upper bound
             supercritical_file << std::setprecision(16)
-                               << mid << "   " << critical_time << endl;
+                               << mid << "   " << critical_time << "   " << super_ah_radius << "   " << super_M << endl;
         }
         else if (state == 0)
         {
