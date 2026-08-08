@@ -2286,6 +2286,19 @@ void Spacetime::evolve()
         if (isnan(slices[n + 1].states2[0].bssn.chi))
         {
             cout << "Central chi became nan on step " << time_step << endl;
+            if (critical_study && ah_radius > 0.)
+            {
+                cout << "Horizon was detected before nan appeared; recording run as supercritical." << endl;
+                if (super_detect_time < 0.0)
+                {
+                    critical_state = 1;
+                    critical_time = t;
+                    super_detect_time = t;
+                }
+                super_ah_radius = ah_radius;
+                super_M = M;
+                break;
+            }
             exit(1);
         }
 
