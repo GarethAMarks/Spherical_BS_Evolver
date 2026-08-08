@@ -2286,7 +2286,7 @@ void Spacetime::evolve()
         if (isnan(slices[n + 1].states2[0].bssn.chi))
         {
             cout << "Central chi became nan on step " << time_step << endl;
-            if (critical_study && ah_radius > 0.)
+            if (critical_study && (super_detect_time >= 0.0 || ah_radius > 0.))
             {
                 cout << "Horizon was detected before nan appeared; recording run as supercritical." << endl;
                 if (super_detect_time < 0.0)
@@ -2294,9 +2294,9 @@ void Spacetime::evolve()
                     critical_state = 1;
                     critical_time = t;
                     super_detect_time = t;
+                    if (ah_radius > 0.) super_ah_radius = ah_radius;
+                    super_M = M;
                 }
-                super_ah_radius = ah_radius;
-                super_M = M;
                 break;
             }
             exit(1);
@@ -2309,26 +2309,27 @@ void Spacetime::evolve()
             exit(1);
         }
 
-        if (critical_study && (ah_radius > 0. || A_ctr > A_thresh)) //use AH formation or central amplitude as supercritical indicator
+        if (critical_study && super_detect_time < 0.0 && (ah_radius > 0. || A_ctr > A_thresh)) //use AH formation or central amplitude as supercritical indicator
         //(critical_study && slices[n + 1].states2[0].bssn.alpha < lapse_thresh)
         {
-            if (super_detect_time < 0.0)
-            {
-                cout << "Supercritical at time " << t << endl;
-                critical_state = 1;
-                critical_time = t;
-                super_detect_time = t;
-            }
+            cout << "Supercritical at time " << t << endl;
+            critical_state = 1;
+            critical_time = t;
+            super_detect_time = t;
+            if (ah_radius > 0.) super_ah_radius = ah_radius;
+            super_M = M;
+        }
 
+        //if past_super_time > 0, keep the last known good AH radius / mass while extending, then break when the window elapses
+        if (critical_study && super_detect_time >= 0.0)
+        {
+            if (ah_radius > 0.) super_ah_radius = ah_radius;
+            super_M = M;
             if (past_super_time <= 0.0 || t >= super_detect_time + past_super_time)
-            {
-                super_ah_radius = ah_radius;
-                super_M = M;
                 break;
-            }
         }
         //wait some time to avoid initial transients, then use net central amplitude decrease as subcritical indicator
-        if (critical_study && A_ctr < A0 && t > sub_min_time) 
+        if (critical_study && super_detect_time < 0.0 && A_ctr < A0 && t > sub_min_time)
         {
             cout << "Subcritical at time " << t << endl;
             critical_state = 0;
@@ -2337,7 +2338,7 @@ void Spacetime::evolve()
         }
 
         // Additional subcritical criterion: if no AH by subcritical_time, assume subcritical
-        if (critical_study && t >= subcritical_time)
+        if (critical_study && super_detect_time < 0.0 && t >= subcritical_time)
         {
             if (ah_radius < 0.0)
             {
