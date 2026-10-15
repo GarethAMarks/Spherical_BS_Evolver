@@ -7,6 +7,7 @@
 
 #include "BosonStar.h"
 #include "mathutils.h"
+#include "mpi_helpers.h"
 #include <sstream>
 #include<iomanip>
 
@@ -1603,5 +1604,51 @@ void BosonStar::cycle_models(int n_stars, double A_0, double delta_A)
     }
 }
 
+
+void BosonStar::broadcast()
+{
+#ifdef USE_MPI
+    // Broadcast scalars that solve() sets.
+    // omega is long double; we transmit as double (precision loss is physics-irrelevant).
+    double buf[3] = {R, (double)omega, (double)omega_pre_rescale};
+    bss_mpi::bcast_doubles(buf, 3);
+    R               = buf[0];
+    omega           = (long double)buf[1];
+    omega_pre_rescale = (long double)buf[2];
+
+    int ibuf[2] = {n_gridpoints, blowup_point};
+    bss_mpi::bcast_ints(ibuf, 2);
+    n_gridpoints = ibuf[0];
+    blowup_point = ibuf[1];
+
+    // Helper lambda to broadcast a vector<double>.
+    auto bcast_vec = [](std::vector<double>& v)
+    {
+        int sz = (int)v.size();
+        bss_mpi::bcast_ints(&sz, 1);
+        v.resize(sz);
+        if (sz > 0)
+            bss_mpi::bcast_doubles(v.data(), sz);
+    };
+
+    // state: vector<FieldState>, each FieldState is 4 contiguous doubles (A, X, phi, eta).
+    {
+        int sz = (int)state.size();
+        bss_mpi::bcast_ints(&sz, 1);
+        state.resize(sz);
+        if (sz > 0)
+            bss_mpi::bcast_doubles(reinterpret_cast<double*>(state.data()), sz * 4);
+    }
+
+    bcast_vec(psi_iso_array);
+    bcast_vec(A_iso_array);
+    bcast_vec(phi_iso_array);
+    bcast_vec(rsf_iso_array);
+    bcast_vec(pert_iso_array);
+    bcast_vec(pert_array);
+    bcast_vec(rsf_array);
+    bcast_vec(radius_array);
+#endif
+}
 
 #endif /* BOSONSTAR_CPP_ */

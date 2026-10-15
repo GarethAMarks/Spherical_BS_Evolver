@@ -151,7 +151,9 @@ class BosonStar
         void add_perturbation(double a, double k, double center);
 
         void cycle_models(int n_stars, double A_0, double delta_A);
-        
+
+        void broadcast();
+
     // Real scalar field helpers
     bool resolve_with_rsf(); // fill rsf_array and re-solve for X and phi keeping A and eta fixed; returns true on success
     FieldState rsf_RHS(const double radius, long double frequency, FieldState s);

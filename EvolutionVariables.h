@@ -252,6 +252,68 @@ class Spacetime
 
         double R; //max radius of computational domain
         int n_gridpoints; // number of spatial gridpoints
+
+        // ---- MPI domain decomposition -----------------------------------
+        // Populated by init_domain_decomposition() from n_gridpoints + rank/size.
+        // In serial builds (no USE_MPI) these degenerate to a single owning
+        // rank with global_lo=0, global_hi=n_gridpoints, local_N=n_gridpoints,
+        // and ghost slots that are never referenced.
+        static constexpr int NGHOST = 3; // widest stencil: 7-point KO dissipation
+
+        int mpi_rank = 0;
+        int mpi_size = 1;
+        int local_N   = 0; // owned points on this rank (excludes ghosts)
+        int global_lo = 0; // global index of first owned point
+        int global_hi = 0; // one past last owned point (global index)
+
+        void init_domain_decomposition(); // sets rank/size/local_N/global_lo/global_hi
+
+        // Number of doubles per gridpoint on the wire: 9 BSSN + 4 CSF + 2 RSF
+        // (RSF is always packed for simplicity; cheap). Theta (CCZ4) is
+        // exchanged as a separate message when use_CCZ4 is on.
+        static constexpr int NDOF_STATE = 9 + 4 + 2;
+
+        // Fill left/right NGHOST ghost slots of slice.states2 (and slice.theta
+        // when use_CCZ4) with owned data from the left/right neighbor.
+        // No-op on interior boundaries where the rank owns the edge (rank 0
+        // has no left neighbor; last rank has no right neighbor).
+        // Expects slice.states2 sized >= n_gridpoints (replicated full-grid storage model).
+        void exchange_ghosts(BSSNSlice& slice);
+
+        // Gather this rank's owned-range doubles into a full-grid buffer on rank 0.
+        // local_owned must hold local_N * doubles_per_point contiguous doubles
+        // (rank r's global offset is global_lo_r * doubles_per_point). On rank 0,
+        // full_buf is resized to n_gridpoints * doubles_per_point and filled;
+        // on non-root ranks full_buf is left untouched. Serial builds just copy.
+        void gather_owned_to_root(const std::vector<double>& local_owned,
+                                  std::vector<double>& full_buf,
+                                  int doubles_per_point) const;
+
+        // All-ranks variant: every rank ends up with the full-grid buffer.
+        // Used by apparent_horizon_search so all ranks can walk the same indicator array.
+        void allgather_owned(const std::vector<double>& local_owned,
+                             std::vector<double>& full_buf,
+                             int doubles_per_point) const;
+
+        // Collective checkpoint write: all ranks pack + gather; rank 0 writes to file.
+        // Passes through to BSSNSlice::write_slice on rank 0 with a scratch slice
+        // populated by gathered data, leaving the input slice untouched everywhere.
+        void write_checkpoint(BSSNSlice& slice, const std::string& file_name);
+
+        bool owns_origin() const { return mpi_rank == 0; }
+        bool owns_outer()  const { return mpi_rank == mpi_size - 1; }
+
+        // Convert between a global gridpoint index and this rank's local
+        // slab index. Local layout is [NGHOST ghosts | local_N owned | NGHOST ghosts],
+        // so an owned point with global index j has local index (j - global_lo + NGHOST).
+        // Iteration bounds over this rank's owned range, in GLOBAL indices.
+        // Under the replicated-storage model, arrays are sized n_gridpoints on
+        // every rank and each rank only writes indices in [owned_begin, owned_end).
+        // Ghost data (from neighbors) lands in the array at global positions
+        // [global_lo - NGHOST, global_lo) and [global_hi, global_hi + NGHOST).
+        int owned_begin() const { return global_lo; }
+        int owned_end()   const { return global_hi; }
+        // -----------------------------------------------------------------
         double courant_factor;
         double stop_time;
         double dt;
@@ -345,6 +407,7 @@ class Spacetime
         double ah_indicator_at(const BSSNSlice* slice_ptr, int j); // Helper for AH search.
         double ah_radius; //stores radius of apparent horizon when found
         double do_ah_search; //flag to enable/disable apparent horizon search each timestep
+        int AH_search_steps = 25;
 
         double V(const double A);
         double dV(const double A);

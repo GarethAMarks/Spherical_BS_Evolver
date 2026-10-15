@@ -7,6 +7,7 @@
 
 #include "EvolutionVariables.h"
 #include "mathutils.h"
+#include "mpi_helpers.h"
 #include "spline.h"
 #include <iomanip>
 #include<algorithm>
@@ -24,13 +25,335 @@ using std::max;
 using std::rotate;
 // Spacetime constructor: initialize reusable CSF model with this context
 Spacetime::Spacetime() : csf_model(this), rsf_model(this) {
-    
-    sub_min_time = 10.0; 
+
+    sub_min_time = 10.0;
     adaptive_timestep = false;
     A_thresh = 10000000.0; // Default to a very large value if not provided in params.
     // Initialize scalar-field energies
     E_phi = 0.0;
     E_psi = 0.0;
+
+    // Cache rank/size up front so early error paths on any rank can print
+    // consistently. local_N / global_lo / global_hi are populated later in
+    // init_domain_decomposition() once n_gridpoints is known.
+    mpi_rank = bss_mpi::rank();
+    mpi_size = bss_mpi::size();
+}
+
+// Contiguously split n_gridpoints across mpi_size ranks. Remainder points
+// are distributed one-per-rank starting at rank 0, so |local_N_r - local_N_s| <= 1.
+// Precondition: n_gridpoints must already be set (initialize() takes care of this).
+void Spacetime::init_domain_decomposition()
+{
+    if (n_gridpoints <= 0)
+    {
+        if (mpi_rank == 0)
+            cerr << "ERROR: init_domain_decomposition called with n_gridpoints=" << n_gridpoints << endl;
+        bss_mpi::abort_all(1);
+    }
+
+    // Require at least NGHOST+1 owned points per rank so a rank's owned zone is
+    // never fully covered by its own ghost width (which would break the 7-point
+    // KO stencil and any exchange that assumes a positive owned interior).
+    const int min_per_rank = NGHOST + 1;
+    if (n_gridpoints < mpi_size * min_per_rank)
+    {
+        if (mpi_rank == 0)
+            cerr << "ERROR: n_gridpoints=" << n_gridpoints
+                 << " too small for " << mpi_size << " MPI ranks "
+                 << "(need at least " << mpi_size * min_per_rank << ")." << endl;
+        bss_mpi::abort_all(1);
+    }
+
+    const int base = n_gridpoints / mpi_size;
+    const int rem  = n_gridpoints % mpi_size;
+
+    local_N   = base + (mpi_rank < rem ? 1 : 0);
+    global_lo = mpi_rank * base + std::min(mpi_rank, rem);
+    global_hi = global_lo + local_N;
+
+    if (mpi_rank == 0 && mpi_size > 1)
+        cout << "MPI domain decomposition: " << mpi_size << " ranks, "
+             << n_gridpoints << " total gridpoints, ~" << base
+             << " points/rank, NGHOST=" << NGHOST << endl;
+}
+
+// Compute (counts, displs) for MPI_Gatherv/Allgatherv given a per-point double
+// stride. Uses the same base/rem split as init_domain_decomposition so the
+// layout matches what each rank actually owns.
+static void compute_gather_layout(int n_gridpoints, int mpi_size, int doubles_per_point,
+                                  std::vector<int>& counts, std::vector<int>& displs)
+{
+    counts.assign(mpi_size, 0);
+    displs.assign(mpi_size, 0);
+    const int base = n_gridpoints / mpi_size;
+    const int rem  = n_gridpoints % mpi_size;
+    for (int r = 0; r < mpi_size; ++r)
+    {
+        const int lN  = base + (r < rem ? 1 : 0);
+        const int gLo = r * base + std::min(r, rem);
+        counts[r] = lN  * doubles_per_point;
+        displs[r] = gLo * doubles_per_point;
+    }
+}
+
+void Spacetime::gather_owned_to_root(const std::vector<double>& local_owned,
+                                     std::vector<double>& full_buf,
+                                     int doubles_per_point) const
+{
+#ifdef USE_MPI
+    if (mpi_size <= 1) { full_buf = local_owned; return; }
+    std::vector<int> counts, displs;
+    compute_gather_layout(n_gridpoints, mpi_size, doubles_per_point, counts, displs);
+    double* recv_ptr = nullptr;
+    if (mpi_rank == 0)
+    {
+        full_buf.assign(n_gridpoints * doubles_per_point, 0.0);
+        recv_ptr = full_buf.data();
+    }
+    MPI_Gatherv(local_owned.data(), local_N * doubles_per_point, MPI_DOUBLE,
+                recv_ptr, counts.data(), displs.data(), MPI_DOUBLE,
+                0, MPI_COMM_WORLD);
+#else
+    (void)doubles_per_point;
+    full_buf = local_owned;
+#endif
+}
+
+void Spacetime::allgather_owned(const std::vector<double>& local_owned,
+                                std::vector<double>& full_buf,
+                                int doubles_per_point) const
+{
+#ifdef USE_MPI
+    if (mpi_size <= 1) { full_buf = local_owned; return; }
+    std::vector<int> counts, displs;
+    compute_gather_layout(n_gridpoints, mpi_size, doubles_per_point, counts, displs);
+    full_buf.assign(n_gridpoints * doubles_per_point, 0.0);
+    MPI_Allgatherv(local_owned.data(), local_N * doubles_per_point, MPI_DOUBLE,
+                   full_buf.data(), counts.data(), displs.data(), MPI_DOUBLE,
+                   MPI_COMM_WORLD);
+#else
+    (void)doubles_per_point;
+    full_buf = local_owned;
+#endif
+}
+
+// Serialize the caller-provided slice's state (and theta) at each rank's owned
+// range, gather to rank 0, and on rank 0 write via a scratch BSSNSlice so the
+// input slice is not mutated anywhere. Non-root ranks participate in the
+// gather and then return.
+void Spacetime::write_checkpoint(BSSNSlice& slice, const std::string& file_name)
+{
+    // 16 doubles per point (theta as 0 when not CCZ4 — but we handle theta
+    // as a separate gather below when CCZ4 is on).
+    constexpr int NCOL = 16;
+    std::vector<double> local(local_N * NCOL);
+    for (int k = 0; k < local_N; ++k)
+    {
+        const int j = owned_begin() + k;
+        double* p = &local[k * NCOL];
+        p[0]  = slice.states2[j].bssn.chi;
+        p[1]  = slice.states2[j].bssn.h_zz;
+        p[2]  = slice.states2[j].bssn.h_ww;
+        p[3]  = slice.states2[j].bssn.A_zz;
+        p[4]  = slice.states2[j].bssn.A_ww;
+        p[5]  = slice.states2[j].bssn.K;
+        p[6]  = slice.states2[j].bssn.c_chris_Z;
+        p[7]  = slice.states2[j].csf.phi_re;
+        p[8]  = slice.states2[j].csf.phi_im;
+        p[9]  = slice.states2[j].csf.K_phi_re;
+        p[10] = slice.states2[j].csf.K_phi_im;
+        p[11] = slice.states2[j].bssn.alpha;
+        p[12] = slice.states2[j].bssn.beta;
+        p[13] = use_CCZ4 ? slice.theta[j] : 0.0;
+        p[14] = slice.states2[j].rsf.psi;
+        p[15] = slice.states2[j].rsf.K_psi;
+    }
+
+    std::vector<double> full;
+    gather_owned_to_root(local, full, NCOL);
+
+    if (mpi_rank != 0) return;
+
+    // Build a scratch slice with the gathered data and write via the
+    // existing BSSNSlice::write_slice formatter to keep the on-disk format
+    // identical to the serial case (so read_checkpoint stays interoperable).
+    BSSNSlice scratch;
+    scratch.R = slice.R;
+    scratch.use_CCZ4 = use_CCZ4;
+    scratch.states2.resize(n_gridpoints);
+    if (use_CCZ4) scratch.theta.resize(n_gridpoints);
+    for (int j = 0; j < n_gridpoints; ++j)
+    {
+        const double* p = &full[j * NCOL];
+        scratch.states2[j].bssn.chi       = p[0];
+        scratch.states2[j].bssn.h_zz      = p[1];
+        scratch.states2[j].bssn.h_ww      = p[2];
+        scratch.states2[j].bssn.A_zz      = p[3];
+        scratch.states2[j].bssn.A_ww      = p[4];
+        scratch.states2[j].bssn.K         = p[5];
+        scratch.states2[j].bssn.c_chris_Z = p[6];
+        scratch.states2[j].csf.phi_re     = p[7];
+        scratch.states2[j].csf.phi_im     = p[8];
+        scratch.states2[j].csf.K_phi_re   = p[9];
+        scratch.states2[j].csf.K_phi_im   = p[10];
+        scratch.states2[j].bssn.alpha     = p[11];
+        scratch.states2[j].bssn.beta      = p[12];
+        if (use_CCZ4) scratch.theta[j]    = p[13];
+        scratch.states2[j].rsf.psi        = p[14];
+        scratch.states2[j].rsf.K_psi      = p[15];
+    }
+    scratch.write_slice(file_name);
+}
+
+// Fill NGHOST ghost slots on each side of this rank's owned range with data
+// from neighboring ranks. Under the replicated-storage model slice.states2
+// (and slice.theta if CCZ4) is sized n_gridpoints on every rank; each rank
+// only *writes* [global_lo, global_hi) but the array is indexed globally, so
+// the neighbor's data lands at global positions:
+//   left ghosts  = [global_lo - NGHOST, global_lo)   from left  neighbor
+//   right ghosts = [global_hi, global_hi + NGHOST)   from right neighbor
+//
+// Wire format per point: NDOF_STATE consecutive doubles laid out as
+//   [BSSNState (9)] [CSF (4)] [RSF (2)]
+// matching the struct member ordering below. Theta is a separate double per
+// point sent in a second message when use_CCZ4 is on.
+//
+// In serial (no USE_MPI, or mpi_size==1) this is a no-op: owns_origin() and
+// owns_outer() are both true so nothing is sent.
+void Spacetime::exchange_ghosts(BSSNSlice& slice)
+{
+#ifdef USE_MPI
+    if (mpi_size <= 1)
+        return;
+
+    // Sanity: the caller must have arrays sized to the full grid.
+    if ((int)slice.states2.size() < n_gridpoints)
+    {
+        cerr << "ERROR (rank " << mpi_rank << "): exchange_ghosts on slice with "
+             << slice.states2.size() << " states2 entries; expected >= "
+             << n_gridpoints << endl;
+        bss_mpi::abort_all(1);
+    }
+    if (use_CCZ4 && (int)slice.theta.size() < n_gridpoints)
+    {
+        cerr << "ERROR (rank " << mpi_rank << "): exchange_ghosts on slice with "
+             << slice.theta.size() << " theta entries; expected >= "
+             << n_gridpoints << endl;
+        bss_mpi::abort_all(1);
+    }
+
+    const int nbuf = NGHOST * NDOF_STATE;
+    std::vector<double> send_left (nbuf);
+    std::vector<double> send_right(nbuf);
+    std::vector<double> recv_left (nbuf);
+    std::vector<double> recv_right(nbuf);
+
+    // Pack the NGHOST owned points nearest each interior boundary.
+    //   Leftmost  owned globals: [global_lo, global_lo + NGHOST)         -> send to left  neighbor
+    //   Rightmost owned globals: [global_hi - NGHOST, global_hi)         -> send to right neighbor
+    auto pack = [&](std::vector<double>& buf, int global_start)
+    {
+        for (int k = 0; k < NGHOST; ++k)
+        {
+            const State& s = slice.states2[global_start + k];
+            double* p = &buf[k * NDOF_STATE];
+            p[0]  = s.bssn.chi;
+            p[1]  = s.bssn.h_zz;
+            p[2]  = s.bssn.h_ww;
+            p[3]  = s.bssn.A_zz;
+            p[4]  = s.bssn.A_ww;
+            p[5]  = s.bssn.K;
+            p[6]  = s.bssn.c_chris_Z;
+            p[7]  = s.bssn.alpha;
+            p[8]  = s.bssn.beta;
+            p[9]  = s.csf.phi_re;
+            p[10] = s.csf.phi_im;
+            p[11] = s.csf.K_phi_re;
+            p[12] = s.csf.K_phi_im;
+            p[13] = s.rsf.psi;
+            p[14] = s.rsf.K_psi;
+        }
+    };
+    auto unpack = [&](const std::vector<double>& buf, int global_start)
+    {
+        for (int k = 0; k < NGHOST; ++k)
+        {
+            State& s = slice.states2[global_start + k];
+            const double* p = &buf[k * NDOF_STATE];
+            s.bssn.chi       = p[0];
+            s.bssn.h_zz      = p[1];
+            s.bssn.h_ww      = p[2];
+            s.bssn.A_zz      = p[3];
+            s.bssn.A_ww      = p[4];
+            s.bssn.K         = p[5];
+            s.bssn.c_chris_Z = p[6];
+            s.bssn.alpha     = p[7];
+            s.bssn.beta      = p[8];
+            s.csf.phi_re     = p[9];
+            s.csf.phi_im     = p[10];
+            s.csf.K_phi_re   = p[11];
+            s.csf.K_phi_im   = p[12];
+            s.rsf.psi        = p[13];
+            s.rsf.K_psi      = p[14];
+        }
+    };
+
+    if (!owns_origin()) pack(send_left,  global_lo);
+    if (!owns_outer())  pack(send_right, global_hi - NGHOST);
+
+    const int left_nbr  = mpi_rank - 1;
+    const int right_nbr = mpi_rank + 1;
+    const int tag_l2r = 100;
+    const int tag_r2l = 101;
+
+    MPI_Request reqs[4];
+    int nreq = 0;
+    if (!owns_origin())
+    {
+        MPI_Irecv(recv_left.data(),  nbuf, MPI_DOUBLE, left_nbr,  tag_l2r, MPI_COMM_WORLD, &reqs[nreq++]);
+        MPI_Isend(send_left.data(),  nbuf, MPI_DOUBLE, left_nbr,  tag_r2l, MPI_COMM_WORLD, &reqs[nreq++]);
+    }
+    if (!owns_outer())
+    {
+        MPI_Irecv(recv_right.data(), nbuf, MPI_DOUBLE, right_nbr, tag_r2l, MPI_COMM_WORLD, &reqs[nreq++]);
+        MPI_Isend(send_right.data(), nbuf, MPI_DOUBLE, right_nbr, tag_l2r, MPI_COMM_WORLD, &reqs[nreq++]);
+    }
+    MPI_Waitall(nreq, reqs, MPI_STATUSES_IGNORE);
+
+    if (!owns_origin()) unpack(recv_left,  global_lo - NGHOST);
+    if (!owns_outer())  unpack(recv_right, global_hi);
+
+    // Theta (CCZ4 only) — separate small message.
+    if (use_CCZ4)
+    {
+        std::vector<double> tsl(NGHOST), tsr(NGHOST), trl(NGHOST), trr(NGHOST);
+        if (!owns_origin())
+            for (int k = 0; k < NGHOST; ++k) tsl[k] = slice.theta[global_lo + k];
+        if (!owns_outer())
+            for (int k = 0; k < NGHOST; ++k) tsr[k] = slice.theta[global_hi - NGHOST + k];
+
+        nreq = 0;
+        if (!owns_origin())
+        {
+            MPI_Irecv(trl.data(), NGHOST, MPI_DOUBLE, left_nbr,  tag_l2r + 2, MPI_COMM_WORLD, &reqs[nreq++]);
+            MPI_Isend(tsl.data(), NGHOST, MPI_DOUBLE, left_nbr,  tag_r2l + 2, MPI_COMM_WORLD, &reqs[nreq++]);
+        }
+        if (!owns_outer())
+        {
+            MPI_Irecv(trr.data(), NGHOST, MPI_DOUBLE, right_nbr, tag_r2l + 2, MPI_COMM_WORLD, &reqs[nreq++]);
+            MPI_Isend(tsr.data(), NGHOST, MPI_DOUBLE, right_nbr, tag_l2r + 2, MPI_COMM_WORLD, &reqs[nreq++]);
+        }
+        MPI_Waitall(nreq, reqs, MPI_STATUSES_IGNORE);
+
+        if (!owns_origin())
+            for (int k = 0; k < NGHOST; ++k) slice.theta[global_lo - NGHOST + k] = trl[k];
+        if (!owns_outer())
+            for (int k = 0; k < NGHOST; ++k) slice.theta[global_hi + k] = trr[k];
+    }
+#else
+    (void)slice;
+#endif
 }
 
 //overloads for addition/ scalar multiplication of BSSNState sets and the slice arrays containing them
@@ -355,6 +678,12 @@ void Spacetime::apply_damping_at_point(int j,
 // Updates rhs.states2 at [last_active_j] and [last_active_j - res_fac]
 void Spacetime::sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slice_ptr)
 {
+    // Sommerfeld BC writes rhs at global indices last_active_j - res_fac and
+    // last_active_j (the outermost 2 active points). Only the rank that owns
+    // the outer edge should apply it.
+    if (!owns_outer())
+        return;
+
     int res_fac = res_fac_outer; //number of points skipped per slot in stencil
 
     // asymptotic states and their derivatives where relevant
@@ -429,7 +758,8 @@ void Spacetime::make_A_traceless(BSSNSlice* slice_ptr)
 {
     double n = D - 2.;
 
-    for (int j = 0; j < n_gridpoints; j++)
+    // MPI: only clamp owned points; ghost values are refreshed by exchange_ghosts.
+    for (int j = owned_begin(); j < owned_end(); j++)
     {
         if (!active_points[j]) //perform no computations on inactive points
             continue;
@@ -1057,7 +1387,10 @@ void Spacetime::compute_auxiliary_quantities(BSSNSlice* slice_ptr, bool derivati
     //double n = D - 2.;
     dr = R / ((double)n_gridpoints - 1.0);
 
-    for (int j = 0; j < n_gridpoints; j++)
+    // MPI: only compute aux at owned points; each rank's aux[] arrays are
+    // therefore only valid in [owned_begin, owned_end). Downstream users
+    // (compute_diagnostics, slice_mass, ...) already restrict their reads.
+    for (int j = owned_begin(); j < owned_end(); j++)
     {
         d_z_chi = d_z(v_chi,j);
         d_z_h_zz = d_z(v_h_zz,j);
@@ -1088,7 +1421,15 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
     int max_ref = (refinement_levels.size() == 0 ) ? 1 : refinement_levels[refinement_levels.size() - 1]; //refinement level at outermost bdry
     const int res_fac_outer = (max_ref > 0) ? (1 << (max_ref - 1)) : 1;
 
-    for (int j = 0; j < n_gridpoints - 2; j++)
+    // MPI: only compute RHS at points this rank owns. Under replicated storage,
+    // rhs.states2 is still sized n_gridpoints; non-owned slots are left zero
+    // (initialized above) and are never read by anyone downstream because the
+    // corresponding rank owns them. The upper bound n_gridpoints - 2 stays
+    // because the last two active gridpoints are set by sommerfeld_BC on the
+    // rank that owns the outer edge.
+    const int j_lo = std::max(owned_begin(), 0);
+    const int j_hi = std::min(owned_end(), n_gridpoints - 2);
+    for (int j = j_lo; j < j_hi; j++)
     {
         if (!active_points[j] || refinement_levels[j] > max_ref - skipped_levels)//perform no calculations and skip on inactive points
             continue;
@@ -1257,7 +1598,9 @@ double Spacetime::slice_mass(BSSNSlice* slice_ptr)
     const double n = D - 2;
     double mass = 0;
 
-    for (int j = 0; j <  0.95 * n_gridpoints - 1; j++)
+    // Owned-range partial sum; global result via bss_mpi::sum.
+    const int j_hi = std::min(owned_end(), (int)(0.95 * n_gridpoints) - 1);
+    for (int j = owned_begin(); j < j_hi; j++)
     {
         if (!active_points[j]) //perform no computations on inactive points
             continue;
@@ -1270,7 +1613,7 @@ double Spacetime::slice_mass(BSSNSlice* slice_ptr)
         else
              mass += -0.125 * pow(M_PI, 0.5 * (D - 3.))  * dr * (Ham[j]- h_ZZ[j] * chi * R_zz[j] - n * h_WW[j] * chi * R_ww[j]) * pow(z, D - 2.) * pow(chi, -1.25 - 0.35 * (D - 4.)) / tgamma(0.5 * (D - 1.));
     }
-    return mass;
+    return bss_mpi::sum(mass);
 }
 
 double Spacetime::slice_charge(BSSNSlice* slice_ptr)
@@ -1278,7 +1621,8 @@ double Spacetime::slice_charge(BSSNSlice* slice_ptr)
     const double n = D - 2;
     double charge = 0;
 
-    for (int j = 0; j <  0.95 * n_gridpoints - 1; j++)
+    const int j_hi = std::min(owned_end(), (int)(0.95 * n_gridpoints) - 1);
+    for (int j = owned_begin(); j < j_hi; j++)
     {
         if (!active_points[j]) //perform no computations on inactive points
             continue;
@@ -1296,7 +1640,7 @@ double Spacetime::slice_charge(BSSNSlice* slice_ptr)
         else
              charge += -4. * pow(M_PI, 0.5 * (D - 1.)) * dr * (phi_re * K_phi_im - phi_im * K_phi_re) * pow(z, n) * pow(chi, 0.5 * (1. - D)) / tgamma(0.5 * (D - 1.));
     }
-    return charge;
+    return bss_mpi::sum(charge);
 }
 
 // Compute energies E_phi (complex scalar) and E_psi (real scalar) by integrating
@@ -1323,9 +1667,12 @@ void Spacetime::compute_scalar_energies(BSSNSlice* slice_ptr)
     double e_phi = 0.0;
     double e_psi = 0.0;
 
-    // Integrate over inner 95% of the grid (to mirror other diagnostics that avoid boundary artifacts)
+    // Integrate over inner 95% of the grid (to mirror other diagnostics that avoid boundary artifacts).
+    // MPI: partial sum over owned range, then bss_mpi::sum below.
     const int Jmax = static_cast<int>(0.95 * N) - 1;
-    for (int j = 0; j < Jmax; ++j)
+    const int j_lo = std::max(owned_begin(), 0);
+    const int j_hi = std::min(owned_end(), Jmax);
+    for (int j = j_lo; j < j_hi; ++j)
     {
         if (!active_points[j])
             continue;
@@ -1354,8 +1701,8 @@ void Spacetime::compute_scalar_energies(BSSNSlice* slice_ptr)
         }
     }
 
-    E_phi = e_phi;
-    E_psi = add_real_field ? e_psi : 0.0;
+    E_phi = bss_mpi::sum(e_phi);
+    E_psi = add_real_field ? bss_mpi::sum(e_psi) : 0.0;
 }
 
 //compute the 4D Ricci scalar at a grid point on the current slice
@@ -1419,10 +1766,18 @@ double Spacetime::get_ah_mass() const
     const int j1 = j0 + 1;
     const double lam = frac_idx - j0;
 
-    const double chi0  = (1.0 - lam) * current_slice_ptr->states2[j0].bssn.chi  + lam * current_slice_ptr->states2[j1].bssn.chi;
-    const double h_ww0 = (1.0 - lam) * current_slice_ptr->states2[j0].bssn.h_ww + lam * current_slice_ptr->states2[j1].bssn.h_ww;
-
-    return 0.5 * std::sqrt(h_ww0 / chi0) * ah_radius;
+    // MPI: only the rank owning j0 has valid state at j0. j1 is either
+    // also owned (j0 not at owned_end - 1) or in that rank's right ghost slot
+    // (populated by exchange_ghosts). Others contribute 0 and we sum-reduce.
+    double contribution = 0.0;
+    const bool own_j0 = (j0 >= global_lo && j0 < global_hi);
+    if (own_j0)
+    {
+        const double chi0  = (1.0 - lam) * current_slice_ptr->states2[j0].bssn.chi  + lam * current_slice_ptr->states2[j1].bssn.chi;
+        const double h_ww0 = (1.0 - lam) * current_slice_ptr->states2[j0].bssn.h_ww + lam * current_slice_ptr->states2[j1].bssn.h_ww;
+        contribution = 0.5 * std::sqrt(h_ww0 / chi0) * ah_radius;
+    }
+    return bss_mpi::sum(contribution);
 }
 
 //computes hamiltonian and momentum constraints and conformal metric determinant
@@ -1434,7 +1789,10 @@ void Spacetime::compute_diagnostics (BSSNSlice* slice_ptr)
     Ham_L2 = 0.;
     Mom_L2 = 0.;
 
-    for (int j = 0; j < n_gridpoints - 2; j++)
+    // Owned-range partial accumulation; global L2 norms combined via bss_mpi::sum below.
+    const int j_lo_d = std::max(owned_begin(), 0);
+    const int j_hi_d = std::min(owned_end(), n_gridpoints - 2);
+    for (int j = j_lo_d; j < j_hi_d; j++)
     {
         if (!active_points[j]) //perform no computations on inactive points
             continue;
@@ -1476,76 +1834,130 @@ void Spacetime::compute_diagnostics (BSSNSlice* slice_ptr)
         }
     }
 
-    //take square root to get L^2 norms; normalize by 16 * pi * central energy density
-    Ham_L2 = sqrt(Ham_L2) / (16. * M_PI * rho0_init);
-    Mom_L2 = sqrt(Mom_L2) / (16. * M_PI * rho0_init);
+    //take square root to get L^2 norms; normalize by 16 * pi * central energy density.
+    // MPI: combine per-rank sums-of-squares before sqrt.
+    Ham_L2 = sqrt(bss_mpi::sum(Ham_L2)) / (16. * M_PI * rho0_init);
+    Mom_L2 = sqrt(bss_mpi::sum(Mom_L2)) / (16. * M_PI * rho0_init);
 }
 
 //writes diagnostic quantities to output file. maybe just make appropriate call to write_slice() instead?
+// MPI: collective. All ranks pack their owned rows; rank 0 gathers and writes.
 void Spacetime:: write_current_slice(std::string file_name)
 {
     const BSSNSlice& s = *current_slice_ptr;
     dr = R / ((double)n_gridpoints - 1.0);
 
-    std::ofstream data_file{file_name};
-
-     if (!data_file)
+    // 16 doubles per point (all state fields; theta packed as 0 if not CCZ4).
+    constexpr int NCOL = 16;
+    std::vector<double> local(local_N * NCOL);
+    for (int k = 0; k < local_N; ++k)
     {
-        cerr << "SliceData.dat could not be opened for writing!\n";
-        exit(1);
+        const int j = owned_begin() + k;
+        double* p = &local[k * NCOL];
+        p[0]  = s.states2[j].bssn.chi;
+        p[1]  = s.states2[j].bssn.h_zz;
+        p[2]  = s.states2[j].bssn.h_ww;
+        p[3]  = s.states2[j].bssn.A_zz;
+        p[4]  = s.states2[j].bssn.A_ww;
+        p[5]  = s.states2[j].bssn.K;
+        p[6]  = s.states2[j].bssn.c_chris_Z;
+        p[7]  = s.states2[j].csf.phi_re;
+        p[8]  = s.states2[j].csf.phi_im;
+        p[9]  = s.states2[j].csf.K_phi_re;
+        p[10] = s.states2[j].csf.K_phi_im;
+        p[11] = s.states2[j].bssn.alpha;
+        p[12] = s.states2[j].bssn.beta;
+        p[13] = use_CCZ4 ? s.theta[j] : 0.0;
+        p[14] = s.states2[j].rsf.psi;
+        p[15] = s.states2[j].rsf.K_psi;
     }
 
-    double theta0 = 0;
+    std::vector<double> full;
+    gather_owned_to_root(local, full, NCOL);
 
-    for (int j = 0; j < n_gridpoints; j++)
+    if (mpi_rank != 0) return;
+
+    std::ofstream data_file{file_name};
+    if (!data_file)
     {
-        if (!active_points[j]) //perform no computations on inactive points
-            continue;
+        cerr << file_name << " could not be opened for writing!\n";
+        bss_mpi::abort_all(1);
+    }
 
-        if (use_CCZ4)
-            theta0 = s.theta[j];
-
-    data_file <<  std::setprecision (16) << (j + grid_offset) * dr << "   " << s.states2[j].bssn.chi << "    " << s.states2[j].bssn.h_zz << "    " << s.states2[j].bssn.h_ww  << "    " << s.states2[j].bssn.A_zz
-        << "   " << s.states2[j].bssn.A_ww << "    " << s.states2[j].bssn.K << "    " << s.states2[j].bssn.c_chris_Z  << "    " << s.states2[j].csf.phi_re << "    " << s.states2[j].csf.phi_im
-        << "   " << s.states2[j].csf.K_phi_re << "    " << s.states2[j].csf.K_phi_im << "    " << s.states2[j].bssn.alpha << "    " << s.states2[j].bssn.beta << "    " << theta0 
-        << "   " << s.states2[j].rsf.psi << "    " << s.states2[j].rsf.K_psi << endl;
+    for (int j = 0; j < n_gridpoints; ++j)
+    {
+        if (!active_points[j]) continue;
+        const double* p = &full[j * NCOL];
+        data_file << std::setprecision(16) << (j + grid_offset) * dr
+                  << "   " << p[0]  << "    " << p[1]  << "    " << p[2]  << "    " << p[3]
+                  << "   " << p[4]  << "    " << p[5]  << "    " << p[6]
+                  << "    " << p[7] << "    " << p[8]  << "   " << p[9]  << "    " << p[10]
+                  << "    " << p[11]<< "    " << p[12] << "    " << p[13]
+                  << "   " << p[14] << "    " << p[15] << endl;
     }
 }
 
 //writes diagnostic quantities to output file
+// MPI: collective. All ranks pack their owned rows into a local buffer and
+// track a local max of ricci_4_matter; the row buffer is gathered to rank 0
+// for writing, and ricci_4_grid_max is set to the global max via MPI_Allreduce.
 void Spacetime:: write_diagnostics(std::string file_name)
 {
     int length = (current_slice_ptr->states2).size();
+    vector<double>& aux_test = rho; // knob: which auxiliary variable to dump
 
-    //stick in desired auxiliary variable here to plot its value in last position
-    vector<double>& aux_test = rho;
+    const double dr_local = R / ((double)length - 1.0);
 
-    double dr = R / ((double)length - 1.0);
+    // 7 doubles per row (skip the `r` column — reconstructed from j on rank 0):
+    //   Ham, Mom_Z, det_h, aux_test, A, ricci_4_val, r4m
+    constexpr int NCOL = 7;
+    std::vector<double> local(local_N * NCOL, 0.0);
+    double local_r4max = 0.0;
+
+    const int j_lo = std::max(owned_begin(), 0);
+    const int j_hi = std::min(owned_end(), length - 2);
+    for (int j = j_lo; j < j_hi; j++)
+    {
+        if (!active_points[j]) continue;
+
+        const double& phi_re = current_slice_ptr->states2[j].csf.phi_re;
+        const double& phi_im = current_slice_ptr->states2[j].csf.phi_im;
+        const double A   = sqrt(phi_re * phi_re + phi_im * phi_im);
+        const double r4m = ricci_4_matter(j);
+        if (r4m > local_r4max) local_r4max = r4m;
+
+        double* p = &local[(j - owned_begin()) * NCOL];
+        p[0] = Ham[j];
+        p[1] = Mom_Z[j];
+        p[2] = det_h[j];
+        p[3] = aux_test[j];
+        p[4] = A;
+        p[5] = ricci_4_val(j);
+        p[6] = r4m;
+    }
+    ricci_4_grid_max = bss_mpi::max(local_r4max);
+
+    std::vector<double> full;
+    gather_owned_to_root(local, full, NCOL);
+
+    if (mpi_rank != 0) return;
+
     std::ofstream data_file{file_name};
-
-     if (!data_file)
+    if (!data_file)
     {
         std::cerr << file_name << " could not be opened for writing!\n";
-        exit(1);
+        bss_mpi::abort_all(1);
     }
 
-    ricci_4_grid_max = 0.0;
-    for (int j = 0; j < length - 2; j++)
+    for (int j = 0; j < length - 2; ++j)
     {
-        if (!active_points[j]) //perform no computations on inactive points
-            continue;
-
-    const double& phi_re = current_slice_ptr->states2[j].csf.phi_re;
-    const double& phi_im = current_slice_ptr->states2[j].csf.phi_im;
-    double A = sqrt(phi_re * phi_re + phi_im * phi_im);
-    double r4m = ricci_4_matter(j);
-    if (r4m > ricci_4_grid_max) ricci_4_grid_max = r4m;
-
-    data_file << std::setprecision (10) <<  (j + grid_offset) * dr << "   " << Ham[j] << "    " << Mom_Z[j]<< "    " << det_h[j]  << "    " << aux_test[j]
-        << "    " << A << "    " << ricci_4_val(j)  << "    " << r4m << endl;  //<< d_zz(v_chi, j) << "    "  << d_zz(v_alpha, j)  << "    " << d_z(v_phi_re,j) << endl;
+        if (!active_points[j]) continue;
+        const double* p = &full[j * NCOL];
+        data_file << std::setprecision(10) << (j + grid_offset) * dr_local
+                  << "   " << p[0] << "    " << p[1] << "    " << p[2]
+                  << "    " << p[3] << "    " << p[4] << "    " << p[5]
+                  << "    " << p[6] << endl;
     }
-
-    //cout << "Wrote diagnostics" << endl;
 }
 
 //read additional parameters from BSparams.par
@@ -1610,6 +2022,7 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "sub_min_time = ", sub_min_time, quiet);
         fill_parameter(current_line, "subcritical_time = ", subcritical_time, quiet);
         fill_parameter(current_line, "do_ah_search = ", do_ah_search, quiet);
+        fill_parameter(current_line, "AH_search_steps = ", AH_search_steps, quiet);
         fill_parameter(current_line, "fill_subcritical = ", fill_subcritical, quiet);
         fill_parameter(current_line, "A_thresh = ", A_thresh, quiet);
         fill_parameter(current_line, "dump_time = ", dump_time, quiet);
@@ -1806,17 +2219,19 @@ void Spacetime::compute_dtK(int time_index)
     BSSNSlice& slice_current = slices[time_index];
     BSSNSlice& slice_last = slices[time_index - 1];
 
-    for (int j = 0; j < n_gridpoints; j++)
+    // MPI: partial sum-of-squares over owned range, then combine.
+    double dtK_local = 0.0;
+    for (int j = owned_begin(); j < owned_end(); j++)
     {
         double z = (j + 0.5) * dr;
 
         if (z < R * (only_BS_violation ? (r_99 / R) : 0.9))
         {
             double local_dtK =  (slice_current.states2[j].bssn.K - slice_last.states2[j].bssn.K ) / dt;
-            dtK_L2 += dr * local_dtK * local_dtK * z * z   * pow(slice_current.states2[j].bssn.chi, -1.5);
+            dtK_local += dr * local_dtK * local_dtK * z * z   * pow(slice_current.states2[j].bssn.chi, -1.5);
         }
     }
-    dtK_L2 = sqrt(dtK_L2);
+    dtK_L2 = sqrt(bss_mpi::sum(dtK_local));
     dtK_L2 = abs(dtK_L2 - 1);
 }
 
@@ -1962,6 +2377,19 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
     if (!refinement_points.empty() && refinement_points[0] <= 0) // disable refinement if sentinel present
         refinement_points.clear();
 
+    // MVP MPI scope: multi-rank runs only support a uniform grid with no
+    // adaptive timestep. The ghost-zone width and load balance change with
+    // refinement, and outer refinement levels get skipped on the last rank
+    // when adaptive_timestep is on; both are out of scope for the first pass.
+    if (mpi_size > 1 && (!refinement_points.empty() || adaptive_timestep))
+    {
+        if (mpi_rank == 0)
+            cerr << "ERROR: MPI multi-rank mode requires a uniform grid: "
+                 << "refinement_points must be empty (or its first entry <= 0) "
+                 << "and adaptive_timestep must be 0." << endl;
+        bss_mpi::abort_all(1);
+    }
+
     if (read_thinshell)
         BS_resolution_factor = 1;
 
@@ -1982,15 +2410,19 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
     //solve BS at higher resolution and read in data to first slice, if not starting in other mode (checkpoint / thinshell read / gaussian start)
     if (BS_resolution_factor > 1 && start_time == 0 && !read_thinshell && !boson_star.gaussian_start)
     {
-        boson_star.n_gridpoints = boson_star.n_gridpoints * BS_resolution_factor - BS_resolution_factor + 1;
-        
-        if (!run_quietly)
-            cout << " \nRe-solving BS at higher resolution with " << boson_star.n_gridpoints <<  endl;
+        if (mpi_rank == 0)
+        {
+            boson_star.n_gridpoints = boson_star.n_gridpoints * BS_resolution_factor - BS_resolution_factor + 1;
 
-        boson_star.solve(1);
-        boson_star.write_field();
-        boson_star.fill_isotropic_arrays();
-        boson_star.write_isotropic();
+            if (!run_quietly)
+                cout << " \nRe-solving BS at higher resolution with " << boson_star.n_gridpoints <<  endl;
+
+            boson_star.solve(1);
+            boson_star.write_field();
+            boson_star.fill_isotropic_arrays();
+            boson_star.write_isotropic();
+        }
+        boson_star.broadcast();
 
         //using higher-res omega seems like an improvement
         omega = boson_star.omega;
@@ -2018,8 +2450,12 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
     //add perturbation to "standard" BS
     if (!read_thinshell && !boson_star.gaussian_start && boson_star.perturb)
     {
-        boson_star.add_perturbation(boson_star.perturb_amp, boson_star.perturb_spread, boson_star.perturb_center);
-        boson_star.fill_given_A(omega);
+        if (mpi_rank == 0)
+        {
+            boson_star.add_perturbation(boson_star.perturb_amp, boson_star.perturb_spread, boson_star.perturb_center);
+            boson_star.fill_given_A(omega);
+        }
+        boson_star.broadcast();
     }
 
     dr = R / (n_gridpoints - 1.0);
@@ -2076,6 +2512,10 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
 
     //NOTE: n_gridpoints and R should not change after this point!!!
 
+    // MPI domain decomposition is computed now, once the grid size is final
+    // (initialize() has already trimmed n_gridpoints twice above).
+    init_domain_decomposition();
+
     //resize all auxiliary/diagnostic arrays as appropriate
     resize_temp_arrays();
 
@@ -2098,11 +2538,14 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
     double charge0 = slice_charge(&slices[0]);
     M = mass0;
 
-    std::ofstream dynamical_file{"dynamical_constants.dat"};
-    dynamical_file << mass0 << "    " << charge0 << "    " << mass0 - mu * charge0;
+    if (mpi_rank == 0)
+    {
+        std::ofstream dynamical_file{"dynamical_constants.dat"};
+        dynamical_file << mass0 << "    " << charge0 << "    " << mass0 - mu * charge0;
 
-    if (!run_quietly)
-        cout << "Dynamical N =" << charge0 << ", M = "  << mass0 << " and binding energy is " << mass0 - mu * charge0  << endl;
+        if (!run_quietly)
+            cout << "Dynamical N =" << charge0 << ", M = "  << mass0 << " and binding energy is " << mass0 - mu * charge0  << endl;
+    }
 }
 
 
@@ -2112,9 +2555,18 @@ void Spacetime::evolve()
     dr = R / (n_gridpoints - 1.0);
     dt = courant_factor * dr;
     if (critical_study) ricci_4_ctr_max = 0.0;
-    
-    if (!run_quietly)
+
+    if (!run_quietly && mpi_rank == 0)
         cout << "dr = " << dr << ", dt = " << dt <<  "   " << endl;
+
+    // MPI: initial slice was populated identically on all ranks (each rank ran
+    // the BosonStar ODE), so slices[0].states2 has valid data at every index and
+    // no exchange_ghosts is strictly needed at t=0. Call it anyway as a
+    // low-cost safety belt in case initial data ever diverges across ranks.
+    exchange_ghosts(slices[0]);
+
+    // AH search is MPI-aware: each rank evaluates ah_indicator on its owned range
+    // (using ghost data at the owned edges) and MPI_Allgathers into a full array.
 
     int num_timesteps = ceil(stop_time / dt);
     int last_checkpoint_time = 0;
@@ -2123,23 +2575,34 @@ void Spacetime::evolve()
     super_ah_radius = 0.0;
     super_M = 0.0;
 
-    //write constraint norms at each timestep to file
-    std::ofstream constraints_file{"constraint_norms.dat"};
-    if (!constraints_file)
+    //write constraint norms at each timestep to file (rank 0 only)
+    std::ofstream constraints_file;
+    if (mpi_rank == 0)
     {
-        std::cerr << "constraint_norms.dat could not be opened for writing!\n";
-        exit(1);
+        constraints_file.open("constraint_norms.dat");
+        if (!constraints_file)
+        {
+            std::cerr << "constraint_norms.dat could not be opened for writing!\n";
+            bss_mpi::abort_all(1);
+        }
+
+        constraints_file << "#time"<< "   " << "Ham_L2"
+                << "   " << "Mom_L2"<<  "   " << "chi_central" << "   "
+                << "A_central" << "   "  << "AH radius" << "   " <<  "M_ADM" << "   "  << "Noether charge"
+                << "   " << "Central dK/dt" << "   " << "freq_central" << "   " << "lapse_central" <<
+                "   " << "complex field energy" << "   " << "real field energy" << "   " << "central 4D ricci scalar" << "   " << "phi_re_central" << "   " << "AH mass" << endl;
     }
 
-    constraints_file << "#time"<< "   " << "Ham_L2" 
-            << "   " << "Mom_L2"<<  "   " << "chi_central" << "   "
-            << "A_central" << "   "  << "AH radius" << "   " <<  "M_ADM" << "   "  << "Noether charge"
-            << "   " << "Central dK/dt" << "   " << "freq_central" << "   " << "lapse_central" <<
-            "   " << "complex field energy" << "   " << "real field energy" << "   " << "central 4D ricci scalar" << "   " << "phi_re_central" << "   " << "AH mass" << endl;
+    // A0 is the initial central field amplitude, used later for migration
+    // detection and the subcritical check. Only rank 0 has states2[0] valid
+    // in the general case; broadcast so all ranks share the same value.
+    double A0 = 0.0;
+    if (owns_origin())
+        A0 = sqrt (pow(slices[0].states2[0].csf.phi_re,2) + pow(slices[0].states2[0].csf.phi_im,2));
+    bss_mpi::bcast_doubles(&A0, 1);
 
-    double A0 = sqrt (pow(slices[0].states2[0].csf.phi_re,2) + pow(slices[0].states2[0].csf.phi_im,2));
-
-    if (!run_quietly) cout <<" \n Will evolve with up to " << num_timesteps << " time steps \n" << endl;
+    if (!run_quietly && mpi_rank == 0)
+        cout <<" \n Will evolve with up to " << num_timesteps << " time steps \n" << endl;
         
     //s_i are returned RHS's, t represents temporary RHS + current_slice quantities that must be stored so derivatives can be accessed
     BSSNSlice s1, s2, s3, s4, t1, t2, t3, update_slice;
@@ -2165,23 +2628,46 @@ void Spacetime::evolve()
 
         //fill out array until we've reached maximum number of stored slices, then update last element + rotate at end.
         int n = (time_step > max_stored_slices - 2) ? (max_stored_slices - 2) : time_step;
-        double phase_ctr, phase_last;
+        double phase_ctr = 0.0, phase_last = 0.0;
         if (time_step > 0) phase_last = phase_ctr;
-        phase_ctr = std::arg( std::complex<double>(slices[n].states2[0].csf.phi_re, slices[n].states2[0].csf.phi_im));
+        // MPI: states2[0] is only valid on rank 0. Compute central-point diagnostics
+        // on rank 0 and broadcast the few scalars other ranks need for control flow.
+        if (owns_origin())
+            phase_ctr = std::arg( std::complex<double>(slices[n].states2[0].csf.phi_re, slices[n].states2[0].csf.phi_im));
 
         double omega_approx = (phase_ctr - phase_last) / dt;
 
         if (omega_approx < -M_PI / dt) omega_approx += 2 * M_PI / dt; //corrects jumps due to branch cuts
-        
-        //double phase_diff= phase_ctr - std::fmod(omega * dt * time_step, M_PI ); //difference between actual and expected phase at center of BS
-        //if (phase_diff < 0.) phase_diff += M_PI;
 
         if (n > 0) compute_dtK(n);
         M = slice_mass(current_slice_ptr); // maybe remove if causes bad bdry oscillations?
 
-        double Ap0 = sqrt (pow(slices[n].states2[0].csf.phi_re,2) + pow(slices[n].states2[0].csf.phi_im,2));
-        double Ap1 = sqrt (pow(slices[n].states2[1].csf.phi_re,2) + pow(slices[n].states2[1].csf.phi_im,2));
-        double A_ctr =  (cell_centered) ? (Ap0- 0.5 * dr * (Ap1 - Ap0)) : Ap0; //just linearly extrapolate to r = 0 when cell-centered
+        // Central-point scalars needed on every rank for control flow.
+        // Layout: [0]=A_ctr, [1]=has_BH_now, [2]=chi_ctr, [3]=alpha_ctr,
+        //         [4]=phi_re_ctr, [5]=phase_ctr, [6]=test_ctr.
+        // (Rank 0 also uses [2..5] to write constraint_norms.dat; the bundle keeps it in one bcast.)
+        double central[7] = {0., 0., 0., 0., 0., 0., 0.};
+        if (owns_origin())
+        {
+            const double Ap0 = sqrt (pow(slices[n].states2[0].csf.phi_re,2) + pow(slices[n].states2[0].csf.phi_im,2));
+            const double Ap1 = sqrt (pow(slices[n].states2[1].csf.phi_re,2) + pow(slices[n].states2[1].csf.phi_im,2));
+            central[0] = (cell_centered) ? (Ap0 - 0.5 * dr * (Ap1 - Ap0)) : Ap0;
+            central[1] = (make_tangherlini || slices[n].states2[0].bssn.chi < 10 * min_chi) ? 1.0 : 0.0;
+            central[2] = slices[n].states2[0].bssn.chi;
+            central[3] = slices[n].states2[0].bssn.alpha;
+            central[4] = slices[n].states2[0].csf.phi_re;
+            central[5] = phase_ctr;
+            central[6] = test_ctr;
+        }
+        bss_mpi::bcast_doubles(central, 7);
+        const double A_ctr        = central[0];
+        const bool   has_BH_now   = (central[1] != 0.0);
+        const double chi_central  = central[2];
+        const double alpha_central= central[3];
+        const double phi_re_ctr   = central[4];
+        phase_ctr                 = central[5];
+        test_ctr                  = central[6];
+
         double ricci_4 = (critical_study ? ricci_4_grid_max : 0.0);
 
         if (critical_study && ricci_4 > ricci_4_ctr_max && t > 10)
@@ -2190,11 +2676,16 @@ void Spacetime::evolve()
         if (time_step % write_CN_interval == 0) //write time-dependent diagnostics to constraint_norms.dat
         {
             compute_scalar_energies(current_slice_ptr);
-            constraints_file << std::setprecision (10) << start_time + dt * time_step << "   " << Ham_L2  
-            << "   " << Mom_L2 <<  "   " << slices[n].states2[0].bssn.chi << "   "
-            << A_ctr << "   "  << ah_radius << "   " <<  M << "   "  << slice_charge(current_slice_ptr)
-            << "   " << dtK_L2 << "   " << omega_approx << "   " << slices[n].states2[0].bssn.alpha <<
-            "   " << E_phi << "   " << E_psi << "   " << ricci_4 << "   " << slices[n].states2[0].csf.phi_re << "   " << get_ah_mass() << endl;
+            const double charge_now = slice_charge(current_slice_ptr);
+            const double ah_mass_now = get_ah_mass(); // 0 on non-owners since ah_radius<0 when AH search is off
+            if (mpi_rank == 0)
+            {
+                constraints_file << std::setprecision (10) << start_time + dt * time_step << "   " << Ham_L2
+                << "   " << Mom_L2 <<  "   " << chi_central << "   "
+                << A_ctr << "   "  << ah_radius << "   " <<  M << "   "  << charge_now
+                << "   " << dtK_L2 << "   " << omega_approx << "   " << alpha_central <<
+                "   " << E_phi << "   " << E_psi << "   " << ricci_4 << "   " << phi_re_ctr << "   " << ah_mass_now << endl;
+            }
         }
 
         slices[n + 1].states2.resize(n_gridpoints);
@@ -2202,34 +2693,39 @@ void Spacetime::evolve()
         slices[n + 1].refinement_points = refinement_points;
         slices[n + 1].active_points = active_points;
 
-        if (make_tangherlini || slices[n].states2[0].bssn.chi < 10 * min_chi)
+        if (has_BH_now)
             slices[n + 1].has_BH = 1;
 
         if (use_CCZ4)
             slices[n + 1].theta.resize(n_gridpoints);
 
-        //evaluate intermediate RK4 quantities
+        //evaluate intermediate RK4 quantities. exchange_ghosts refreshes each
+        //temporary's ghost slots with the corresponding time-shifted values
+        //from neighbors before the next RHS reads them across stencils.
         current_slice_ptr = &slices[n];
 
         s1 = slice_rhs(current_slice_ptr, skipped_levels);
         t1 = slices[n]  + (0.5 * dt) * s1;
+        exchange_ghosts(t1);
 
-        compute_diagnostics(current_slice_ptr); //do this here so current_slice_ptr is in right place and auxiliary quantities computed
+        if (time_step % write_CN_interval == 0)
+            compute_diagnostics(current_slice_ptr);
 
-        current_slice_ptr = &t1; //must update current_slice_ptr before calling slice_rhs or derivatives will not work properly! Should consider better approach...
+        current_slice_ptr = &t1;
         s2 = slice_rhs(current_slice_ptr, skipped_levels);
         t2 = slices[n] + (0.5 * dt) * s2;
+        exchange_ghosts(t2);
 
         current_slice_ptr = &t2;
         s3 = slice_rhs(current_slice_ptr, skipped_levels);
         t3 = slices[n] + dt * s3;
+        exchange_ghosts(t3);
 
         current_slice_ptr = &t3;
         s4 = slice_rhs(current_slice_ptr, skipped_levels);
 
         //update slice
         get_update_slice(s1, s2, s3, s4, update_slice, dt, skipped_levels);
-        //update_slice = (dt / 6.) * (s1 + 2. * s2 + 2. * s3 + s4);
         slices[n + 1] = slices[n] + update_slice;
 
         //enforce that A is traceless
@@ -2237,31 +2733,39 @@ void Spacetime::evolve()
         kill_refinement_noise(); //interpolate over refinement boundary noise before making A traceless-- maybe add at each rk4 stage?
         make_A_traceless(current_slice_ptr);
 
-        //enforce minimum chi
-        for (State& st: slices[n + 1].states2)
-            {if (st.bssn.chi < min_chi) st.bssn.chi = min_chi; }
-        
-        if (do_ah_search)
-        {   
+        //enforce minimum chi on owned points (ghosts get refreshed by exchange_ghosts below)
+        for (int j = owned_begin(); j < owned_end(); j++)
+        {
+            State& st = slices[n + 1].states2[j];
+            if (st.bssn.chi < min_chi) st.bssn.chi = min_chi;
+        }
+
+        // Refresh ghost zones of the freshly-updated slice so next step's RHS
+        // sees consistent-time values across the domain boundary.
+        exchange_ghosts(slices[n + 1]);
+
+        if (do_ah_search && time_step % AH_search_steps == 0)
+        {
             double ah_radius_old = ah_radius;
             ah_radius = apparent_horizon_search(current_slice_ptr);
-            if ( ah_radius_old < 0. && ah_radius > 0. && !critical_study)
+            if ( ah_radius_old < 0. && ah_radius > 0. && !critical_study && mpi_rank == 0)
                 cout << "Apparent horizon found at radius " << ah_radius << " at time " << t + dt << endl;
         }
 
         if (time_step % write_interval == 0)
         {
-            //current_slice_ptr->write_slice();
+            // Both writes are collective (they gather from every rank; rank 0 writes).
             write_current_slice();
             write_diagnostics();
         }
 
-        //write checkpoint files
+        //write checkpoint files (collective: gather to rank 0, rank 0 writes)
         if ((int)std::floor(t) % checkpoint_time == 0 && (int)std::floor(t) > last_checkpoint_time)
         {
-            current_slice_ptr->write_slice("checkpoint" + std::to_string((int)std::floor(t)) + ".dat");
+            write_checkpoint(*current_slice_ptr, "checkpoint" + std::to_string((int)std::floor(t)) + ".dat");
+            if (mpi_rank == 0)
+                cout << "Wrote checkpoint at t = " << (int)std::floor(t) << endl;
             last_checkpoint_time = (int)std::floor(t);
-            cout << "Wrote checkpoint at t = " << last_checkpoint_time << endl;
         }
 
         //write dump files at multiples of dump_time
@@ -2281,14 +2785,19 @@ void Spacetime::evolve()
         if (time_step >= max_stored_slices - 2)
             rotate(slices.begin(), slices.begin() + 1, slices.end());
 
-        if ((time_step + 1) % 10 == 0 && !run_quietly) cout << "Time step " << time_step + 1 << " complete! t = " << t << endl;
+        if ((time_step + 1) % 10 == 0 && !run_quietly && mpi_rank == 0)
+            cout << "Time step " << time_step + 1 << " complete! t = " << t << endl;
 
-        if (isnan(slices[n + 1].states2[0].bssn.chi))
+        // Collective NaN check: any rank sees a NaN in its owned chi -> abort together.
+        bool local_nan = false;
+        for (int j = owned_begin(); j < owned_end() && !local_nan; j++)
+            if (std::isnan(slices[n + 1].states2[j].bssn.chi)) local_nan = true;
+        if (bss_mpi::any(local_nan))
         {
-            cout << "Central chi became nan on step " << time_step << endl;
+            if (mpi_rank == 0) cout << "chi became nan on step " << time_step << endl;
             if (critical_study && (super_detect_time >= 0.0 || ah_radius > 0.))
             {
-                cout << "Horizon was detected before nan appeared; recording run as supercritical." << endl;
+                if (mpi_rank == 0) cout << "Horizon was detected before nan appeared; recording run as supercritical." << endl;
                 if (super_detect_time < 0.0)
                 {
                     critical_state = 1;
@@ -2299,20 +2808,21 @@ void Spacetime::evolve()
                 }
                 break;
             }
-            exit(1);
+            bss_mpi::abort_all(1);
         }
 
         //if stop_on_migrate enabled, exit when central amplitude changes by more than 10%
         if (stop_on_migrate && abs(A0 - test_ctr) > 0.1 * A0)
         {
-            cout << "Migration occurred on time step  " << time_step <<" at time t = " << time_step * dt << endl;
-            exit(1);
+            if (mpi_rank == 0)
+                cout << "Migration occurred on time step  " << time_step <<" at time t = " << time_step * dt << endl;
+            bss_mpi::abort_all(1);
         }
 
         if (critical_study && super_detect_time < 0.0 && (ah_radius > 0. || A_ctr > A_thresh)) //use AH formation or central amplitude as supercritical indicator
         //(critical_study && slices[n + 1].states2[0].bssn.alpha < lapse_thresh)
         {
-            cout << "Supercritical at time " << t << endl;
+            if (mpi_rank == 0) cout << "Supercritical at time " << t << endl;
             critical_state = 1;
             critical_time = t;
             super_detect_time = t;
@@ -2331,7 +2841,7 @@ void Spacetime::evolve()
         //wait some time to avoid initial transients, then use net central amplitude decrease as subcritical indicator
         if (critical_study && super_detect_time < 0.0 && A_ctr < A0 && t > sub_min_time)
         {
-            cout << "Subcritical at time " << t << endl;
+            if (mpi_rank == 0) cout << "Subcritical at time " << t << endl;
             critical_state = 0;
             critical_time = t;
             break;
@@ -2342,7 +2852,7 @@ void Spacetime::evolve()
         {
             if (ah_radius < 0.0)
             {
-                cout << "Subcritical by time criterion at time " << t << endl;
+                if (mpi_rank == 0) cout << "Subcritical by time criterion at time " << t << endl;
                 critical_state = 0;
                 critical_time = t;
                 break;
@@ -2511,6 +3021,10 @@ double Spacetime::ah_indicator_at(const BSSNSlice* slice_ptr, int j)
 }
 
 // Scan slice for sign changes of the AH indicator and return outermost root radius. Returns -1.0 if no AH is found.
+// MPI: each rank evaluates the indicator on its owned range (using ghost data
+// for derivative stencils at the owned edges), Allgatherv assembles a full
+// indicator array on every rank, and every rank walks the same array so the
+// returned radius is identical across ranks with no follow-up broadcast needed.
 double Spacetime::apparent_horizon_search(const BSSNSlice* slice_ptr)
 {
     if (slice_ptr == nullptr || slice_ptr->states2.empty())
@@ -2520,14 +3034,29 @@ double Spacetime::apparent_horizon_search(const BSSNSlice* slice_ptr)
     const double dr_local = slice_ptr->R / (static_cast<double>(N) - 1.0);
     const double offset = 0.5 * static_cast<double>(cell_centered); // match grid_offset convention
 
+    // Build a full-grid indicator array. In serial we compute it inline via the
+    // usual walk; under MPI each rank computes its owned slice and Allgathers.
+    std::vector<double> full;
+    if (mpi_size > 1)
+    {
+        std::vector<double> local(local_N);
+        for (int k = 0; k < local_N; ++k)
+            local[k] = ah_indicator_at(slice_ptr, owned_begin() + k);
+        allgather_owned(local, full, 1);
+    }
+
+    auto f_at = [&](int j) -> double {
+        return (mpi_size > 1) ? full[j] : ah_indicator_at(slice_ptr, j);
+    };
+
     double outermost_r = -1.0;
 
-    double f_prev = ah_indicator_at(slice_ptr, 0);
+    double f_prev = f_at(0);
     double r_prev = (0 + offset) * dr_local;
 
     for (int j = 1; j < N; ++j)
     {
-        double f_curr = ah_indicator_at(slice_ptr, j);
+        double f_curr = f_at(j);
         double r_curr = (j + offset) * dr_local;
 
         // Exact zero at a node counts as a root

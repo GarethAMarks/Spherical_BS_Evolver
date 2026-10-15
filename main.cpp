@@ -9,6 +9,7 @@
 #include "EvolutionVariables.h"
 #include "LinearPerturbation.h"
 #include "mathutils.h"
+#include "mpi_helpers.h"
 #include <iomanip>
 
 
@@ -18,19 +19,26 @@ void slice_convergence_test (BSSNSlice& sl, BSSNSlice& sm, BSSNSlice& sh);
 void gauss_initialize(BosonStar& boson_star);
 void compute_linear_perturbation(BosonStar& boson_star, double A0, double dA, double n_stars);
 
-int main()
+int main(int argc, char** argv)
 {
+    bss_mpi::init(&argc, &argv);
+    const int mpi_rank = bss_mpi::rank();
+
     //construct initial BS solution
     BosonStar boson_star{};
     boson_star.read_parameters();
 
-    boson_star.solve();
-    if (boson_star.isotropic)
+    if (mpi_rank == 0)
     {
-        boson_star.fill_isotropic_arrays();
-        boson_star.write_isotropic();
+        boson_star.solve();
+        if (boson_star.isotropic)
+        {
+            boson_star.fill_isotropic_arrays();
+            boson_star.write_isotropic();
+        }
+        boson_star.write_field();
     }
-    boson_star.write_field();
+    boson_star.broadcast();
 
     if (boson_star.gaussian_start)
         gauss_initialize(boson_star);
@@ -44,7 +52,10 @@ int main()
     {
         Spacetime st{};
         st.initialize(boson_star);
-        st.slices[0].write_slice();
+        // MPI: both writes are collective (all ranks gather; rank 0 writes).
+        // Using write_current_slice instead of slices[0].write_slice() so ranks
+        // don't all try to open the same file simultaneously.
+        st.write_current_slice();
         st.write_diagnostics();
         
         if (st.critical_study)
@@ -64,14 +75,20 @@ int main()
         else
             st.evolve();
     }
-    cout <<  "c4 = " << boson_star.get_c4() << endl; 
-    cout << "Ending..."  << endl;
+    if (mpi_rank == 0)
+    {
+        cout <<  "c4 = " << boson_star.get_c4() << endl;
+        cout << "Ending..."  << endl;
+    }
+    bss_mpi::finalize();
     return 0;
 }
 
 void gauss_initialize(BosonStar& boson_star)
 {
-    std::ofstream nm_file{"mass_charge.dat"};
+    const int mpi_rank = bss_mpi::rank();
+    std::ofstream nm_file;
+    if (mpi_rank == 0) nm_file.open("mass_charge.dat");
 
     int num_gaussians = 1; //change this to produce a gaussian model cycle to explore 1-parameter families
     double step = 0.0001;
@@ -94,10 +111,14 @@ void gauss_initialize(BosonStar& boson_star)
 
         Spacetime st_gauss{};
         st_gauss.initialize(boson_star);
-        st_gauss.slices[0].write_slice();
+        st_gauss.write_current_slice();
         st_gauss.write_diagnostics();
 
-        nm_file << st_gauss.slice_mass(&st_gauss.slices[0]) << "    " << st_gauss.slice_charge(&st_gauss.slices[0]) <<  "    " <<  step_var << endl;
+        // slice_mass / slice_charge are collective (Allreduce); nm_file write is rank-0-only.
+        const double m_local = st_gauss.slice_mass(&st_gauss.slices[0]);
+        const double q_local = st_gauss.slice_charge(&st_gauss.slices[0]);
+        if (mpi_rank == 0)
+            nm_file << m_local << "    " << q_local <<  "    " <<  step_var << endl;
 
         step_var += step;
         }
