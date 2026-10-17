@@ -6,6 +6,7 @@
 #include <math.h>
 #include <sstream>
 #include "BosonStar.h"
+#include "ProcaStar.h"
 #include "EvolutionVariables.h"
 #include "LinearPerturbation.h"
 #include "mathutils.h"
@@ -18,11 +19,21 @@ using namespace std;
 void slice_convergence_test (BSSNSlice& sl, BSSNSlice& sm, BSSNSlice& sh);
 void gauss_initialize(BosonStar& boson_star);
 void compute_linear_perturbation(BosonStar& boson_star, double A0, double dA, double n_stars);
+bool read_proca_flag();
+int run_proca_star();
 
 int main(int argc, char** argv)
 {
     bss_mpi::init(&argc, &argv);
     const int mpi_rank = bss_mpi::rank();
+
+    //if proca = 1 in BSParams.par, construct Proca stars instead of boson stars
+    if (read_proca_flag())
+    {
+        int status = run_proca_star();
+        bss_mpi::finalize();
+        return status;
+    }
 
     //construct initial BS solution
     BosonStar boson_star{};
@@ -81,6 +92,55 @@ int main(int argc, char** argv)
         cout << "Ending..."  << endl;
     }
     bss_mpi::finalize();
+    return 0;
+}
+
+//reads the proca flag from BSParams.par (defaults to 0 if absent)
+bool read_proca_flag()
+{
+    bool proca = 0;
+    ifstream params{ "BSParams.par" };
+    string current_line{};
+
+    while (getline(params, current_line))
+        fill_parameter(current_line, "proca = ", proca, 1);
+
+    return proca;
+}
+
+//constructs a Proca star (or a family of them if cycle_only = 1). Evolution and linear perturbations are not yet implemented for Proca stars.
+int run_proca_star()
+{
+    const int mpi_rank = bss_mpi::rank();
+
+    ProcaStar proca_star{};
+    proca_star.read_parameters();
+
+    if (mpi_rank == 0)
+    {
+        proca_star.solve();
+        if (proca_star.isotropic)
+        {
+            proca_star.fill_isotropic_arrays();
+            proca_star.write_isotropic();
+        }
+        proca_star.write_field();
+    }
+    proca_star.broadcast();
+
+    if (proca_star.cycle_only)
+    {
+        if (mpi_rank == 0)
+            proca_star.cycle_models(proca_star.n_stars, proca_star.A0, proca_star.dA);
+    }
+    else if (mpi_rank == 0)
+        cout << "NOTE: evolution and linear perturbations are not yet implemented for Proca stars; only the initial model was constructed (PSdata.dat)." << endl;
+
+    if (mpi_rank == 0)
+    {
+        cout <<  "c4 = " << proca_star.get_c4() << endl;
+        cout << "Ending..."  << endl;
+    }
     return 0;
 }
 

@@ -1,4 +1,5 @@
 #BS params
+proca = 0 #if 1, construct Proca stars (ProcaStar) instead of boson stars; only model construction/cycling is implemented
 D = 4
 mu = 1.0
 lambda = 0

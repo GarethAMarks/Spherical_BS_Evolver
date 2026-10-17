@@ -18,6 +18,16 @@ bash make_BSEvolver_gcc.sh
 
 The executable must be run in the same directory as `BSParams.par`.
 
+### Proca stars
+
+Setting `proca = 1` uses the `ProcaStar` class, which reads the same model parameters as the boson star. Differences in meaning:
+
+- `A_central` is `f(0)/alpha(0) = sqrt(-A_a Abar^a)` at the centre, for the vector potential `A = e^{-i omega t}(f dt + i g dr)`.
+- `eigen` counts nodes of `g` (equivalently `E = f' - omega g`); the ground state has nodeless `g` and a single node in `f`.
+- The potential family (`mu`, `lambda`, `solitonic`, `sigma`) is the same, as a function of `A_a Abar^a` in place of `|phi|^2`. With self-interactions, solutions can fail where the algebraic equation for `g` loses its root; this is reported as a warning.
+
+Outputs are `PSdata.dat` (`r f g X phi E m`), `isotropic_proca.dat` if `isotropic = 1`, and `ProcaStars.dat` in `cycle_only` mode, with the same columns as `BosonStars.dat` plus `f0`, the value of `f(0)` with `alpha(infinity) = 1`.
+
 ---
 
 ## Output files
@@ -41,6 +51,7 @@ The executable must be run in the same directory as `BSParams.par`.
 
 | Parameter | Default | Description |
 |---|---|---|
+| `proca` | `0` | Construct Proca stars instead of boson stars (see below); only single-model construction and `cycle_only` family sweeps are implemented |
 | `D` | `4` | Spacetime dimension |
 | `mu` | `1.0` | Scalar field mass |
 | `lambda` | `0` | Quartic self-coupling coefficient |
