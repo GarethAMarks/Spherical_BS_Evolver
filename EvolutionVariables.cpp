@@ -1844,9 +1844,9 @@ double Spacetime::slice_mass(BSSNSlice* slice_ptr)
     const double& chi = slice_ptr->states2[j].bssn.chi;
 
         if (D == 4.)
-            mass += -0.25 * dr * (Ham[j]- h_ZZ[j] * chi * R_zz[j] - n * h_WW[j] * chi * R_ww[j]) * z * z * pow(chi, -1.25) ; //-1.25 is spurious! Still haven't figured out why this works...
+            mass += -0.25 * quad_weights[j] * (Ham[j]- h_ZZ[j] * chi * R_zz[j] - n * h_WW[j] * chi * R_ww[j]) * z * z * pow(chi, -1.25) ; //-1.25 is spurious! Still haven't figured out why this works...
         else
-             mass += -0.125 * pow(M_PI, 0.5 * (D - 3.))  * dr * (Ham[j]- h_ZZ[j] * chi * R_zz[j] - n * h_WW[j] * chi * R_ww[j]) * pow(z, D - 2.) * pow(chi, -1.25 - 0.35 * (D - 4.)) / tgamma(0.5 * (D - 1.));
+             mass += -0.125 * pow(M_PI, 0.5 * (D - 3.))  * quad_weights[j] * (Ham[j]- h_ZZ[j] * chi * R_zz[j] - n * h_WW[j] * chi * R_ww[j]) * pow(z, D - 2.) * pow(chi, -1.25 - 0.35 * (D - 4.)) / tgamma(0.5 * (D - 1.));
     }
     return bss_mpi::sum(mass);
 }
@@ -1873,12 +1873,12 @@ double Spacetime::slice_charge(BSSNSlice* slice_ptr)
         if (proca) // Omega_{D-2} * charge density * sqrt(gamma) z^{D-2}, with sqrt(gamma) = chi^{(1-D)/2} as below
         {
             const double sphere_area = 2. * pow(M_PI, 0.5 * (D - 1.)) / tgamma(0.5 * (D - 1.));
-            charge += sphere_area * dr * cvf_model.charge_density(slice_ptr->states2[j].cvf) * pow(z, n) * pow(chi, 0.5 * (1. - D));
+            charge += sphere_area * quad_weights[j] * cvf_model.charge_density(slice_ptr->states2[j].cvf) * pow(z, n) * pow(chi, 0.5 * (1. - D));
         }
         else if (D == 4.)
-            charge += -8. * M_PI  * dr * (phi_re * K_phi_im - phi_im * K_phi_re) * z * z * pow(chi, -1.5);
+            charge += -8. * M_PI  * quad_weights[j] * (phi_re * K_phi_im - phi_im * K_phi_re) * z * z * pow(chi, -1.5);
         else
-             charge += -4. * pow(M_PI, 0.5 * (D - 1.)) * dr * (phi_re * K_phi_im - phi_im * K_phi_re) * pow(z, n) * pow(chi, 0.5 * (1. - D)) / tgamma(0.5 * (D - 1.));
+             charge += -4. * pow(M_PI, 0.5 * (D - 1.)) * quad_weights[j] * (phi_re * K_phi_im - phi_im * K_phi_re) * pow(z, n) * pow(chi, 0.5 * (1. - D)) / tgamma(0.5 * (D - 1.));
     }
     return bss_mpi::sum(charge);
 }
@@ -1925,7 +1925,7 @@ void Spacetime::compute_scalar_energies(BSSNSlice* slice_ptr)
         if (proca)
         {
             const double rho_A = cvf_model.rho(slice_ptr->states2[j].cvf, bssn);
-            e_phi += dr_local * sphere_area * rho_A * std::pow(z, D - 2.) * std::pow(chi, 0.5 * (1.0 - D));
+            e_phi += quad_weights[j] * sphere_area * rho_A * std::pow(z, D - 2.) * std::pow(chi, 0.5 * (1.0 - D));
         }
         // Complex scalar field contribution
         else
@@ -1934,7 +1934,7 @@ void Spacetime::compute_scalar_energies(BSSNSlice* slice_ptr)
             const CSF d_z_csf{slice_ptr->d_z(v_phi_re, j), slice_ptr->d_z(v_phi_im, j), 0.0, 0.0};
             const CSF d_zz_csf{0.0, 0.0, 0.0, 0.0};
             const double rho_phi = csf_model.rho(csf, bssn, d_z_csf, d_zz_csf);
-            e_phi += dr_local * sphere_area * rho_phi * std::pow(z, D - 2.) * std::pow(chi, 0.5 * (1.0 - D));
+            e_phi += quad_weights[j] * sphere_area * rho_phi * std::pow(z, D - 2.) * std::pow(chi, 0.5 * (1.0 - D));
         }
 
         // Real scalar field (optional)
@@ -1944,7 +1944,7 @@ void Spacetime::compute_scalar_energies(BSSNSlice* slice_ptr)
             const RSF d_z_rsf{slice_ptr->d_z(v_psi, j), slice_ptr->d_z(v_K_psi, j)};
             const RSF d_zz_rsf{0.0, 0.0};
             const double rho_psi = rsf_model.rho(rsf, bssn, d_z_rsf, d_zz_rsf);
-            e_psi += dr_local * sphere_area * rho_psi * std::pow(z, D - 2.) * std::pow(chi, 0.5 * (1.0 - D));
+            e_psi += quad_weights[j] * sphere_area * rho_psi * std::pow(z, D - 2.) * std::pow(chi, 0.5 * (1.0 - D));
         }
     }
 
@@ -2077,8 +2077,8 @@ void Spacetime::compute_diagnostics (BSSNSlice* slice_ptr)
         //violation being dominated by non-propagating boundary noise/ BH center spike.
        if (z > start_val && z < end_val)
         {
-            Ham_L2 += dr * Ham[j] * Ham[j] * pow(z, D - 2.) * pow(chi, (1. - D) / 2.);
-            Mom_L2 += dr * Mom_Z[j] * Mom_Z[j] * pow(z, D - 2.) * pow(chi, (1. - D) / 2.);
+            Ham_L2 += quad_weights[j] * Ham[j] * Ham[j] * pow(z, D - 2.) * pow(chi, (1. - D) / 2.);
+            Mom_L2 += quad_weights[j] * Mom_Z[j] * Mom_Z[j] * pow(z, D - 2.) * pow(chi, (1. - D) / 2.);
         }
 
         if (proca)
@@ -2094,7 +2094,7 @@ void Spacetime::compute_diagnostics (BSSNSlice* slice_ptr)
 
             if (z > start_val && z < end_val)
             {
-                const double w = dr * pow(z, D - 2.) * pow(chi, (1. - D) / 2.);
+                const double w = quad_weights[j] * pow(z, D - 2.) * pow(chi, (1. - D) / 2.);
                 gauss_sq += w * Gauss[j] * Gauss[j];
                 gauss_ref_sq += w * pow(mu, 4) * (v.Xphi_re * v.Xphi_re + v.Xphi_im * v.Xphi_im);
             }
@@ -2506,12 +2506,15 @@ void Spacetime::compute_dtK(int time_index)
     double dtK_local = 0.0;
     for (int j = owned_begin(); j < owned_end(); j++)
     {
+        if (!active_points[j]) //inactive points are never updated
+            continue;
+
         double z = (j + 0.5) * dr;
 
         if (z < R * (only_BS_violation ? (r_99 / R) : 0.9))
         {
             double local_dtK =  (slice_current.states2[j].bssn.K - slice_last.states2[j].bssn.K ) / dt;
-            dtK_local += dr * local_dtK * local_dtK * z * z   * pow(slice_current.states2[j].bssn.chi, -1.5);
+            dtK_local += quad_weights[j] * local_dtK * local_dtK * z * z   * pow(slice_current.states2[j].bssn.chi, -1.5);
         }
     }
     dtK_L2 = sqrt(bss_mpi::sum(dtK_local));
@@ -2564,6 +2567,36 @@ void Spacetime::resize_temp_arrays()
     last_active_j = n_gridpoints - 1; //find last active gridpoint
     while (!active_points[last_active_j])
         last_active_j--;
+
+    fill_quad_weights();
+}
+
+//radial quadrature weights for integrals over the slice (masses, charges, energies, constraint norms). With mesh
+//refinement only every 2^(level-1)-th point is active, so each active point j is weighted by half the distance
+//between its active neighbours, dr * (j_next - j_prev) / 2 (the origin is mirrored, j_prev = -1, and the last active
+//point uses its inner spacing). Inactive points get weight 0. On a uniform grid every weight is exactly dr.
+void Spacetime::fill_quad_weights()
+{
+    quad_weights.assign(n_gridpoints, 0.);
+
+    for (int j = 0; j < n_gridpoints; j++)
+    {
+        if (!active_points[j])
+            continue;
+
+        int prev = j - 1;
+        while (prev >= 0 && !active_points[prev])
+            prev--;
+
+        int next = j + 1;
+        while (next < n_gridpoints && !active_points[next])
+            next++;
+
+        if (next >= n_gridpoints) //last active point
+            next = j + (j - prev);
+
+        quad_weights[j] = 0.5 * (next - prev) * dr;
+    }
 }
 
 //add perturbation directly to spacetime field profile, thus skipping BS step

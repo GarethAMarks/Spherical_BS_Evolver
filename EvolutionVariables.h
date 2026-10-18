@@ -247,6 +247,8 @@ class Spacetime
         std::vector<double>  A0_values; // if store_A0 true will hold an array of central field amplitudes
         std::vector<int> refinement_points; //points at which refinement should be halved
         std::vector<bool> active_points; //determines whether each point needs to be updated; 1 if active 0 if not
+        std::vector<double> quad_weights; //radial quadrature weight of each gridpoint: dr * (local spacing of active points), 0 if inactive
+        void fill_quad_weights();
 
         std::vector<int> refinement_levels; //lists the refinement levels of each point.
 
