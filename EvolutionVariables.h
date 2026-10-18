@@ -8,6 +8,8 @@
 #include "BosonStar.h"
 #include "ComplexScalarField.h" // for CSF in composite State
 #include "RealScalarField.h"   // for RSF in composite State
+#include "ComplexVectorField.h" // for CVF in composite State
+#include "ProcaStar.h"
 
 class ComplexScalarField; // forward declaration for friendship
 
@@ -29,7 +31,15 @@ enum bssn_var
     v_beta,
     v_theta, //this isn't a BSSN var (CCZ4), but added for derivatives.
     v_psi,
-    v_K_psi
+    v_K_psi,
+    v_X_re, //Proca variables (ComplexVectorField): X_z, E^z (odd in z), X_phi, Z (even in z)
+    v_X_im,
+    v_E_re,
+    v_E_im,
+    v_Xphi_re,
+    v_Xphi_im,
+    v_Z_re,
+    v_Z_im
 };
 
 //a set of BSSN evolution variables at a point in spacetime
@@ -53,6 +63,7 @@ struct State {
     CSF csf;         // complex scalar field variables
     BSSNState bssn;  // geometric and gauge variables
     RSF rsf;        // real scalar field variables if enabled
+    CVF cvf;        // complex vector (Proca) field variables if enabled
 };
 
 //the BSSN variables, along with some auxiliary quantities, on a single time slice.
@@ -75,8 +86,9 @@ class BSSNSlice
         std::vector<int> refinement_points; //points at which refinement should be halved; to be copied from spacetime version at start of each step
 
         void read_BS_data(BosonStar& boson_star,int BS_resolution_factor = 1., bool isotropic = 1, bool cell_centered = 0);
-        void read_checkpoint(int time, int n_gridpoints);
-        void write_slice( std::string file_name = "SliceData.dat");
+        void read_PS_data(ProcaStar& proca_star, int BS_resolution_factor = 1, bool isotropic = 1, bool cell_centered = 0);
+        void read_checkpoint(int time, int n_gridpoints, bool read_cvf = 0);
+        void write_slice( std::string file_name = "SliceData.dat", bool write_cvf = 0);
 
         int get_refinement_level(int j, std::vector<int>& refinement_points);
         std::vector<bool> active_points; //for now just give each slice a copy of the active_points array; can probably be optimized
@@ -106,6 +118,7 @@ class Spacetime
 
         
         void initialize(BosonStar& boson_star, bool skip_read = false);// If skip_read is true, do not read BSParams.par again (use existing in-memory settings).
+        void initialize(ProcaStar& proca_star, bool skip_read = false);// as above, evolving a Proca star with ComplexVectorField matter
         void write_diagnostics(std::string file_name = "Diagnostics.dat");
         void evolve();
         void write_current_slice( std::string file_name = "SliceData.dat");
@@ -156,10 +169,23 @@ class Spacetime
     private:
         friend class ComplexScalarField; // allow matter models to access potential V, dV
         friend class RealScalarField;    // allow RSF to access spacetime internals (e.g., D, min_z)
+        friend class ComplexVectorField; // allow CVF to access spacetime internals (e.g., D, min_z, mu, proca_damping)
 
         // Matter model instances reused across evaluations to avoid per-point construction
         ComplexScalarField csf_model;
         RealScalarField    rsf_model;
+        ComplexVectorField cvf_model;
+
+        bool proca = false;          // if true, matter is a complex Proca field (ComplexVectorField) instead of the complex scalar
+        double proca_damping = 1.0;  // kappa in the Gauss-constraint damping equation d_t Z = alpha (C - kappa Z) + ...
+        std::vector<double> Gauss;   // |Gauss constraint| D_i E^i + mu^2 X_phi on current slice (Proca only)
+        double Gauss_L2 = 0.;        // its L2 norm, normalised like Ham_L2
+
+        // pieces of initialize() shared between boson star and Proca star initial data
+        void setup_before_reading(bool skip_read);
+        void setup_after_reading();
+        double central_amplitude(const BSSNSlice& slice, int j) const; // |phi| (scalar) or |X_phi| (Proca) at index j
+        double central_phase(const BSSNSlice& slice, int j) const;     // arg(phi) or arg(X_phi)
         BSSNSlice* current_slice_ptr; //pointer to current slice, updated on each time step
         
         double D;
@@ -268,10 +294,10 @@ class Spacetime
 
         void init_domain_decomposition(); // sets rank/size/local_N/global_lo/global_hi
 
-        // Number of doubles per gridpoint on the wire: 9 BSSN + 4 CSF + 2 RSF
-        // (RSF is always packed for simplicity; cheap). Theta (CCZ4) is
+        // Number of doubles per gridpoint on the wire: 9 BSSN + 4 CSF + 2 RSF + 8 CVF
+        // (RSF and CVF are always packed for simplicity; cheap). Theta (CCZ4) is
         // exchanged as a separate message when use_CCZ4 is on.
-        static constexpr int NDOF_STATE = 9 + 4 + 2;
+        static constexpr int NDOF_STATE = 9 + 4 + 2 + 8;
 
         // Fill left/right NGHOST ghost slots of slice.states2 (and slice.theta
         // when use_CCZ4) with owned data from the left/right neighbor.

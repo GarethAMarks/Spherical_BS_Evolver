@@ -90,6 +90,8 @@ void ProcaStar::read_parameters(bool quiet, string filename)
 
         fill_parameter(current_line, "R = ", R, quiet);
         fill_parameter(current_line, "n_gridpoints = ", n_gridpoints, quiet);
+        fill_parameter(current_line, "courant_factor = ", courant_factor, quiet);
+        fill_parameter(current_line, "stop_time = ", stop_time, quiet);
 
         fill_parameter(current_line, "cycle_only = ", cycle_only, quiet);
         fill_parameter(current_line, "A0 = ", A0, quiet);
@@ -696,7 +698,8 @@ double ProcaStar::r_areal(int j_iso)
 }
 
 //fill out arrays for radius, vector components, and conformal factor in isotropic coordinates. Must have solved PS model first!
-//f = A_t is unchanged by the radial relabelling; the radial component transforms as A_R = g dr/dR = g psi^2 / X.
+//f = A_t is unchanged by the radial relabelling; the radial components transform as A_R = g dr/dR = g psi^2 / X and
+//F_{Rt} = E dr/dR = E psi^2 / X.
 void ProcaStar::fill_isotropic_arrays()
 {
     double dr = R / (n_gridpoints - 1);
@@ -716,6 +719,7 @@ void ProcaStar::fill_isotropic_arrays()
     phi_iso_array.resize(n_gridpoints);
     f_iso_array.resize(n_gridpoints);
     g_iso_array.resize(n_gridpoints);
+    E_iso_array.resize(n_gridpoints);
 
     r_iso_array[0] = 0;
 
@@ -750,7 +754,7 @@ void ProcaStar::fill_isotropic_arrays()
         int j_areal_low = floor(r_areal_array[j] / dr);
         int j_areal_high = ceil (r_areal_array[j] / dr);
 
-        double f, X_val, g_val;
+        double f, X_val, g_val, E_val;
 
         //cubic interpolation where we won't go OOB in radial array
         if (j_areal_high <= n_gridpoints - 1)
@@ -760,6 +764,7 @@ void ProcaStar::fill_isotropic_arrays()
             phi_iso_array[j] = cubic_interp(r_areal_array[j], state[j0].phi, state[j0 + 1].phi, state[j0 + 2].phi, state[j0 + 3].phi, j0, dr );
             f_iso_array[j] = cubic_interp(r_areal_array[j], state[j0].f, state[j0 + 1].f, state[j0 + 2].f, state[j0 + 3].f, j0, dr );
             g_val = cubic_interp(r_areal_array[j], g_array[j0], g_array[j0 + 1], g_array[j0 + 2], g_array[j0 + 3], j0, dr );
+            E_val = cubic_interp(r_areal_array[j], state[j0].E, state[j0 + 1].E, state[j0 + 2].E, state[j0 + 3].E, j0, dr );
             X_val = cubic_interp(r_areal_array[j], state[j0].X, state[j0 + 1].X, state[j0 + 2].X, state[j0 + 3].X, j0, dr );
             f = cubic_interp(r_areal_array[j], f_array[j0], f_array[j0 + 1], f_array[j0 + 2], f_array[j0 + 3], j0, dr );
         }
@@ -771,6 +776,7 @@ void ProcaStar::fill_isotropic_arrays()
             phi_iso_array[j] = state[N - 1].phi  + dR * (state[N - 1].phi - state[N - 2].phi ) / dr;
             f_iso_array[j] = state[N - 1].f  + dR * (state[N - 1].f - state[N - 2].f ) / dr;
             g_val = g_array[N - 1]  + dR * (g_array[N - 1] - g_array[N - 2] ) / dr;
+            E_val = state[N - 1].E  + dR * (state[N - 1].E - state[N - 2].E ) / dr;
             X_val = state[N - 1].X  + dR * (state[N - 1].X - state[N - 2].X ) / dr;
             f = f_array[N - 1]  + dR * (f_array[N - 1] - f_array[N - 2] ) / dr;
         }
@@ -789,6 +795,7 @@ void ProcaStar::fill_isotropic_arrays()
         //psi is simply 1 / sqrt(f)
         psi_iso_array[j] = 1. / sqrt(f);
         g_iso_array[j] = g_val * psi_iso_array[j] * psi_iso_array[j] / X_val;
+        E_iso_array[j] = E_val * psi_iso_array[j] * psi_iso_array[j] / X_val;
     }
 }
 
@@ -804,7 +811,7 @@ void ProcaStar::write_isotropic()
         exit(1);
     }
 
-    data_file << "# r r_iso r_areal psi_iso f_iso g_iso phi_iso phi_lap X_lap\n";
+    data_file << "# r r_iso r_areal psi_iso f_iso g_iso phi_iso phi_lap X_lap E_iso\n";
 
     for (int j = 1; j < n_gridpoints - 1; j++)
     {
@@ -812,7 +819,7 @@ void ProcaStar::write_isotropic()
         double X_lap = (-2. * state[j].X + state[j - 1].X + state[j + 1].X ) / (dr * dr);
 
         data_file << std::setprecision (10) << radius_array[j] << "   " << r_iso_array[j] << "    " << r_areal(j) << "    " << psi_iso_array[j]  <<  "    "
-        << f_iso_array[j] << "    " << g_iso_array[j] << "    " << phi_iso_array[j] << "    " << phi_lap <<  "    " << X_lap << std::endl;
+        << f_iso_array[j] << "    " << g_iso_array[j] << "    " << phi_iso_array[j] << "    " << phi_lap <<  "    " << X_lap << "    " << E_iso_array[j] << std::endl;
     }
 }
 
@@ -859,11 +866,13 @@ void ProcaStar::broadcast()
 {
 #ifdef USE_MPI
     // Broadcast scalars that solve() sets.
-    double buf[3] = {R, (double)omega, (double)omega_pre_rescale};
-    bss_mpi::bcast_doubles(buf, 3);
+    double buf[5] = {R, (double)omega, (double)omega_pre_rescale, M, r_99};
+    bss_mpi::bcast_doubles(buf, 5);
     R               = buf[0];
     omega           = (long double)buf[1];
     omega_pre_rescale = (long double)buf[2];
+    M               = buf[3];
+    r_99            = buf[4];
 
     int ibuf[2] = {n_gridpoints, blowup_point};
     bss_mpi::bcast_ints(ibuf, 2);
@@ -892,6 +901,7 @@ void ProcaStar::broadcast()
     bcast_vec(psi_iso_array);
     bcast_vec(f_iso_array);
     bcast_vec(g_iso_array);
+    bcast_vec(E_iso_array);
     bcast_vec(phi_iso_array);
     bcast_vec(radius_array);
 #endif

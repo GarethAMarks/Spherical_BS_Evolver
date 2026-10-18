@@ -71,6 +71,8 @@ eta = 1.0
 gamma_fac = 0.75
 evolve_shift = 0
 
+proca_damping = 1.0 #Proca evolution only: kappa in the Gauss-constraint damping equation for Z
+
 use_CCZ4 = 0 #0 for BSSN, 1 for CCZ4
 c1 = 0.02
 c2 = 0.0

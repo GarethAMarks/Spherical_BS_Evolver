@@ -24,7 +24,7 @@ using std::min;
 using std::max;
 using std::rotate;
 // Spacetime constructor: initialize reusable CSF model with this context
-Spacetime::Spacetime() : csf_model(this), rsf_model(this) {
+Spacetime::Spacetime() : csf_model(this), rsf_model(this), cvf_model(this) {
 
     sub_min_time = 10.0;
     adaptive_timestep = false;
@@ -144,9 +144,9 @@ void Spacetime::allgather_owned(const std::vector<double>& local_owned,
 // gather and then return.
 void Spacetime::write_checkpoint(BSSNSlice& slice, const std::string& file_name)
 {
-    // 16 doubles per point (theta as 0 when not CCZ4 — but we handle theta
-    // as a separate gather below when CCZ4 is on).
-    constexpr int NCOL = 16;
+    // 24 doubles per point (theta as 0 when not CCZ4 — but we handle theta
+    // as a separate gather below when CCZ4 is on); the last 8 are the Proca variables.
+    constexpr int NCOL = 24;
     std::vector<double> local(local_N * NCOL);
     for (int k = 0; k < local_N; ++k)
     {
@@ -168,6 +168,9 @@ void Spacetime::write_checkpoint(BSSNSlice& slice, const std::string& file_name)
         p[13] = use_CCZ4 ? slice.theta[j] : 0.0;
         p[14] = slice.states2[j].rsf.psi;
         p[15] = slice.states2[j].rsf.K_psi;
+        const CVF& v = slice.states2[j].cvf;
+        p[16] = v.X_re;    p[17] = v.X_im;    p[18] = v.E_re; p[19] = v.E_im;
+        p[20] = v.Xphi_re; p[21] = v.Xphi_im; p[22] = v.Z_re; p[23] = v.Z_im;
     }
 
     std::vector<double> full;
@@ -202,8 +205,9 @@ void Spacetime::write_checkpoint(BSSNSlice& slice, const std::string& file_name)
         if (use_CCZ4) scratch.theta[j]    = p[13];
         scratch.states2[j].rsf.psi        = p[14];
         scratch.states2[j].rsf.K_psi      = p[15];
+        scratch.states2[j].cvf = CVF{p[16], p[17], p[18], p[19], p[20], p[21], p[22], p[23]};
     }
-    scratch.write_slice(file_name);
+    scratch.write_slice(file_name, proca);
 }
 
 // Fill NGHOST ghost slots on each side of this rank's owned range with data
@@ -215,7 +219,7 @@ void Spacetime::write_checkpoint(BSSNSlice& slice, const std::string& file_name)
 //   right ghosts = [global_hi, global_hi + NGHOST)   from right neighbor
 //
 // Wire format per point: NDOF_STATE consecutive doubles laid out as
-//   [BSSNState (9)] [CSF (4)] [RSF (2)]
+//   [BSSNState (9)] [CSF (4)] [RSF (2)] [CVF (8)]
 // matching the struct member ordering below. Theta is a separate double per
 // point sent in a second message when use_CCZ4 is on.
 //
@@ -273,6 +277,8 @@ void Spacetime::exchange_ghosts(BSSNSlice& slice)
             p[12] = s.csf.K_phi_im;
             p[13] = s.rsf.psi;
             p[14] = s.rsf.K_psi;
+            p[15] = s.cvf.X_re;    p[16] = s.cvf.X_im;    p[17] = s.cvf.E_re; p[18] = s.cvf.E_im;
+            p[19] = s.cvf.Xphi_re; p[20] = s.cvf.Xphi_im; p[21] = s.cvf.Z_re; p[22] = s.cvf.Z_im;
         }
     };
     auto unpack = [&](const std::vector<double>& buf, int global_start)
@@ -296,6 +302,7 @@ void Spacetime::exchange_ghosts(BSSNSlice& slice)
             s.csf.K_phi_im   = p[12];
             s.rsf.psi        = p[13];
             s.rsf.K_psi      = p[14];
+            s.cvf = CVF{p[15], p[16], p[17], p[18], p[19], p[20], p[21], p[22]};
         }
     };
 
@@ -363,21 +370,21 @@ BSSNState operator-(const BSSNState& s1, const BSSNState& s2);
 BSSNState operator*(const BSSNState& s1, const BSSNState& s2);
 BSSNState operator*(double c, const BSSNState& s);
 
-// Composite State elementwise operations (applies to both csf and bssn)
+// Composite State elementwise operations (applies to all of csf, bssn, rsf and cvf)
 State operator+(const State& a, const State& b) {
-    return State{a.csf + b.csf, a.bssn + b.bssn, a.rsf + b.rsf};
+    return State{a.csf + b.csf, a.bssn + b.bssn, a.rsf + b.rsf, a.cvf + b.cvf};
 }
 
 State operator-(const State& a, const State& b) {
-    return State{a.csf - b.csf, a.bssn - b.bssn, a.rsf - b.rsf};
+    return State{a.csf - b.csf, a.bssn - b.bssn, a.rsf - b.rsf, a.cvf - b.cvf};
 }
 
 State operator*(const State& a, const State& b) {
-    return State{a.csf * b.csf, a.bssn * b.bssn, a.rsf * b.rsf};
+    return State{a.csf * b.csf, a.bssn * b.bssn, a.rsf * b.rsf, a.cvf * b.cvf};
 }
 
 State operator*(double c, const State& a) {
-    return State{c * a.csf, c * a.bssn, c * a.rsf};
+    return State{c * a.csf, c * a.bssn, c * a.rsf, c * a.cvf};
 }
 
 inline State operator/(const State& a, double c) {
@@ -568,16 +575,40 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
                 case v_K_psi:
                     F[j] = states2[J[j]].rsf.K_psi;
                     break;
+                case v_X_re:
+                    F[j] = states2[J[j]].cvf.X_re;
+                    break;
+                case v_X_im:
+                    F[j] = states2[J[j]].cvf.X_im;
+                    break;
+                case v_E_re:
+                    F[j] = states2[J[j]].cvf.E_re;
+                    break;
+                case v_E_im:
+                    F[j] = states2[J[j]].cvf.E_im;
+                    break;
+                case v_Xphi_re:
+                    F[j] = states2[J[j]].cvf.Xphi_re;
+                    break;
+                case v_Xphi_im:
+                    F[j] = states2[J[j]].cvf.Xphi_im;
+                    break;
+                case v_Z_re:
+                    F[j] = states2[J[j]].cvf.Z_re;
+                    break;
+                case v_Z_im:
+                    F[j] = states2[J[j]].cvf.Z_im;
+                    break;
                 default:
                     cerr << "ERROR: invalid variable requested for differentiation" << endl;
                     exit(0);
             }
         }
 
-        bool parity_is_odd = ((var == v_c_chris_Z || var == v_beta)/*|| (has_BH && (var == v_chi || var == v_alpha))*/);
+        bool parity_is_odd = ((var == v_c_chris_Z || var == v_beta || var == v_X_re || var == v_X_im || var == v_E_re || var == v_E_im)/*|| (has_BH && (var == v_chi || var == v_alpha))*/);
        //if (var == v_alpha) cout << parity_is_odd<< endl;
 
-        //account for odd parity of contracted christoffel symbols and beta across z = 0
+        //account for odd parity of contracted christoffel symbols, beta and the radial Proca components across z = 0
             if (index <= 1 && parity_is_odd )
                 F[0] = -F[0];
             if (index == 0 && parity_is_odd)
@@ -622,6 +653,7 @@ double BSSNSlice::make_tangherlini (double m, double min_chi, double D)
     states2[j].csf.phi_im = 0.;
     states2[j].csf.K_phi_re = 0.;
     states2[j].csf.K_phi_im = 0.;
+    states2[j].cvf = CVF{};
 
     states2[j].bssn.alpha = pow(states2[j].bssn.chi, 0.5);
     states2[j].bssn.beta = 0.;
@@ -658,6 +690,29 @@ void Spacetime::apply_damping_at_point(int j,
     State& sJ6 = slice_ptr->states2[J[6]];
 
     State damping_corr = d_mult * sevenPointDeriv(h, 6, sJ0, sJ1, sJ2, sJ3, sJ4, sJ5, sJ6);
+
+    // the stencil above reflects every variable as even across z = 0; redo the odd variables (the contracted
+    // Christoffel symbol and shift, and the Proca X_z, E^z) with the correct sign flip for reflected points
+    if (j < 3)
+    {
+        std::array<double, 7> sgn;
+        for (int k = 0; k < 7; ++k) sgn[k] = (j + (k - 3) * res_fac < 0) ? -1. : 1.;
+        auto odd_corr = [&](auto get)
+        {
+            return d_mult * sevenPointDeriv<double>(h, 6, sgn[0] * get(sJ0), sgn[1] * get(sJ1), sgn[2] * get(sJ2),
+                                                    get(sJ3), sgn[4] * get(sJ4), sgn[5] * get(sJ5), sgn[6] * get(sJ6));
+        };
+        damping_corr.bssn.c_chris_Z = odd_corr([](const State& st) { return st.bssn.c_chris_Z; });
+        damping_corr.bssn.beta      = odd_corr([](const State& st) { return st.bssn.beta; });
+        if (proca)
+        {
+            damping_corr.cvf.X_re = odd_corr([](const State& st) { return st.cvf.X_re; });
+            damping_corr.cvf.X_im = odd_corr([](const State& st) { return st.cvf.X_im; });
+            damping_corr.cvf.E_re = odd_corr([](const State& st) { return st.cvf.E_re; });
+            damping_corr.cvf.E_im = odd_corr([](const State& st) { return st.cvf.E_im; });
+        }
+    }
+
     rhs_states2[j] = rhs_states2[j] + damping_corr;
 
     if (use_CCZ4 && rhs_theta.size() == static_cast<size_t>(n_gridpoints))
@@ -703,6 +758,7 @@ void Spacetime::sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slic
     State N{};
     N.bssn = (BSSNState){1., 1., 1., 1., 1., 1., 1., 1., 1.};
     N.csf = (CSF){1., 1., 1., 1.};
+    N.cvf = CVF{1., 1., 1., 1., 1., 1., 1., 1.};
     
     if (add_real_field)
         N.rsf = (RSF){1., 1.};
@@ -722,6 +778,7 @@ void Spacetime::sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slic
     double cs = sqrt(2. / s4.bssn.alpha);
     char_speeds.bssn = (BSSNState){cs, 1., 1., 1., 1., cs, 1., cs, 1.};
     char_speeds.csf = (CSF){1., 1., 1., 1.};
+    char_speeds.cvf = CVF{1., 1., 1., 1., 1., 1., 1., 1.};
 
     if (add_real_field)
         char_speeds.rsf = (RSF){1., 1.};
@@ -967,8 +1024,125 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
     }
 }
 
-//writes BSSN evolution variables from a particular slice to text file
-void BSSNSlice::write_slice(std::string file_name)
+//reads data from a solved ProcaStar into the initial slice (Proca star analogue of read_BS_data).
+//At t = 0, A = f dt + i g dr, so with zero shift: X_phi = -f / alpha (real), X_z = i g (imaginary) and
+//E_z = F_{zt} / alpha = (d_z f - omega g) / alpha (real), raised with gamma^zz to give the evolved E^z.
+void BSSNSlice::read_PS_data(ProcaStar& proca_star, int BS_resolution_factor, bool isotropic, bool cell_centered)
+{
+    if ((proca_star.n_gridpoints + BS_resolution_factor - 1) % BS_resolution_factor != 0 )
+        cout << "WARNING: Incompatible resolution factor used in read_PS_data" << endl;
+
+    int n_gridpoints = (proca_star.n_gridpoints + BS_resolution_factor - 1) / BS_resolution_factor;
+    states2.resize(n_gridpoints);
+
+    if (use_CCZ4)
+       theta.resize(n_gridpoints);
+
+    R = proca_star.R;
+    double dr = R / ((double)n_gridpoints - 1.0);
+    double D = proca_star.D;
+
+    int N_ps = proca_star.n_gridpoints;
+    double dr_ps = proca_star.R / (double)(max(1, N_ps - 1));
+
+    std::vector<double> X_nodes(N_ps);
+    for (int k = 0; k < N_ps; ++k) X_nodes[k] = k * dr_ps;
+
+    if (proca_star.g_array.size() != proca_star.state.size())
+        proca_star.fill_g_array();
+
+    //source arrays: conformal factor (psi or X), log lapse, f, and the radial components g, E (odd in r)
+    std::vector<double> c_src(N_ps), phi_src(N_ps), f_src(N_ps), g_src(N_ps), E_src(N_ps);
+    for (int k = 0; k < N_ps; ++k)
+    {
+        if (isotropic)
+        {
+            c_src[k] = proca_star.psi_iso_array[k];  phi_src[k] = proca_star.phi_iso_array[k];
+            f_src[k] = proca_star.f_iso_array[k];    g_src[k] = proca_star.g_iso_array[k];   E_src[k] = proca_star.E_iso_array[k];
+        }
+        else
+        {
+            c_src[k] = proca_star.state[k].X;  phi_src[k] = proca_star.state[k].phi;
+            f_src[k] = proca_star.state[k].f;  g_src[k] = proca_star.g_array[k];   E_src[k] = proca_star.state[k].E;
+        }
+    }
+
+    //even functions have zero first derivative at the origin, odd ones zero second derivative
+    auto make_spline = [&](tk::spline& sp, const std::vector<double>& y, bool odd)
+    {
+        if (odd) sp.set_boundary(tk::spline::second_deriv, 0.0, tk::spline::second_deriv, 0.0);
+        else     sp.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
+        sp.set_points(X_nodes, y, tk::spline::cspline);
+    };
+    tk::spline s_c, s_phi, s_f, s_g, s_E;
+    make_spline(s_c, c_src, 0); make_spline(s_phi, phi_src, 0); make_spline(s_f, f_src, 0);
+    make_spline(s_g, g_src, 1); make_spline(s_E, E_src, 1);
+
+    for (int j = 0; j < n_gridpoints; j++)
+    {
+        double z = (j + 0.5 * (double)cell_centered) * dr;
+
+        if (isotropic)
+        {
+            states2[j].bssn.chi = pow(s_c(z), -4.);
+            states2[j].bssn.h_zz = 1.;
+            states2[j].bssn.h_ww = 1.;
+        }
+        else
+        {
+            double X_interp = s_c(z);
+            states2[j].bssn.chi = pow(X_interp, -2. / (D - 1.));
+            states2[j].bssn.h_zz = pow(X_interp, (2. * D - 4.) / (D - 1.));
+            states2[j].bssn.h_ww = pow(X_interp, -2. / (D - 1.));
+        }
+
+        //static star: K_ij = 0
+        states2[j].bssn.A_zz = 0.;
+        states2[j].bssn.A_ww = 0.;
+        states2[j].bssn.K = 0.;
+
+        double alpha = exp(s_phi(z));
+        states2[j].bssn.alpha = alpha;
+        states2[j].bssn.beta = 0.;
+
+        double g_ZZ = states2[j].bssn.chi / states2[j].bssn.h_zz; //physical gamma^zz
+
+        states2[j].csf = CSF{0., 0., 0., 0.};
+        states2[j].rsf = RSF{0., 0.};
+
+        CVF& v = states2[j].cvf;
+        v.Xphi_re = -s_f(z) / alpha;
+        v.Xphi_im = 0.;
+        v.X_re = 0.;
+        v.X_im = s_g(z);
+        v.E_re = g_ZZ * s_E(z) / alpha;
+        v.E_im = 0.;
+        v.Z_re = 0.;
+        v.Z_im = 0.;
+
+        if (use_CCZ4)
+            theta[j] = 0.;
+    }
+
+    //contracted Christoffel symbols, as in read_BS_data
+    for (int j = 0; j < n_gridpoints; j++)
+    {
+        double z = (j) * dr;
+        double h_ZZ = 1 / states2[j].bssn.h_zz;
+        double h_WW = 1 / states2[j].bssn.h_ww;
+
+        states2[j].bssn.c_chris_Z = 0.5 * h_ZZ * h_ZZ * d_z(v_h_zz,j) + (D - 2.) * (-0.5 * h_ZZ * h_WW * d_z(v_h_ww,j));
+
+        if (z > 1e-8)
+            states2[j].bssn.c_chris_Z += (D - 2.) * (h_WW * (1 - h_ZZ * states2[j].bssn.h_ww) / z);
+
+        if (isotropic)
+            states2[j].bssn.c_chris_Z = 0.;
+    }
+}
+
+//writes BSSN evolution variables from a particular slice to text file; if write_cvf, the 8 Proca variables are appended
+void BSSNSlice::write_slice(std::string file_name, bool write_cvf)
 {
     int length = states2.size();
     double dr = R / ((double)length - 1.0);
@@ -992,12 +1166,21 @@ void BSSNSlice::write_slice(std::string file_name)
     data_file <<  std::setprecision (16) << (j) * dr << "   " << states2[j].bssn.chi << "    " << states2[j].bssn.h_zz << "    " << states2[j].bssn.h_ww  << "    " << states2[j].bssn.A_zz
         << "   " << states2[j].bssn.A_ww << "    " << states2[j].bssn.K << "    " << states2[j].bssn.c_chris_Z  << "    " << states2[j].csf.phi_re << "    " << states2[j].csf.phi_im
         << "   " << states2[j].csf.K_phi_re << "    " << states2[j].csf.K_phi_im << "    " << states2[j].bssn.alpha << "    " << states2[j].bssn.beta << "    " <<  theta0
-        << "   " << states2[j].rsf.psi << "    " << states2[j].rsf.K_psi << endl;
+        << "   " << states2[j].rsf.psi << "    " << states2[j].rsf.K_psi;
+
+        if (write_cvf)
+        {
+            const CVF& v = states2[j].cvf;
+            data_file << "    " << v.X_re << "    " << v.X_im << "    " << v.E_re << "    " << v.E_im
+                      << "    " << v.Xphi_re << "    " << v.Xphi_im << "    " << v.Z_re << "    " << v.Z_im;
+        }
+        data_file << endl;
     }
 }
 
-//reads slice data from checkpoint file of form checkpoint(time).dat w/o parentheses
-void BSSNSlice::read_checkpoint(int time, int n_gridpoints)
+//reads slice data from checkpoint file of form checkpoint(time).dat w/o parentheses. If read_cvf, the file is expected to
+//contain all columns written by write_slice(..., true), including the 8 Proca variables.
+void BSSNSlice::read_checkpoint(int time, int n_gridpoints, bool read_cvf)
 {
     states2.resize(n_gridpoints);
 
@@ -1017,7 +1200,25 @@ void BSSNSlice::read_checkpoint(int time, int n_gridpoints)
     // read into temporaries to populate both legacy states and new states2
     double chi,h_zz,h_ww,A_zz,A_ww,K,c_chris_Z,phi_re,phi_im,K_phi_re,K_phi_im,alpha,beta;
 
-        if (use_CCZ4)
+        if (read_cvf)
+        {
+            double t0, psi, K_psi;
+            CVF v{};
+            if(iss >> z >> chi >> h_zz >> h_ww >> A_zz >> A_ww >> K >> c_chris_Z >> phi_re >> phi_im >> K_phi_re >> K_phi_im >> alpha >> beta >> t0
+                   >> psi >> K_psi >> v.X_re >> v.X_im >> v.E_re >> v.E_im >> v.Xphi_re >> v.Xphi_im >> v.Z_re >> v.Z_im)
+            {
+                if (j >= n_gridpoints) break;
+                states2[j].bssn.chi = chi; states2[j].bssn.h_zz = h_zz; states2[j].bssn.h_ww = h_ww;
+                states2[j].bssn.A_zz = A_zz; states2[j].bssn.A_ww = A_ww; states2[j].bssn.K = K; states2[j].bssn.c_chris_Z = c_chris_Z;
+                states2[j].csf.phi_re = phi_re; states2[j].csf.phi_im = phi_im; states2[j].csf.K_phi_re = K_phi_re; states2[j].csf.K_phi_im = K_phi_im;
+                states2[j].bssn.alpha = alpha; states2[j].bssn.beta = beta;
+                states2[j].rsf.psi = psi; states2[j].rsf.K_psi = K_psi;
+                states2[j].cvf = v;
+                if (use_CCZ4) theta[j] = t0;
+                j++;
+            }
+        }
+        else if (use_CCZ4)
         {
             double& t = theta[j];
 
@@ -1205,6 +1406,11 @@ double Spacetime::d_alpha_asymp(double r)
         cout << "WARNING: Spacetime Hamiltonian solver called in non-isotropic coordinates; aborting request" << endl;
         return;
     }
+    if (proca)
+    {
+        cout << "WARNING: Spacetime Hamiltonian solver is not implemented for Proca fields; aborting request" << endl;
+        return;
+    }
 
     BSSNSlice& s = slices[0]; //initial slice
     double c1, c2, c3, c4, e1, e2, e3, e4;
@@ -1345,21 +1551,36 @@ void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
     R_zz_TF[j] = n * (R_zz[j] - h_zz * inv_hww * R_ww[j]) * invDm1;
     R_ww_TF[j] = (R_ww[j] - h_ww * inv_hzz * R_zz[j]) * invDm1;
 
-    // |phi|
-    double mod_phi = sqrt(phi_re * phi_re + phi_im * phi_im);
-    if (j == 0) test_ctr = mod_phi;
-
-    // matter quantities via ComplexScalarField helpers (reuse member to avoid per-point construction)
-    CSF csf = slice_ptr->states2[j].csf;
     const BSSNState& bssn = slice_ptr->states2[j].bssn;
-    // Only phi derivatives are used; K_phi derivatives and second derivatives not used in stress-energy
-    CSF d_z_csf{d_z_phi_re, d_z_phi_im, 0.0, 0.0};
-    CSF d_zz_csf{0.0, 0.0, 0.0, 0.0};
 
-    rho[j] = csf_model.rho(csf, bssn, d_z_csf, d_zz_csf);
-    j_z[j] = csf_model.j_z(csf, bssn, d_z_csf, d_zz_csf);
-    S_zz[j] = csf_model.S_zz(csf, bssn, d_z_csf, d_zz_csf);
-    S_ww[j] = csf_model.S_ww(csf, bssn, d_z_csf, d_zz_csf);
+    if (proca)
+    {
+        // matter quantities via ComplexVectorField helpers; |X_phi| at the centre plays the role of |phi|
+        const CVF& cvf = slice_ptr->states2[j].cvf;
+        if (j == 0) test_ctr = sqrt(cvf.Xphi_re * cvf.Xphi_re + cvf.Xphi_im * cvf.Xphi_im);
+
+        rho[j] = cvf_model.rho(cvf, bssn);
+        j_z[j] = cvf_model.j_z(cvf, bssn);
+        S_zz[j] = cvf_model.S_zz(cvf, bssn);
+        S_ww[j] = cvf_model.S_ww(cvf, bssn);
+    }
+    else
+    {
+        // |phi|
+        double mod_phi = sqrt(phi_re * phi_re + phi_im * phi_im);
+        if (j == 0) test_ctr = mod_phi;
+
+        // matter quantities via ComplexScalarField helpers (reuse member to avoid per-point construction)
+        CSF csf = slice_ptr->states2[j].csf;
+        // Only phi derivatives are used; K_phi derivatives and second derivatives not used in stress-energy
+        CSF d_z_csf{d_z_phi_re, d_z_phi_im, 0.0, 0.0};
+        CSF d_zz_csf{0.0, 0.0, 0.0, 0.0};
+
+        rho[j] = csf_model.rho(csf, bssn, d_z_csf, d_zz_csf);
+        j_z[j] = csf_model.j_z(csf, bssn, d_z_csf, d_zz_csf);
+        S_zz[j] = csf_model.S_zz(csf, bssn, d_z_csf, d_zz_csf);
+        S_ww[j] = csf_model.S_ww(csf, bssn, d_z_csf, d_zz_csf);
+    }
 
     // If configured, add massless real scalar field contributions
     if (add_real_field)
@@ -1508,23 +1729,37 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
         rhs.states2[j].bssn.alpha = beta * d_z_alpha - f * (alpha * alpha) * K;
         rhs.states2[j].bssn.beta =  (evolve_shift)? (beta * d_z_beta + gamma_fac * c_chris_Z - eta * beta): 0.;
        
-        // ComplexScalarField RHS for matter variables (uses internal origin regularization and geometric couplings)
-        CSF d_z_csf{d_z_phi_re, d_z_phi_im, d_z(v_K_phi_re, j), d_z(v_K_phi_im, j)};
-        // Optimization: K_phi second derivatives not used by RHS; pass zeros for those entries
-        CSF d_zz_csf{d_zz(v_phi_re, j), d_zz(v_phi_im, j), 0.0, 0.0};
+        if (proca)
+        {
+            // ComplexVectorField RHS for the Proca variables
+            CVF d_z_cvf{d_z(v_X_re, j), d_z(v_X_im, j), d_z(v_E_re, j), d_z(v_E_im, j),
+                        d_z(v_Xphi_re, j), d_z(v_Xphi_im, j), d_z(v_Z_re, j), d_z(v_Z_im, j)};
 
-        const CSF csf_rhs = csf_model.rhs_CSF(
-            slice_ptr->states2[j].csf,
-            slice_ptr->states2[j].bssn,
-            d_z_csf,
-            d_zz_csf,
-            d_z_alpha,
-            d_z_chi,
-            chris_Zzz[j],
-            chris_Zww[j],
-            z);
+            rhs.states2[j].cvf = cvf_model.rhs_CVF(slice_ptr->states2[j].cvf, slice_ptr->states2[j].bssn, d_z_cvf,
+                                                   d_z_alpha, d_z_beta, d_z_chi, d_z_h_zz, d_z_h_ww, z);
+            rhs.states2[j].csf = CSF{0.0, 0.0, 0.0, 0.0};
+        }
+        else
+        {
+            // ComplexScalarField RHS for matter variables (uses internal origin regularization and geometric couplings)
+            CSF d_z_csf{d_z_phi_re, d_z_phi_im, d_z(v_K_phi_re, j), d_z(v_K_phi_im, j)};
+            // Optimization: K_phi second derivatives not used by RHS; pass zeros for those entries
+            CSF d_zz_csf{d_zz(v_phi_re, j), d_zz(v_phi_im, j), 0.0, 0.0};
 
-        rhs.states2[j].csf = csf_rhs;
+            const CSF csf_rhs = csf_model.rhs_CSF(
+                slice_ptr->states2[j].csf,
+                slice_ptr->states2[j].bssn,
+                d_z_csf,
+                d_zz_csf,
+                d_z_alpha,
+                d_z_chi,
+                chris_Zzz[j],
+                chris_Zww[j],
+                z);
+
+            rhs.states2[j].csf = csf_rhs;
+            rhs.states2[j].cvf = CVF{};
+        }
 
         // RealScalarField RHS for massless real scalar (optional)
         if (add_real_field)
@@ -1635,7 +1870,12 @@ double Spacetime::slice_charge(BSSNSlice* slice_ptr)
     const double& K_phi_re = slice_ptr->states2[j].csf.K_phi_re;
     const double& K_phi_im = slice_ptr->states2[j].csf.K_phi_im;
 
-        if (D == 4.)
+        if (proca) // Omega_{D-2} * charge density * sqrt(gamma) z^{D-2}, with sqrt(gamma) = chi^{(1-D)/2} as below
+        {
+            const double sphere_area = 2. * pow(M_PI, 0.5 * (D - 1.)) / tgamma(0.5 * (D - 1.));
+            charge += sphere_area * dr * cvf_model.charge_density(slice_ptr->states2[j].cvf) * pow(z, n) * pow(chi, 0.5 * (1. - D));
+        }
+        else if (D == 4.)
             charge += -8. * M_PI  * dr * (phi_re * K_phi_im - phi_im * K_phi_re) * z * z * pow(chi, -1.5);
         else
              charge += -4. * pow(M_PI, 0.5 * (D - 1.)) * dr * (phi_re * K_phi_im - phi_im * K_phi_re) * pow(z, n) * pow(chi, 0.5 * (1. - D)) / tgamma(0.5 * (D - 1.));
@@ -1681,7 +1921,14 @@ void Spacetime::compute_scalar_energies(BSSNSlice* slice_ptr)
         const BSSNState& bssn = slice_ptr->states2[j].bssn;
         const double chi = std::max(min_chi, bssn.chi);
 
+        // Proca field contribution (stored in E_phi, the "complex field energy")
+        if (proca)
+        {
+            const double rho_A = cvf_model.rho(slice_ptr->states2[j].cvf, bssn);
+            e_phi += dr_local * sphere_area * rho_A * std::pow(z, D - 2.) * std::pow(chi, 0.5 * (1.0 - D));
+        }
         // Complex scalar field contribution
+        else
         {
             const CSF csf = slice_ptr->states2[j].csf;
             const CSF d_z_csf{slice_ptr->d_z(v_phi_re, j), slice_ptr->d_z(v_phi_im, j), 0.0, 0.0};
@@ -1788,6 +2035,7 @@ void Spacetime::compute_diagnostics (BSSNSlice* slice_ptr)
 
     Ham_L2 = 0.;
     Mom_L2 = 0.;
+    double gauss_sq = 0., gauss_ref_sq = 0.; //Proca Gauss constraint and its reference scale mu^2 |X_phi|
 
     // Owned-range partial accumulation; global L2 norms combined via bss_mpi::sum below.
     const int j_lo_d = std::max(owned_begin(), 0);
@@ -1832,12 +2080,38 @@ void Spacetime::compute_diagnostics (BSSNSlice* slice_ptr)
             Ham_L2 += dr * Ham[j] * Ham[j] * pow(z, D - 2.) * pow(chi, (1. - D) / 2.);
             Mom_L2 += dr * Mom_Z[j] * Mom_Z[j] * pow(z, D - 2.) * pow(chi, (1. - D) / 2.);
         }
+
+        if (proca)
+        {
+            const CVF& v = slice_ptr->states2[j].cvf;
+            CVF d_z_cvf{};
+            d_z_cvf.E_re = slice_ptr->d_z(v_E_re, j);
+            d_z_cvf.E_im = slice_ptr->d_z(v_E_im, j);
+            double C_re, C_im;
+            cvf_model.gauss_constraint(v, slice_ptr->states2[j].bssn, d_z_cvf, slice_ptr->d_z(v_chi, j),
+                                       slice_ptr->d_z(v_h_zz, j), slice_ptr->d_z(v_h_ww, j), z, C_re, C_im);
+            Gauss[j] = sqrt(C_re * C_re + C_im * C_im);
+
+            if (z > start_val && z < end_val)
+            {
+                const double w = dr * pow(z, D - 2.) * pow(chi, (1. - D) / 2.);
+                gauss_sq += w * Gauss[j] * Gauss[j];
+                gauss_ref_sq += w * pow(mu, 4) * (v.Xphi_re * v.Xphi_re + v.Xphi_im * v.Xphi_im);
+            }
+        }
     }
 
     //take square root to get L^2 norms; normalize by 16 * pi * central energy density.
     // MPI: combine per-rank sums-of-squares before sqrt.
     Ham_L2 = sqrt(bss_mpi::sum(Ham_L2)) / (16. * M_PI * rho0_init);
     Mom_L2 = sqrt(bss_mpi::sum(Mom_L2)) / (16. * M_PI * rho0_init);
+
+    //Proca Gauss constraint, relative to the L2 norm of mu^2 X_phi over the same region
+    if (proca)
+    {
+        const double num = bss_mpi::sum(gauss_sq), den = bss_mpi::sum(gauss_ref_sq);
+        Gauss_L2 = (den > 0.) ? sqrt(num / den) : sqrt(num);
+    }
 }
 
 //writes diagnostic quantities to output file. maybe just make appropriate call to write_slice() instead?
@@ -1847,13 +2121,17 @@ void Spacetime:: write_current_slice(std::string file_name)
     const BSSNSlice& s = *current_slice_ptr;
     dr = R / ((double)n_gridpoints - 1.0);
 
-    // 16 doubles per point (all state fields; theta packed as 0 if not CCZ4).
-    constexpr int NCOL = 16;
+    // 24 doubles per point (all state fields; theta packed as 0 if not CCZ4; last 8 are Proca variables,
+    // written only for Proca runs so that boson star output is unchanged).
+    constexpr int NCOL = 24;
     std::vector<double> local(local_N * NCOL);
     for (int k = 0; k < local_N; ++k)
     {
         const int j = owned_begin() + k;
         double* p = &local[k * NCOL];
+        const CVF& v = s.states2[j].cvf;
+        p[16] = v.X_re;    p[17] = v.X_im;    p[18] = v.E_re; p[19] = v.E_im;
+        p[20] = v.Xphi_re; p[21] = v.Xphi_im; p[22] = v.Z_re; p[23] = v.Z_im;
         p[0]  = s.states2[j].bssn.chi;
         p[1]  = s.states2[j].bssn.h_zz;
         p[2]  = s.states2[j].bssn.h_ww;
@@ -1893,7 +2171,10 @@ void Spacetime:: write_current_slice(std::string file_name)
                   << "   " << p[4]  << "    " << p[5]  << "    " << p[6]
                   << "    " << p[7] << "    " << p[8]  << "   " << p[9]  << "    " << p[10]
                   << "    " << p[11]<< "    " << p[12] << "    " << p[13]
-                  << "   " << p[14] << "    " << p[15] << endl;
+                  << "   " << p[14] << "    " << p[15];
+        if (proca)
+            for (int c = 16; c < 24; ++c) data_file << "    " << p[c];
+        data_file << endl;
     }
 }
 
@@ -1908,9 +2189,9 @@ void Spacetime:: write_diagnostics(std::string file_name)
 
     const double dr_local = R / ((double)length - 1.0);
 
-    // 7 doubles per row (skip the `r` column — reconstructed from j on rank 0):
-    //   Ham, Mom_Z, det_h, aux_test, A, ricci_4_val, r4m
-    constexpr int NCOL = 7;
+    // 8 doubles per row (skip the `r` column — reconstructed from j on rank 0):
+    //   Ham, Mom_Z, det_h, aux_test, A, ricci_4_val, r4m, Gauss (Proca only, written only for Proca runs)
+    constexpr int NCOL = 8;
     std::vector<double> local(local_N * NCOL, 0.0);
     double local_r4max = 0.0;
 
@@ -1920,9 +2201,7 @@ void Spacetime:: write_diagnostics(std::string file_name)
     {
         if (!active_points[j]) continue;
 
-        const double& phi_re = current_slice_ptr->states2[j].csf.phi_re;
-        const double& phi_im = current_slice_ptr->states2[j].csf.phi_im;
-        const double A   = sqrt(phi_re * phi_re + phi_im * phi_im);
+        const double A   = central_amplitude(*current_slice_ptr, j); //|phi|, or |X_phi| for Proca
         const double r4m = ricci_4_matter(j);
         if (r4m > local_r4max) local_r4max = r4m;
 
@@ -1934,6 +2213,7 @@ void Spacetime:: write_diagnostics(std::string file_name)
         p[4] = A;
         p[5] = ricci_4_val(j);
         p[6] = r4m;
+        p[7] = proca ? Gauss[j] : 0.;
     }
     ricci_4_grid_max = bss_mpi::max(local_r4max);
 
@@ -1956,7 +2236,9 @@ void Spacetime:: write_diagnostics(std::string file_name)
         data_file << std::setprecision(10) << (j + grid_offset) * dr_local
                   << "   " << p[0] << "    " << p[1] << "    " << p[2]
                   << "    " << p[3] << "    " << p[4] << "    " << p[5]
-                  << "    " << p[6] << endl;
+                  << "    " << p[6];
+        if (proca) data_file << "    " << p[7];
+        data_file << endl;
     }
 }
 
@@ -2026,6 +2308,7 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "fill_subcritical = ", fill_subcritical, quiet);
         fill_parameter(current_line, "A_thresh = ", A_thresh, quiet);
         fill_parameter(current_line, "dump_time = ", dump_time, quiet);
+        fill_parameter(current_line, "proca_damping = ", proca_damping, quiet);
 
         fill_param_array(current_line, "refinement_points = ", refinement_points, quiet);
 
@@ -2269,6 +2552,7 @@ void Spacetime::resize_temp_arrays()
     Ham.resize(n_gridpoints);
     Mom_Z.resize(n_gridpoints);
     det_h.resize(n_gridpoints);
+    Gauss.assign(n_gridpoints, 0.);
 
     if (use_CCZ4)
     {
@@ -2330,6 +2614,7 @@ void Spacetime::add_real_gaussian(BSSNSlice& slice)
 //read data from BosonStar to spacetime and construct initial time slice
 void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
 {
+    proca = false;
     wave_mode = 0; //make 1 for MR testing purposes only
     ah_radius = -1.;
     D = boson_star.D;
@@ -2349,59 +2634,7 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
     r_99 = boson_star.r_99;
     BS_perturbed = boson_star.perturb;
 
-    if (!skip_read)
-    {
-        // Initialize defaults prior to reading params for backwards compatibility
-        gamma_fac = 0.75; // 3/4 by default
-        spatially_varying_BC = 1;
-        one_log_fac = 2.0;
-    }
-    critical_state = 2;
-
-    if (!skip_read)
-    {   
-        // Default subcritical_time if not provided
-        subcritical_time = stop_time;
-        refinement_points = {};
-        read_parameters();
-    }
-
-    if (critical_study)
-        do_ah_search = 1;
-    
-
-    if (D != 4.)
-        spatially_varying_BC = 0; //only try this for D = 4 for now
-
-    //cout << refinement_points.size() << endl;
-    if (!refinement_points.empty() && refinement_points[0] <= 0) // disable refinement if sentinel present
-        refinement_points.clear();
-
-    // MVP MPI scope: multi-rank runs only support a uniform grid with no
-    // adaptive timestep. The ghost-zone width and load balance change with
-    // refinement, and outer refinement levels get skipped on the last rank
-    // when adaptive_timestep is on; both are out of scope for the first pass.
-    if (mpi_size > 1 && (!refinement_points.empty() || adaptive_timestep))
-    {
-        if (mpi_rank == 0)
-            cerr << "ERROR: MPI multi-rank mode requires a uniform grid: "
-                 << "refinement_points must be empty (or its first entry <= 0) "
-                 << "and adaptive_timestep must be 0." << endl;
-        bss_mpi::abort_all(1);
-    }
-
-    if (read_thinshell)
-        BS_resolution_factor = 1;
-
-    if ((BS_resolution_factor & (BS_resolution_factor - 1)) != 0 || BS_resolution_factor <= 0)
-        {
-            cerr << "ERROR: BS_resolution_factor must be a power of 2" << endl;
-            exit(1);
-        }
-
-    active_points.resize(n_gridpoints);
-    fill_active_points();
-    fill_refinement_levels();
+    setup_before_reading(skip_read);
 
     // Cache original BosonStar grid so we can restore after temporary high-res solve
     const int bs_n_gridpoints_orig = boson_star.n_gridpoints;
@@ -2477,10 +2710,77 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
     if (bumped_bs_resolution)
         boson_star.n_gridpoints = bs_n_gridpoints_orig;
 
+    setup_after_reading();
+}
+
+
+//parameter reading, consistency checks and grid setup shared by boson star and Proca star initialisation.
+//Requires the parameters inherited from the star (D, n_gridpoints, R, stop_time, ...) to have been set.
+void Spacetime::setup_before_reading(bool skip_read)
+{
+    if (!skip_read)
+    {
+        // Initialize defaults prior to reading params for backwards compatibility
+        gamma_fac = 0.75; // 3/4 by default
+        spatially_varying_BC = 1;
+        one_log_fac = 2.0;
+    }
+    critical_state = 2;
+
+    if (!skip_read)
+    {   
+        // Default subcritical_time if not provided
+        subcritical_time = stop_time;
+        refinement_points = {};
+        read_parameters();
+    }
+
+    if (critical_study)
+        do_ah_search = 1;
+    
+
+    if (D != 4.)
+        spatially_varying_BC = 0; //only try this for D = 4 for now
+
+    //cout << refinement_points.size() << endl;
+    if (!refinement_points.empty() && refinement_points[0] <= 0) // disable refinement if sentinel present
+        refinement_points.clear();
+
+    // MVP MPI scope: multi-rank runs only support a uniform grid with no
+    // adaptive timestep. The ghost-zone width and load balance change with
+    // refinement, and outer refinement levels get skipped on the last rank
+    // when adaptive_timestep is on; both are out of scope for the first pass.
+    if (mpi_size > 1 && (!refinement_points.empty() || adaptive_timestep))
+    {
+        if (mpi_rank == 0)
+            cerr << "ERROR: MPI multi-rank mode requires a uniform grid: "
+                 << "refinement_points must be empty (or its first entry <= 0) "
+                 << "and adaptive_timestep must be 0." << endl;
+        bss_mpi::abort_all(1);
+    }
+
+    if (read_thinshell)
+        BS_resolution_factor = 1;
+
+    if ((BS_resolution_factor & (BS_resolution_factor - 1)) != 0 || BS_resolution_factor <= 0)
+        {
+            cerr << "ERROR: BS_resolution_factor must be a power of 2" << endl;
+            exit(1);
+        }
+
+    active_points.resize(n_gridpoints);
+    fill_active_points();
+    fill_refinement_levels();
+}
+
+//trims the grid, sets up domain decomposition/auxiliary arrays and computes initial diagnostics; shared by boson star
+//and Proca star initialisation. Must be called after the initial slice has been read in.
+void Spacetime::setup_after_reading()
+{
     grid_offset = 0.5 * (double)cell_centered;
 
     if (!run_quietly)
-        cout << "Read BS data" << endl;
+        cout << (proca ? "Read PS data" : "Read BS data") << endl;
 
     // Optionally add a real scalar field Gaussian before evolution
     //if (add_real_field && start_time == 0)
@@ -2508,7 +2808,7 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
         slices[0].theta.resize(n_gridpoints);
 
     if (start_time > 0)
-        slices[0].read_checkpoint(start_time, n_gridpoints);
+        slices[0].read_checkpoint(start_time, n_gridpoints, proca);
 
     //NOTE: n_gridpoints and R should not change after this point!!!
 
@@ -2548,6 +2848,116 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
     }
 }
 
+//|phi| for the complex scalar field, or |X_phi| = |n^a A_a| for the Proca field (which equals f(0)/alpha(0) = A_central for
+//a stationary Proca star), at index j of a slice
+double Spacetime::central_amplitude(const BSSNSlice& slice, int j) const
+{
+    if (proca)
+        return sqrt(pow(slice.states2[j].cvf.Xphi_re, 2) + pow(slice.states2[j].cvf.Xphi_im, 2));
+    return sqrt(pow(slice.states2[j].csf.phi_re, 2) + pow(slice.states2[j].csf.phi_im, 2));
+}
+
+double Spacetime::central_phase(const BSSNSlice& slice, int j) const
+{
+    if (proca)
+        return std::arg(std::complex<double>(slice.states2[j].cvf.Xphi_re, slice.states2[j].cvf.Xphi_im));
+    return std::arg(std::complex<double>(slice.states2[j].csf.phi_re, slice.states2[j].csf.phi_im));
+}
+
+//read data from a solved ProcaStar to spacetime and construct initial time slice (Proca analogue of initialize(BosonStar&)).
+//Only the free (mini) Proca potential is supported in evolution.
+void Spacetime::initialize(ProcaStar& proca_star, bool skip_read)
+{
+    proca = true;
+    wave_mode = 0;
+    ah_radius = -1.;
+    D = proca_star.D;
+
+    //inherit parameters from PS
+    n_gridpoints = proca_star.n_gridpoints;
+    R = proca_star.R;
+    courant_factor = proca_star.courant_factor;
+    stop_time = proca_star.stop_time;
+    mu = proca_star.mu;
+    lambda = proca_star.lambda;
+    sigma = proca_star.sigma;
+    solitonic = proca_star.solitonic;
+    omega = proca_star.omega;
+    isotropic = proca_star.isotropic;
+    M = proca_star.M;
+    r_99 = proca_star.r_99;
+    BS_perturbed = 0;
+
+    setup_before_reading(skip_read);
+
+    if (proca_star.self_interacting())
+    {
+        if (mpi_rank == 0)
+            cerr << "ERROR: evolution of self-interacting Proca stars (lambda != 0 or solitonic = 1) is not implemented;"
+                 << " only the free (mini) Proca field is supported." << endl;
+        bss_mpi::abort_all(1);
+    }
+    if (read_thinshell || critical_study || make_tangherlini)
+    {
+        if (mpi_rank == 0)
+            cerr << "ERROR: read_thinshell, critical_study and make_tangherlini are not supported for Proca stars." << endl;
+        bss_mpi::abort_all(1);
+    }
+    if (damping_factor <= 0. && mpi_rank == 0)
+        cout << "WARNING: the first-order Proca system is unstable at the origin without Kreiss-Oliger dissipation;"
+             << " damping_factor of about 1 is recommended for Proca evolutions." << endl;
+    if (add_real_field || run_spacetime_solver)
+    {
+        if (mpi_rank == 0)
+            cout << "WARNING: add_real_field and run_spacetime_solver are not supported for Proca stars; ignoring them." << endl;
+        add_real_field = 0;
+        run_spacetime_solver = 0;
+    }
+
+    const int ps_n_gridpoints_orig = proca_star.n_gridpoints;
+    bool bumped_resolution = false;
+
+    //solve PS at higher resolution and read in data to first slice, as for the BS
+    if (BS_resolution_factor > 1 && start_time == 0)
+    {
+        if (mpi_rank == 0)
+        {
+            proca_star.n_gridpoints = proca_star.n_gridpoints * BS_resolution_factor - BS_resolution_factor + 1;
+
+            if (!run_quietly)
+                cout << " \nRe-solving PS at higher resolution with " << proca_star.n_gridpoints <<  endl;
+
+            proca_star.solve(1);
+            proca_star.write_field();
+            if (isotropic)
+            {
+                proca_star.fill_isotropic_arrays();
+                proca_star.write_isotropic();
+            }
+        }
+        proca_star.broadcast();
+
+        omega = proca_star.omega;
+        bumped_resolution = true;
+    }
+
+    dr = R / (n_gridpoints - 1.0);
+    dt = courant_factor * dr;
+    int num_timesteps = ceil(stop_time / dt);
+
+    slices.resize(std::min(num_timesteps + 1, max_stored_slices));
+    slices[0].active_points = active_points;
+    slices[0].refinement_points = refinement_points;
+    slices[0].use_CCZ4 = use_CCZ4;
+
+    if (start_time == 0)
+        slices[0].read_PS_data(proca_star, BS_resolution_factor, isotropic, cell_centered);
+
+    if (bumped_resolution)
+        proca_star.n_gridpoints = ps_n_gridpoints_orig;
+
+    setup_after_reading();
+}
 
 //Time evolution! Must have initialized using a constructed BosonStar first.
 void Spacetime::evolve()
@@ -2590,7 +3000,9 @@ void Spacetime::evolve()
                 << "   " << "Mom_L2"<<  "   " << "chi_central" << "   "
                 << "A_central" << "   "  << "AH radius" << "   " <<  "M_ADM" << "   "  << "Noether charge"
                 << "   " << "Central dK/dt" << "   " << "freq_central" << "   " << "lapse_central" <<
-                "   " << "complex field energy" << "   " << "real field energy" << "   " << "central 4D ricci scalar" << "   " << "phi_re_central" << "   " << "AH mass" << endl;
+                "   " << "complex field energy" << "   " << "real field energy" << "   " << "central 4D ricci scalar" << "   " << "phi_re_central" << "   " << "AH mass";
+        if (proca) constraints_file << "   " << "Gauss_L2"; //for Proca runs, A_central/phi_re_central/field energy refer to X_phi and the Proca field
+        constraints_file << endl;
     }
 
     // A0 is the initial central field amplitude, used later for migration
@@ -2598,7 +3010,7 @@ void Spacetime::evolve()
     // in the general case; broadcast so all ranks share the same value.
     double A0 = 0.0;
     if (owns_origin())
-        A0 = sqrt (pow(slices[0].states2[0].csf.phi_re,2) + pow(slices[0].states2[0].csf.phi_im,2));
+        A0 = central_amplitude(slices[0], 0);
     bss_mpi::bcast_doubles(&A0, 1);
 
     if (!run_quietly && mpi_rank == 0)
@@ -2606,6 +3018,8 @@ void Spacetime::evolve()
         
     //s_i are returned RHS's, t represents temporary RHS + current_slice quantities that must be stored so derivatives can be accessed
     BSSNSlice s1, s2, s3, s4, t1, t2, t3, update_slice;
+
+    double phase_last = 0.0; //central phase on the previous step, for the central frequency diagnostic
 
     for (int time_step = 0; time_step < num_timesteps; time_step++)
     {
@@ -2628,16 +3042,11 @@ void Spacetime::evolve()
 
         //fill out array until we've reached maximum number of stored slices, then update last element + rotate at end.
         int n = (time_step > max_stored_slices - 2) ? (max_stored_slices - 2) : time_step;
-        double phase_ctr = 0.0, phase_last = 0.0;
-        if (time_step > 0) phase_last = phase_ctr;
+        double phase_ctr = 0.0;
         // MPI: states2[0] is only valid on rank 0. Compute central-point diagnostics
         // on rank 0 and broadcast the few scalars other ranks need for control flow.
         if (owns_origin())
-            phase_ctr = std::arg( std::complex<double>(slices[n].states2[0].csf.phi_re, slices[n].states2[0].csf.phi_im));
-
-        double omega_approx = (phase_ctr - phase_last) / dt;
-
-        if (omega_approx < -M_PI / dt) omega_approx += 2 * M_PI / dt; //corrects jumps due to branch cuts
+            phase_ctr = central_phase(slices[n], 0);
 
         if (n > 0) compute_dtK(n);
         M = slice_mass(current_slice_ptr); // maybe remove if causes bad bdry oscillations?
@@ -2649,13 +3058,13 @@ void Spacetime::evolve()
         double central[7] = {0., 0., 0., 0., 0., 0., 0.};
         if (owns_origin())
         {
-            const double Ap0 = sqrt (pow(slices[n].states2[0].csf.phi_re,2) + pow(slices[n].states2[0].csf.phi_im,2));
-            const double Ap1 = sqrt (pow(slices[n].states2[1].csf.phi_re,2) + pow(slices[n].states2[1].csf.phi_im,2));
+            const double Ap0 = central_amplitude(slices[n], 0);
+            const double Ap1 = central_amplitude(slices[n], 1);
             central[0] = (cell_centered) ? (Ap0 - 0.5 * dr * (Ap1 - Ap0)) : Ap0;
             central[1] = (make_tangherlini || slices[n].states2[0].bssn.chi < 10 * min_chi) ? 1.0 : 0.0;
             central[2] = slices[n].states2[0].bssn.chi;
             central[3] = slices[n].states2[0].bssn.alpha;
-            central[4] = slices[n].states2[0].csf.phi_re;
+            central[4] = proca ? slices[n].states2[0].cvf.Xphi_re : slices[n].states2[0].csf.phi_re;
             central[5] = phase_ctr;
             central[6] = test_ctr;
         }
@@ -2667,6 +3076,15 @@ void Spacetime::evolve()
         const double phi_re_ctr   = central[4];
         phase_ctr                 = central[5];
         test_ctr                  = central[6];
+
+        //central frequency from the phase change over the last step, with the phase difference wrapped into (-pi, pi].
+        //Boson star initial data rotate as e^{+i omega t} and Proca star data as e^{-i omega t}; the sign is chosen so
+        //that a stationary star of either kind reports omega > 0.
+        double dphase = phase_ctr - phase_last;
+        while (dphase > M_PI) dphase -= 2. * M_PI;
+        while (dphase <= -M_PI) dphase += 2. * M_PI;
+        double omega_approx = (time_step > 0) ? (proca ? -1. : 1.) * dphase / dt : 0.;
+        phase_last = phase_ctr;
 
         double ricci_4 = (critical_study ? ricci_4_grid_max : 0.0);
 
@@ -2684,7 +3102,9 @@ void Spacetime::evolve()
                 << "   " << Mom_L2 <<  "   " << chi_central << "   "
                 << A_ctr << "   "  << ah_radius << "   " <<  M << "   "  << charge_now
                 << "   " << dtK_L2 << "   " << omega_approx << "   " << alpha_central <<
-                "   " << E_phi << "   " << E_psi << "   " << ricci_4 << "   " << phi_re_ctr << "   " << ah_mass_now << endl;
+                "   " << E_phi << "   " << E_psi << "   " << ricci_4 << "   " << phi_re_ctr << "   " << ah_mass_now;
+                if (proca) constraints_file << "   " << Gauss_L2;
+                constraints_file << endl;
             }
         }
 

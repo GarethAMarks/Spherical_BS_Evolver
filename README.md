@@ -28,6 +28,20 @@ Setting `proca = 1` uses the `ProcaStar` class, which reads the same model param
 
 Outputs are `PSdata.dat` (`r f g X phi E m`), `isotropic_proca.dat` if `isotropic = 1`, and `ProcaStars.dat` in `cycle_only` mode, with the same columns as `BosonStars.dat` plus `f0`, the value of `f(0)` with `alpha(infinity) = 1`.
 
+With `cycle_only = 0`, the star is evolved with the same BSSN/CCZ4 machinery, using the `ComplexVectorField` matter model (free Proca field only; `lambda != 0` or `solitonic = 1` is rejected for evolution). Evolved Proca variables, real and imaginary parts of each, are the radial components `X_z` and `E^z` (odd in `z`), `X_phi = -n^a A_a` and the Gauss-constraint damping variable `Z` (even in `z`), following Zilhão, Witek & Cardoso (2015). The modified-cartoon reduction and the 3+1 equations are checked by the scripts in `derivations/` (sympy). Not supported for Proca stars: perturbations, Gaussian starts, critical studies, thin-shell data, the real scalar field, the initial Hamiltonian solver and the linear perturbation solver.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `proca_damping` | `1.0` | `kappa` in `d_t Z = alpha (D_i E^i + mu^2 X_phi - kappa Z) + ...` |
+
+The Proca system is first order in space, and with centred differences it develops a grid-scale instability at the origin unless Kreiss-Oliger dissipation is on: use `damping_factor` of about 1 (0.2 is not enough). The dissipation stencil treats `c_chris_Z`, `beta`, `X_z` and `E^z` as odd across `z = 0`.
+
+Differences in the evolution output for Proca runs:
+
+- `SliceData.dat` and checkpoints have 8 extra trailing columns: `X_re X_im E_re E_im Xphi_re Xphi_im Z_re Z_im`.
+- `Diagnostics.dat` has an extra trailing column with the magnitude of the Gauss constraint `|D_i E^i + mu^2 X_phi|`.
+- In `constraint_norms.dat`, `A_central`, `phi_re_central` and the complex field energy refer to `|X_phi|`, `Re X_phi` and the Proca field. For a stationary star `|X_phi(0)| = A_central`. A trailing `Gauss_L2` column gives the Gauss constraint norm relative to the norm of `mu^2 X_phi`.
+
 ---
 
 ## Output files
@@ -38,7 +52,7 @@ Outputs are `PSdata.dat` (`r f g X phi E m`), `isotropic_proca.dat` if `isotropi
 | `isotropic.dat` | once, if `isotropic = 1` | Isotropic-coordinate field values |
 | `SliceData.dat` | `write_interval` steps | Radial profiles of all 13 BSSN + matter variables (see `bssn_var` enum in `EvolutionVariables.h`) |
 | `Diagnostics.dat` | `write_interval` steps | Radial profiles of Hamiltonian constraint, momentum constraint, conformal-metric determinant, auxiliary variable, field amplitude, geometric and matter Ricci scalars |
-| `constraint_norms.dat` | `write_CN_interval` steps | Time-series: L² constraint norms, central chi, central field amplitude, AH radius, ADM mass, Noether charge, field energies, central 4-Ricci scalar, AH mass |
+| `constraint_norms.dat` | `write_CN_interval` steps | Time-series: L² constraint norms, central chi, central field amplitude, AH radius, ADM mass, Noether charge, central dK/dt, central frequency (from the phase change of the central field over one step), central lapse, field energies, central 4-Ricci scalar, central Re(field), AH mass |
 | `BosonStars.dat` | once per model, in `cycle_models` | Family data: `A_central M r_99 noether_charge binding_energy omega omega_unrescaled phi0 C4 Cmax` |
 | `checkpoint<T>.dat` | when `t` crosses a multiple of `checkpoint_time` | Full slice snapshot for restarting |
 | `Diagnostics_<T>.dat`, `SliceData_<T>.dat` | when `t` crosses a multiple of `dump_time` | Snapshot diagnostics/slice at time `T` |
@@ -51,7 +65,7 @@ Outputs are `PSdata.dat` (`r f g X phi E m`), `isotropic_proca.dat` if `isotropi
 
 | Parameter | Default | Description |
 |---|---|---|
-| `proca` | `0` | Construct Proca stars instead of boson stars (see below); only single-model construction and `cycle_only` family sweeps are implemented |
+| `proca` | `0` | Construct (and evolve) Proca stars instead of boson stars; see below |
 | `D` | `4` | Spacetime dimension |
 | `mu` | `1.0` | Scalar field mass |
 | `lambda` | `0` | Quartic self-coupling coefficient |
@@ -125,7 +139,7 @@ Outputs are `PSdata.dat` (`r f g X phi E m`), `isotropic_proca.dat` if `isotropi
 | `max_stored_slices` | `5` | Number of time slices held in memory simultaneously (minimum 3 for RK4) |
 | `stop_on_migrate` | `0` | Exit with a message if the central field amplitude changes by more than 10% |
 | `sigma_BSSN` | `0.333333` | Coefficient of the constraint-damping term in the conformal connection evolution; in CCZ4 mode, also sets `c3 / 3` |
-| `damping_factor` | `0.0` | Kreiss-Oliger dissipation strength |
+| `damping_factor` | `0.0` | Kreiss-Oliger dissipation strength (about 1 is needed for Proca stars) |
 | `only_BS_violation` | `1` | Restrict constraint damping to the interior of the star (`r < r_99`) |
 | `spatially_varying_BC` | `1` | Use spatially varying (Sommerfeld-like) outer boundary conditions |
 | `shock_gauge` | `0` | Use shock-avoiding Bona-Masso lapse with `f(alpha) = 1 + shock_fac / alpha^2` instead of 1+log |

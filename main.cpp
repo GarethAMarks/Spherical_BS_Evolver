@@ -108,7 +108,8 @@ bool read_proca_flag()
     return proca;
 }
 
-//constructs a Proca star (or a family of them if cycle_only = 1). Evolution and linear perturbations are not yet implemented for Proca stars.
+//constructs a Proca star, then either cycles a family of them (cycle_only = 1) or evolves it with ComplexVectorField matter.
+//Linear perturbations, critical studies and Gaussian starts are not implemented for Proca stars.
 int run_proca_star()
 {
     const int mpi_rank = bss_mpi::rank();
@@ -133,8 +134,14 @@ int run_proca_star()
         if (mpi_rank == 0)
             proca_star.cycle_models(proca_star.n_stars, proca_star.A0, proca_star.dA);
     }
-    else if (mpi_rank == 0)
-        cout << "NOTE: evolution and linear perturbations are not yet implemented for Proca stars; only the initial model was constructed (PSdata.dat)." << endl;
+    else
+    {
+        Spacetime st{};
+        st.initialize(proca_star);
+        st.write_current_slice();
+        st.write_diagnostics();
+        st.evolve();
+    }
 
     if (mpi_rank == 0)
     {

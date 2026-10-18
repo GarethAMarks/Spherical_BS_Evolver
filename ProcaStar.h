@@ -72,6 +72,7 @@ class ProcaStar
         std::vector<double> psi_iso_array; // conformal factor in isotropic coords
         std::vector<double> f_iso_array; // A_t in isotropic coords
         std::vector<double> g_iso_array; // A_R (radial component w.r.t. isotropic radius) in isotropic coords
+        std::vector<double> E_iso_array; // F_{Rt} = E dr/dR (E = f' - omega g, radial component w.r.t. isotropic radius) in isotropic coords
         std::vector<double> r_iso_array; // isotropic radii given in terms of areal indices
 
         double V (const double Psi);
@@ -86,6 +87,8 @@ class ProcaStar
         double D;
         double R; //max radius of computational domain
         int n_gridpoints; // number of spatial gridpoints
+        double courant_factor; //evolution parameters, read for passing to Spacetime
+        double stop_time;
         int blowup_point; //gridpoint at which the solution first blows up
         double freq_epsilon;//tolerance for the frequency finder
         int max_newton_iterations = 50; //for the algebraic solve for g with self-interactions
