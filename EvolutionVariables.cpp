@@ -2438,6 +2438,13 @@ void Spacetime::kill_refinement_noise()
         int j3 = j4 - step;
         int j1 = j4 - 3 * step;
 
+        //skip if the interpolation stencils would leave the grid (cannot happen after finalize_refinement, but guard anyway)
+        if (j1 - 3 * step < 0 || j3 + 3 * step >= n_gridpoints)
+        {
+            start_point = j4;
+            continue;
+        }
+
         // interpolate at mid-refinement boundary using cubic Lagrange polynomial
         // Nodes around j1 are at j1-3*step, j1-step, j1+step, j1+3*step
         // For uniform spacing, the weights at the center (x=0 relative to j1) are [-1/16, 9/16, 9/16, -1/16]
@@ -2569,6 +2576,95 @@ void Spacetime::resize_temp_arrays()
         last_active_j--;
 
     fill_quad_weights();
+    build_inactive_stencils();
+}
+
+//Makes the refinement layout consistent with the final grid. refinement_points are given as indices into the grid before
+//initialize() trims it (by two points and then by cutoff_frac), and the level/active-point arrays were built for that
+//untrimmed grid. A refinement point is kept only if at least 6 points of the coarser level fit beyond it on the trimmed
+//grid (needed by the boundary interpolation and by the outer boundary stencil); it and any later ones are dropped
+//otherwise. The active-point and level arrays are then rebuilt for the final grid size.
+void Spacetime::finalize_refinement()
+{
+    std::vector<int> kept;
+    for (size_t k = 0; k < refinement_points.size(); k++)
+    {
+        const int coarse_step = 1 << (k + 1);
+        if (refinement_points[k] + 1 + 6 * coarse_step <= n_gridpoints - 1)
+            kept.push_back(refinement_points[k]);
+        else
+            break;
+    }
+
+    if (kept.size() < refinement_points.size() && mpi_rank == 0)
+    {
+        cout << "WARNING: refinement point(s)";
+        for (size_t k = kept.size(); k < refinement_points.size(); k++)
+            cout << " " << refinement_points[k];
+        cout << " do not fit on the trimmed grid of " << n_gridpoints << " points and will be ignored" << endl;
+    }
+    refinement_points = kept;
+
+    active_points.assign(n_gridpoints, false);
+    fill_active_points();
+    fill_refinement_levels();
+
+    slices[0].refinement_points = refinement_points;
+    slices[0].active_points = active_points;
+}
+
+//Precomputes, for every inactive point strictly inside the last active point, a 4-point Lagrange interpolation stencil
+//over the nearest active points (two on each side where possible, otherwise three below and one above).
+void Spacetime::build_inactive_stencils()
+{
+    inactive_stencils.clear();
+
+    std::vector<int> act; //indices of active points, in order
+    for (int j = 0; j <= last_active_j; j++)
+        if (active_points[j])
+            act.push_back(j);
+
+    int a = 0; //index into act of the last active point below j
+    for (int j = 0; j < last_active_j; j++)
+    {
+        if (active_points[j])
+        {
+            while (a + 1 < (int)act.size() && act[a + 1] <= j) a++;
+            continue;
+        }
+
+        //act[a] < j < act[a + 1]
+        int lo = a - 1;
+        if (a + 2 >= (int)act.size()) lo = a - 2; //no second point above: use three below
+        if (lo < 0) lo = 0;
+        if (lo + 3 >= (int)act.size()) continue; //not enough active points (should not happen)
+
+        InactiveStencil st;
+        st.j = j;
+        for (int m = 0; m < 4; m++) st.idx[m] = act[lo + m];
+        for (int m = 0; m < 4; m++)
+        {
+            double w = 1.;
+            for (int l = 0; l < 4; l++)
+                if (l != m) w *= (double)(j - st.idx[l]) / (double)(st.idx[m] - st.idx[l]);
+            st.w[m] = w;
+        }
+        inactive_stencils.push_back(st);
+    }
+}
+
+//Overwrites every inactive point of the slice by interpolation from the active points (no-op on a uniform grid)
+void Spacetime::fill_inactive_points(BSSNSlice& slice)
+{
+    for (const InactiveStencil& st : inactive_stencils)
+    {
+        slice.states2[st.j] = st.w[0] * slice.states2[st.idx[0]] + st.w[1] * slice.states2[st.idx[1]]
+                            + st.w[2] * slice.states2[st.idx[2]] + st.w[3] * slice.states2[st.idx[3]];
+
+        if (use_CCZ4 && slice.theta.size() == slice.states2.size())
+            slice.theta[st.j] = st.w[0] * slice.theta[st.idx[0]] + st.w[1] * slice.theta[st.idx[1]]
+                              + st.w[2] * slice.theta[st.idx[2]] + st.w[3] * slice.theta[st.idx[3]];
+    }
 }
 
 //radial quadrature weights for integrals over the slice (masses, charges, energies, constraint norms). With mesh
@@ -2844,6 +2940,9 @@ void Spacetime::setup_after_reading()
         slices[0].read_checkpoint(start_time, n_gridpoints, proca);
 
     //NOTE: n_gridpoints and R should not change after this point!!!
+
+    //the grid has been trimmed, so make the refinement layout consistent with its final size
+    finalize_refinement();
 
     // MPI domain decomposition is computed now, once the grid size is final
     // (initialize() has already trimmed n_gridpoints twice above).
@@ -3177,6 +3276,7 @@ void Spacetime::evolve()
 
         s1 = slice_rhs(current_slice_ptr, skipped_levels);
         t1 = slices[n]  + (0.5 * dt) * s1;
+        fill_inactive_points(t1);
         exchange_ghosts(t1);
 
         if (time_step % write_CN_interval == 0)
@@ -3185,11 +3285,13 @@ void Spacetime::evolve()
         current_slice_ptr = &t1;
         s2 = slice_rhs(current_slice_ptr, skipped_levels);
         t2 = slices[n] + (0.5 * dt) * s2;
+        fill_inactive_points(t2);
         exchange_ghosts(t2);
 
         current_slice_ptr = &t2;
         s3 = slice_rhs(current_slice_ptr, skipped_levels);
         t3 = slices[n] + dt * s3;
+        fill_inactive_points(t3);
         exchange_ghosts(t3);
 
         current_slice_ptr = &t3;
@@ -3210,6 +3312,9 @@ void Spacetime::evolve()
             State& st = slices[n + 1].states2[j];
             if (st.bssn.chi < min_chi) st.bssn.chi = min_chi;
         }
+
+        //refresh inactive (refinement) points from the updated active points
+        fill_inactive_points(slices[n + 1]);
 
         // Refresh ghost zones of the freshly-updated slice so next step's RHS
         // sees consistent-time values across the domain boundary.
@@ -3525,8 +3630,12 @@ double Spacetime::apparent_horizon_search(const BSSNSlice* slice_ptr)
     double f_prev = f_at(0);
     double r_prev = (0 + offset) * dr_local;
 
+    //only active points carry evolved data, so look for sign changes between consecutive active points
     for (int j = 1; j < N; ++j)
     {
+        if (j < (int)active_points.size() && !active_points[j])
+            continue;
+
         double f_curr = f_at(j);
         double r_curr = (j + offset) * dr_local;
 

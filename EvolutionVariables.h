@@ -250,6 +250,14 @@ class Spacetime
         std::vector<double> quad_weights; //radial quadrature weight of each gridpoint: dr * (local spacing of active points), 0 if inactive
         void fill_quad_weights();
 
+        //mesh refinement: inactive points (those skipped in coarser levels) are not evolved, but are refreshed by cubic
+        //interpolation from neighbouring active points after every RK stage, so that no stencil reads stale data
+        struct InactiveStencil { int j; int idx[4]; double w[4]; };
+        std::vector<InactiveStencil> inactive_stencils;
+        void build_inactive_stencils();
+        void fill_inactive_points(BSSNSlice& slice);
+        void finalize_refinement(); //drop refinement points that do not fit the final (trimmed) grid and rebuild level arrays
+
         std::vector<int> refinement_levels; //lists the refinement levels of each point.
 
         int last_active_j;//outermost active gridpoint, for bdry purposes
