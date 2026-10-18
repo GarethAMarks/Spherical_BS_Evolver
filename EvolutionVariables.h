@@ -251,7 +251,10 @@ class Spacetime
         void fill_quad_weights();
 
         //mesh refinement: inactive points (those skipped in coarser levels) are not evolved, but are refreshed by cubic
-        //interpolation from neighbouring active points after every RK stage, so that no stencil reads stale data
+        //interpolation from neighbouring active points after every RK stage, so that no stencil reads stale data.
+        //Refinement boundary points (points of the refinement pattern whose centred derivative stencil would reach an
+        //inactive point) are treated the same way, with a symmetric stencil over active points.
+        std::vector<int> refinement_boundary_points;
         struct InactiveStencil { int j; int idx[4]; double w[4]; };
         std::vector<InactiveStencil> inactive_stencils;
         void build_inactive_stencils();
@@ -428,7 +431,6 @@ class Spacetime
 
         void fill_active_points();
         void fill_refinement_levels();
-        void kill_refinement_noise();
         void compute_dtK(int time_index);
 
         // Apply high-order damping at gridpoint j: updates rhs arrays in place
