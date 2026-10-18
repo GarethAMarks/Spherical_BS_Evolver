@@ -1604,7 +1604,6 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
     //apply Sommerfeld boundary conditions at outer boundary
     sommerfeld_BC(rhs, res_fac_outer, slice_ptr);
 
-    kill_refinement_noise(); //EXPERIMENTAL: do refinement boundary interpolation at each RHS update
     return rhs;
 }
 
@@ -2156,54 +2155,6 @@ void Spacetime::fill_refinement_levels()
     for (int j = 0; j < n_gridpoints; j++)
         refinement_levels[j] = slices[0].get_refinement_level(j, refinement_points);
 }
-//attempts to remove the noise that accumulates at refinement boundaries
-void Spacetime::kill_refinement_noise()
-{
-    int start_point = 0;
-    for (unsigned int level = 0; level < refinement_points.size(); level++)
-    {
-        int step = pow(2, level);
-
-        int j4 = start_point;
-        while (j4 + step < n_gridpoints && active_points[j4 + step])
-            j4 += step;
-
-        int j3 = j4 - step;
-        int j1 = j4 - 3 * step;
-
-        //skip if the interpolation stencils would leave the grid (cannot happen after finalize_refinement, but guard anyway)
-        if (j1 - 3 * step < 0 || j3 + 3 * step >= n_gridpoints)
-        {
-            start_point = j4;
-            continue;
-        }
-
-        // interpolate at mid-refinement boundary using cubic Lagrange polynomial
-        // Nodes around j1 are at j1-3*step, j1-step, j1+step, j1+3*step
-        // For uniform spacing, the weights at the center (x=0 relative to j1) are [-1/16, 9/16, 9/16, -1/16]
-        BSSNSlice& s1 = *current_slice_ptr;
-
-        const State& st1 = s1.states2[j1 - 3 * step];
-        const State& st2 = s1.states2[j1 - step];
-        const State& st3 = s1.states2[j1 + step];
-        const State& st4 = s1.states2[j1 + 3 * step];
-
-        s1.states2[j1] = (-1.0/16.0) * st1 + (9.0/16.0) * st2 + (9.0/16.0) * st3 + (-1.0/16.0) * st4;
-
-        // Repeat for j3 with the same symmetric stencil around j3
-        const State& tt1 = s1.states2[j3 - 3 * step];
-        const State& tt2 = s1.states2[j3 - step];
-        const State& tt3 = s1.states2[j3 + step];
-        const State& tt4 = s1.states2[j3 + 3 * step];
-
-        s1.states2[j3] = (-1.0/16.0) * tt1 + (9.0/16.0) * tt2 + (9.0/16.0) * tt3 + (-1.0/16.0) * tt4;
-
-        //s1.states2[j1] = 0.5 * (s1.states2[j1 - step] + s1.states2[j1 + step]);
-        //s1.states2[j3] = 0.5 * (s1.states2[j3 - step] + s1.states2[j3 + step]);
-
-        start_point = j4;
-    }
-}
 
 //corrects the initial field momentum in such a way that constraints are satisfied. Must have filled in initial slice already.
 //seems to only work for negative initial perturbation, at least for early tests... now deprecated
@@ -2341,15 +2292,74 @@ void Spacetime::finalize_refinement()
     fill_active_points();
     fill_refinement_levels();
 
+    //refinement boundary points: points of the refinement pattern whose centred 5-point stencil (at their level's spacing)
+    //would reach a point that is not part of the pattern. They cannot be evolved consistently (doing so with interpolated
+    //neighbours is unstable for the Proca system), so they are removed from the active set and filled by interpolation
+    //(see build_inactive_stencils / fill_inactive_points). There is one such point per refinement boundary.
+    refinement_boundary_points.clear();
+    if (!refinement_points.empty())
+    {
+        int last = n_gridpoints - 1;
+        while (last > 0 && !active_points[last]) last--;
+
+        for (int j = 0; j <= last; j++)
+        {
+            if (!active_points[j]) continue;
+            const int rf = 1 << (refinement_levels[j] - 1);
+            for (int m : {-2, -1, 1, 2})
+            {
+                const int i = std::abs(j + m * rf);
+                if (i <= last && !active_points[i])
+                {
+                    refinement_boundary_points.push_back(j);
+                    break;
+                }
+            }
+        }
+        for (int j : refinement_boundary_points)
+            active_points[j] = false;
+
+        if (!run_quietly && mpi_rank == 0)
+        {
+            cout << "Refinement boundary points (interpolated, not evolved):";
+            for (int j : refinement_boundary_points) cout << " " << j;
+            cout << endl;
+        }
+    }
+
     slices[0].refinement_points = refinement_points;
     slices[0].active_points = active_points;
 }
 
 //Precomputes, for every inactive point strictly inside the last active point, a 4-point Lagrange interpolation stencil
-//over the nearest active points (two on each side where possible, otherwise three below and one above).
+//over the nearest active points (two on each side where possible, otherwise three below and one above); refinement
+//boundary points get a symmetric stencil instead.
 void Spacetime::build_inactive_stencils()
 {
     inactive_stencils.clear();
+
+    //refinement boundary points: symmetric 4-point stencil j - 3s, j - s, j + s, j + 3s over active points, with the
+    //smallest such spacing s (weights -1/16, 9/16, 9/16, -1/16)
+    std::vector<bool> is_boundary(n_gridpoints, false);
+    for (int j : refinement_boundary_points)
+    {
+        for (int s = 1; s <= (1 << 12); s *= 2)
+        {
+            const int nodes[4] = {j - 3 * s, j - s, j + s, j + 3 * s};
+            bool usable = true;
+            for (int i : nodes)
+                if (i < 0 || i > last_active_j || !active_points[i]) { usable = false; break; }
+            if (!usable) continue;
+
+            InactiveStencil st;
+            st.j = j;
+            const double w[4] = {-1. / 16., 9. / 16., 9. / 16., -1. / 16.};
+            for (int m = 0; m < 4; m++) { st.idx[m] = nodes[m]; st.w[m] = w[m]; }
+            inactive_stencils.push_back(st);
+            is_boundary[j] = true;
+            break;
+        }
+    }
 
     std::vector<int> act; //indices of active points, in order
     for (int j = 0; j <= last_active_j; j++)
@@ -2364,6 +2374,8 @@ void Spacetime::build_inactive_stencils()
             while (a + 1 < (int)act.size() && act[a + 1] <= j) a++;
             continue;
         }
+
+        if (is_boundary[j]) continue; //already has its symmetric stencil
 
         //act[a] < j < act[a + 1]
         int lo = a - 1;
@@ -2881,7 +2893,6 @@ void Spacetime::evolve()
 
         //enforce that A is traceless
         current_slice_ptr = &slices[n + 1];
-        kill_refinement_noise(); //interpolate over refinement boundary noise before making A traceless-- maybe add at each rk4 stage?
         make_A_traceless(current_slice_ptr);
 
         //enforce minimum chi on owned points (ghosts get refreshed by exchange_ghosts below)
