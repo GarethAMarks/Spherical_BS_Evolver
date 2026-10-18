@@ -104,6 +104,7 @@ class ProcaStar
         double m(int j);
         void rescale_lapse (double phi_shift);
         double f_RHS(double r, double f);
+        void constraint_RHS(double radius, double X, double phi, double E, double f, double g, double& dX, double& dPhi, double& dE);
         double r_areal (int j_iso);
 
     public:
@@ -115,6 +116,13 @@ class ProcaStar
         double noether_charge;
         double compactness;
         double r_99; //solved radius containing 99% of mass
+
+        //Gaussian perturbation f, g, E -> (1 + perturb_amp exp(-(r - perturb_center)^2 / perturb_spread^2)) f, g, E,
+        //applied before evolution (same parameters as for the boson star)
+        bool perturb = 0;
+        double perturb_amp = 0.;
+        double perturb_spread = 1.;
+        double perturb_center = 0.;
 
         double A0;
         double dA;
@@ -140,6 +148,8 @@ class ProcaStar
         void write_isotropic();
 
         void cycle_models(int n_stars, double A_0, double delta_A);
+
+        void add_perturbation(double a, double k, double center, bool quiet = 0);
 
         void broadcast();
 

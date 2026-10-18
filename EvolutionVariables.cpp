@@ -2941,6 +2941,24 @@ void Spacetime::initialize(ProcaStar& proca_star, bool skip_read)
         bumped_resolution = true;
     }
 
+    //optional perturbation of the star (scales the matter fields and re-solves the metric)
+    if (proca_star.perturb && start_time == 0)
+    {
+        if (mpi_rank == 0)
+        {
+            proca_star.add_perturbation(proca_star.perturb_amp, proca_star.perturb_spread, proca_star.perturb_center, run_quietly);
+            proca_star.write_field("PSdata_perturbed.dat");
+            if (isotropic)
+            {
+                proca_star.fill_isotropic_arrays();
+                proca_star.write_isotropic();
+            }
+        }
+        proca_star.broadcast();
+        M = proca_star.M;
+        r_99 = proca_star.r_99;
+    }
+
     dr = R / (n_gridpoints - 1.0);
     dt = courant_factor * dr;
     int num_timesteps = ceil(stop_time / dt);

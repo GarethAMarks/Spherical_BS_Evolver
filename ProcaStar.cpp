@@ -92,6 +92,10 @@ void ProcaStar::read_parameters(bool quiet, string filename)
         fill_parameter(current_line, "n_gridpoints = ", n_gridpoints, quiet);
         fill_parameter(current_line, "courant_factor = ", courant_factor, quiet);
         fill_parameter(current_line, "stop_time = ", stop_time, quiet);
+        fill_parameter(current_line, "perturb = ", perturb, quiet);
+        fill_parameter(current_line, "perturb_amp = ", perturb_amp, quiet);
+        fill_parameter(current_line, "perturb_spread = ", perturb_spread, quiet);
+        fill_parameter(current_line, "perturb_center = ", perturb_center, quiet);
 
         fill_parameter(current_line, "cycle_only = ", cycle_only, quiet);
         fill_parameter(current_line, "A0 = ", A0, quiet);
@@ -821,6 +825,118 @@ void ProcaStar::write_isotropic()
         data_file << std::setprecision (10) << radius_array[j] << "   " << r_iso_array[j] << "    " << r_areal(j) << "    " << psi_iso_array[j]  <<  "    "
         << f_iso_array[j] << "    " << g_iso_array[j] << "    " << phi_iso_array[j] << "    " << phi_lap <<  "    " << X_lap << "    " << E_iso_array[j] << std::endl;
     }
+}
+
+//RHS of the constraint system (X', phi', E') for given f and g: the X equation is the Hamiltonian constraint, phi' the
+//polar slicing condition and E' the Gauss law (t component of the field equation); the same expressions as in
+//state_RHS, but with g supplied rather than obtained from the radial field equation. Used to build perturbed
+//(non-stationary) initial data.
+void ProcaStar::constraint_RHS(double radius, double X, double phi, double E, double f, double g, double& dX, double& dPhi, double& dE)
+{
+    double r = (radius == 0.) ? 0.0000001 : radius;
+    double alpha2 = exp(2. * phi);
+    double X2 = X * X;
+    double Psi = -f * f / alpha2 + g * g / X2;
+    double W = dV(Psi);
+
+    double T1 = (radius == 0.) ? 0. : 0.5 * (D - 3.) * (X2 - 1.) / r;
+    double T3 = (radius == 0.) ? 0. : E / r;
+    double F1 = 4. * M_PI * G * r * X2 / (D - 2.);
+
+    double E_term = E * E / (alpha2 * X2);
+    double two_rho = E_term + 2. * W * f * f / alpha2 + V(Psi);
+    double two_p_r = -E_term + 2. * W * g * g / X2 - V(Psi);
+
+    dX = X * (F1 * two_rho - T1);
+    dPhi = T1 + F1 * two_p_r;
+    double E_corr = (radius == 0.) ? (1. / (D - 1.)) : 1.;
+    dE = E_corr * (W * f * X2 - (D - 2.) * T3 + E * (dPhi + dX / X));
+}
+
+//Perturbs a solved star by scaling the vector potential, f, g -> (1 + a exp(-(r - center)^2 / k^2)) (f, g), then
+//re-solves X, phi and E (the latter from the Gauss law) with f and g held fixed, much as BosonStar::add_perturbation
+//+ fill_given_A do for the scalar field. The resulting data satisfy the Hamiltonian and Gauss constraints and have
+//vanishing momentum density at t = 0 (X_phi real, X_z imaginary). a > 0 makes the star denser. Since the perturbed
+//f no longer integrates to zero against the Gauss law, E acquires a small Coulomb-like tail outside the star, which
+//radiates away. The lapse is rescaled to alpha(infinity) = 1 afterwards, and M, N, E_b and r_99 are recomputed.
+void ProcaStar::add_perturbation(double a, double k, double center, bool quiet)
+{
+    if (g_array.size() != state.size())
+        fill_g_array();
+
+    int N = state.size();
+    double dr = R / (N - 1);
+
+    //perturbed vector potential
+    vector<double> f_p(N), g_p(N);
+    for (int j = 0; j < N; j++)
+    {
+        double r = j * dr;
+        double fac = 1. + a * exp(-pow(r - center, 2.) / (k * k));
+        f_p[j] = fac * state[j].f;
+        g_p[j] = fac * g_array[j];
+    }
+
+    //values at an arbitrary radius (needed at RK4 half steps)
+    auto interp = [&](const vector<double>& y, double r)
+    {
+        int j0 = bound((int)floor(r / dr) - 1, 0, N - 4);
+        return cubic_interp(r, y[j0], y[j0 + 1], y[j0 + 2], y[j0 + 3], j0, dr);
+    };
+
+    //re-integrate X, phi, E outwards from the centre (X(0) = 1, E(0) = 0, phi(0) unchanged)
+    state[0].E = 0.;
+    for (int j = 0; j < N - 1; j++)
+    {
+        double r = j * dr;
+        double X = state[j].X, phi = state[j].phi, E = state[j].E;
+        double fm = interp(f_p, r + 0.5 * dr), gm = interp(g_p, r + 0.5 * dr);
+        double k1X, k1p, k1E, k2X, k2p, k2E, k3X, k3p, k3E, k4X, k4p, k4E;
+
+        constraint_RHS(r, X, phi, E, f_p[j], g_p[j], k1X, k1p, k1E);
+        constraint_RHS(r + 0.5 * dr, X + 0.5 * dr * k1X, phi + 0.5 * dr * k1p, E + 0.5 * dr * k1E, fm, gm, k2X, k2p, k2E);
+        constraint_RHS(r + 0.5 * dr, X + 0.5 * dr * k2X, phi + 0.5 * dr * k2p, E + 0.5 * dr * k2E, fm, gm, k3X, k3p, k3E);
+        constraint_RHS(r + dr, X + dr * k3X, phi + dr * k3p, E + dr * k3E, f_p[j + 1], g_p[j + 1], k4X, k4p, k4E);
+
+        state[j + 1].X = X + (dr / 6.) * (k1X + 2. * k2X + 2. * k3X + k4X);
+        state[j + 1].phi = phi + (dr / 6.) * (k1p + 2. * k2p + 2. * k3p + k4p);
+        state[j + 1].E = E + (dr / 6.) * (k1E + 2. * k2E + 2. * k3E + k4E);
+
+        if (isnan(state[j + 1].X) || isnan(state[j + 1].phi) || isnan(state[j + 1].E))
+        {
+            cerr << "ERROR: constraint solve for perturbed Proca star failed at r = " << r + dr << endl;
+            exit(1);
+        }
+    }
+
+    for (int j = 0; j < N; j++)
+    {
+        state[j].f = f_p[j];
+        g_array[j] = g_p[j];
+    }
+
+    //enforce alpha(infinity) = 1 (rescales f and E along with the lapse; g is unaffected)
+    double phi_shift = -log(state[N - 1].X) - state[N - 1].phi;
+    rescale_lapse(phi_shift);
+
+    double M_old = M, N_old = noether_charge;
+    M = m(N - 1);
+    noether_charge = get_noether_charge();
+    binding_energy = M - mu * noether_charge;
+
+    int j = 0;
+    while (j < N - 1 && m(j) < 0.99 * M)
+    {
+        if (m(j + 1) != m(j))
+            r_99 = dr * j + dr * (0.99 * M - m(j)) / (m(j + 1) - m(j));
+        j++;
+    }
+    compactness = M / r_99;
+
+    if (!quiet)
+        cout << "\nPerturbed Proca star with amplitude " << a << ", width " << k << ", centre " << center
+             << ": M = " << M_old << " -> " << M << ", N = " << N_old << " -> " << noether_charge
+             << ", binding energy = " << binding_energy << endl;
 }
 
 //constructs a family of PS models with A_central = A_0 + delta_A, A_0 + 2 delta_A, ..., writing to ProcaStars.dat.
