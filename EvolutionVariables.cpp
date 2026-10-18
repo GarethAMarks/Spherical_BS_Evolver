@@ -658,6 +658,22 @@ void Spacetime::apply_damping_at_point(int j,
     State& sJ6 = slice_ptr->states2[J[6]];
 
     State damping_corr = d_mult * sevenPointDeriv(h, 6, sJ0, sJ1, sJ2, sJ3, sJ4, sJ5, sJ6);
+
+    // the stencil above reflects every variable as even across z = 0; redo the odd variables (the contracted
+    // Christoffel symbol and the shift) with the correct sign flip for reflected points
+    if (j < 3)
+    {
+        std::array<double, 7> sgn;
+        for (int k = 0; k < 7; ++k) sgn[k] = (j + (k - 3) * res_fac < 0) ? -1. : 1.;
+        auto odd_corr = [&](auto get)
+        {
+            return d_mult * sevenPointDeriv<double>(h, 6, sgn[0] * get(sJ0), sgn[1] * get(sJ1), sgn[2] * get(sJ2),
+                                                    get(sJ3), sgn[4] * get(sJ4), sgn[5] * get(sJ5), sgn[6] * get(sJ6));
+        };
+        damping_corr.bssn.c_chris_Z = odd_corr([](const State& st) { return st.bssn.c_chris_Z; });
+        damping_corr.bssn.beta      = odd_corr([](const State& st) { return st.bssn.beta; });
+    }
+
     rhs_states2[j] = rhs_states2[j] + damping_corr;
 
     if (use_CCZ4 && rhs_theta.size() == static_cast<size_t>(n_gridpoints))
