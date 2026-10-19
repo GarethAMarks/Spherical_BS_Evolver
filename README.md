@@ -105,7 +105,13 @@ Differences in the evolution output for Proca runs:
 | `cell_centered` | `0` | If true, use a cell-centred grid (first point at `dr/2`); otherwise vertex-centred |
 | `BS_resolution_factor` | `1` | Multiply the BS ODE solver resolution by this factor (must be a power of 2) |
 | `refinement_points` | `(none)` | Space-separated list of grid indices after which the effective resolution is halved; set first entry negative to disable refinement |
-| `adaptive_timestep` | `0` | Reduce the timestep at higher refinement levels |
+| `adaptive_timestep` | `0` | With refinement, subcycle the refinement levels in time (Berger-Oliger): each level steps at `courant_factor` times its own spacing, so coarse levels take larger steps. See below |
+
+**Subcycling (`adaptive_timestep = 1`).** The coarsest level takes one step of `courant_factor * dr * 2^(L-1)` (for `L` levels), then each finer level takes two steps of half the size, recursively. Each level also evolves a 14-point buffer (at its own spacing) into its neighbours. Before each substep, the buffer reaching into the next coarser level is filled using RK4 dense output in time and 6-point Lagrange interpolation in space. Notes:
+- Requires refinement and a serial run. Each refinement level must be wide enough to hold the buffer of the next finer level (the code stops with an error otherwise).
+- `write_CN_interval`, `write_interval` and `AH_search_steps` count coarse steps.
+- For refined runs with mostly coarse grid, it is typically 1.6-2.6x faster at the same or better accuracy than `adaptive_timestep = 0`.
+- With `adaptive_timestep = 0` (the default) results are unchanged.
 
 ### Massless real scalar field
 

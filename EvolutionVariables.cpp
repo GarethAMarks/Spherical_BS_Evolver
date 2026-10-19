@@ -489,10 +489,12 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
     // Use cell-centred grid spacing to match read_BS_data (innermost point at z = 0.5*dr)
     double dr = R / ((double)n_gridpoints - 1.0);
 
-    int ref_level = get_refinement_level(index, refinement_points); //refinement level; starts at 1 for no refinement and halves every time.
-
-    // Use bit-shift instead of pow for 2^(ref_level-1)
-    int res_fac = 1 << (ref_level - 1);
+    // stencil spacing 2^(ref_level-1), where the refinement level starts at 1 for no refinement; subcycling may override it
+    int res_fac;
+    if (forced_res_fac && index >= 0 && index < (int)forced_res_fac->size() && (*forced_res_fac)[index] > 0)
+        res_fac = (*forced_res_fac)[index];
+    else
+        res_fac = 1 << (get_refinement_level(index, refinement_points) - 1);
 
     //check index is valid and error out if not
    if (index < 0 || index >= n_gridpoints )
@@ -669,7 +671,7 @@ void Spacetime::apply_damping_at_point(int j,
                                        std::vector<double>& rhs_theta)
 {
     // refinement factor local to j
-    int res_fac = 1 << (slice_ptr->get_refinement_level(j, refinement_points) - 1);
+    int res_fac = (rhs_res_fac && (*rhs_res_fac)[j] > 0) ? (*rhs_res_fac)[j] : (1 << (slice_ptr->get_refinement_level(j, refinement_points) - 1));
 
     // indices for 7-point centered stencil with symmetry fix near the origin
     std::array<int, 7> J = {j - 3 * res_fac, j - 2 * res_fac, j - 1 * res_fac, j, j + 1 * res_fac, j + 2 * res_fac, j + 3 * res_fac};
@@ -1652,8 +1654,9 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
     const int j_hi = std::min(owned_end(), n_gridpoints - 2);
     for (int j = j_lo; j < j_hi; j++)
     {
-        if (!active_points[j] || refinement_levels[j] > max_ref - skipped_levels)//perform no calculations and skip on inactive points
+        if (rhs_mask ? !(*rhs_mask)[j] : (!active_points[j] || refinement_levels[j] > max_ref - skipped_levels))//perform no calculations and skip on inactive points
             continue;
+        point_updates++;
 
         double z = (j + grid_offset) * dr;
 
@@ -1821,7 +1824,8 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
     }
 
     //apply Sommerfeld boundary conditions at outer boundary
-    sommerfeld_BC(rhs, res_fac_outer, slice_ptr);
+    if (rhs_do_sommerfeld)
+        sommerfeld_BC(rhs, res_fac_outer, slice_ptr);
 
     return rhs;
 }
@@ -3121,12 +3125,206 @@ void Spacetime::initialize(ProcaStar& proca_star, bool skip_read)
     setup_after_reading();
 }
 
+// ================= Berger-Oliger subcycling of refinement levels (adaptive_timestep = 1) =================
+void Spacetime::setup_subcycling()
+{
+    const int B = subcycle_buffer;
+    n_levels_sub = refinement_levels.empty() ? 1 : refinement_levels[last_active_j];
+    sublevels.assign(n_levels_sub, SubLevel());
+    sub_start.assign(n_levels_sub, BSSNSlice());
+    sub_stages.assign(n_levels_sub, std::vector<BSSNSlice>());
+    sub_step.assign(n_levels_sub, 0.);
+
+    for (int k = 1; k <= n_levels_sub; k++)
+    {
+        SubLevel& Lv = sublevels[k - 1];
+        Lv.k = k; Lv.s = 1 << (k - 1);
+        Lv.a = -1; Lv.b = -1;
+        for (int j = 0; j <= last_active_j; j++)
+            if (refinement_levels[j] == k) { if (Lv.a < 0) Lv.a = j; Lv.b = j; }
+        int q0 = -1;
+        for (int j = Lv.a; j >= 0 && j <= Lv.b; j++) if (active_points[j]) { q0 = j; break; }
+        if (Lv.a < 0 || q0 < 0) { cerr << "ERROR: subcycling setup failed for refinement level " << k << endl; exit(1); }
+        auto aligned = [&](int j) { return ((j - q0) % Lv.s + Lv.s) % Lv.s == 0; };
+
+        Lv.mask.assign(n_gridpoints, 0); Lv.rf.assign(n_gridpoints, 0);
+        for (int j = Lv.a; j <= Lv.b; j++)
+            if (aligned(j))
+            {
+                if (!active_points[j]) { cerr << "ERROR: subcycling: point " << j << " of refinement level " << k << " is inactive" << endl; exit(1); }
+                Lv.writeback.push_back(j);
+            }
+        // inner buffer: points of the finer level (at this level's spacing), stopping short of the origin so that the
+        // stencils stay well defined; outer buffer: points of the coarser level k+1, filled by interpolation
+        std::vector<int> inner;
+        if (k > 1)
+        {
+            if (Lv.a - B * Lv.s < 3 * Lv.s)
+            {
+                cerr << "ERROR: subcycling (adaptive_timestep = 1): refinement level " << k << " starts too close to the origin to hold its "
+                     << subcycle_buffer << "-point inner buffer; move the first refinement points outwards" << endl;
+                exit(1);
+            }
+            for (int j = Lv.a - 1; j >= Lv.a - B * Lv.s; j--)
+                if (aligned(j)) inner.push_back(j);
+        }
+        if (k < n_levels_sub)
+        {
+            for (int j = Lv.b + 1; j <= std::min(Lv.b + B * Lv.s, last_active_j); j++)
+                if (aligned(j)) Lv.outer_buffer.push_back(j);
+            for (int j : Lv.outer_buffer)
+                if (refinement_levels[j] != k + 1)
+                {
+                    cerr << "ERROR: subcycling (adaptive_timestep = 1): refinement level " << k + 1 << " is too narrow to hold the "
+                         << subcycle_buffer << "-point buffer of level " << k << "; move the refinement points further apart" << endl;
+                    exit(1);
+                }
+        }
+        for (int j : inner) Lv.evolve.push_back(j);
+        for (int j : Lv.writeback) Lv.evolve.push_back(j);
+        for (int j : Lv.outer_buffer) Lv.evolve.push_back(j);
+        for (int j : Lv.evolve) { Lv.mask[j] = 1; Lv.rf[j] = Lv.s; }
+
+        if (!run_quietly && mpi_rank == 0)
+            cout << "Subcycling level " << k << ": spacing " << Lv.s << ", points " << Lv.a << ".." << Lv.b << " (" << Lv.writeback.size()
+                 << " evolved), inner buffer " << inner.size() << ", outer buffer " << Lv.outer_buffer.size() << endl;
+    }
+}
+
+// Fills the outer buffer of level k in W for its substep m (0 or 1) within the current step of level k+1. Values of level
+// k+1 at the intermediate time come from RK4 dense output over its last step; points between level k+1's points are
+// filled by 6-point Lagrange interpolation over the merged points of both levels (the last points of level k, already at
+// the substep's start time in cur, followed by those of level k+1), centred on the target so nothing is extrapolated.
+void Spacetime::fill_outer_buffer(BSSNSlice& W, const BSSNSlice& cur, int k, int m)
+{
+    const SubLevel& Lv = sublevels[k - 1];
+    const SubLevel& Lc = sublevels[k]; // level k+1
+    const int ic = k;                  // storage index of level k+1
+    const bool ccz4 = use_CCZ4 && !cur.theta.empty();
+
+    // dense output weights for y(T + th D) = y(T) + D (b1 k1 + b2 k2 + b3 k3 + b4 k4), b2 = b3
+    const double th = 0.5 * m;
+    const double b1 = th - 1.5 * th * th + 2. * th * th * th / 3.;
+    const double b23 = th * th - 2. * th * th * th / 3.;
+    const double b4 = -0.5 * th * th + 2. * th * th * th / 3.;
+    const std::vector<BSSNSlice>& kk = sub_stages[ic];
+    const BSSNSlice& y0 = sub_start[ic];
+    const double D = sub_step[ic];
+    if (kk.size() != 4) { cerr << "ERROR: subcycling: level " << k + 1 << " has no stored step" << endl; exit(1); }
+
+    struct Node { int j; State s; double theta; };
+    std::vector<Node> nodes;
+    const int n_own = 8;
+    for (size_t q = (Lv.writeback.size() > (size_t)n_own ? Lv.writeback.size() - n_own : 0); q < Lv.writeback.size(); q++)
+    {
+        const int j = Lv.writeback[q];
+        nodes.push_back({j, cur.states2[j], ccz4 ? cur.theta[j] : 0.});
+    }
+    const int jmax = Lv.outer_buffer.empty() ? Lv.b : Lv.outer_buffer.back();
+    int extra = 0;
+    for (int j : Lc.writeback)
+    {
+        if (j <= Lv.b) continue;
+        Node nd{j, y0.states2[j] + D * (b1 * kk[0].states2[j] + b23 * (kk[1].states2[j] + kk[2].states2[j]) + b4 * kk[3].states2[j]), 0.};
+        if (ccz4) nd.theta = y0.theta[j] + D * (b1 * kk[0].theta[j] + b23 * (kk[1].theta[j] + kk[2].theta[j]) + b4 * kk[3].theta[j]);
+        nodes.push_back(nd);
+        if (j > jmax && ++extra >= 3) break;
+    }
+    if (nodes.size() < 6) { cerr << "ERROR: subcycling: too few interpolation points for the buffer of level " << k << endl; exit(1); }
+
+    for (int j : Lv.outer_buffer)
+    {
+        auto it = std::lower_bound(nodes.begin(), nodes.end(), j, [](const Node& nd, int jj) { return nd.j < jj; });
+        const int hi = it - nodes.begin();
+        if (it != nodes.end() && it->j == j) { W.states2[j] = it->s; if (ccz4) W.theta[j] = it->theta; continue; }
+        const int lo = std::max(0, std::min(hi - 3, (int)nodes.size() - 6));
+        State v{};
+        double tv = 0.;
+        for (int a = 0; a < 6; a++)
+        {
+            double w = 1.;
+            for (int b = 0; b < 6; b++)
+                if (b != a) w *= (double)(j - nodes[lo + b].j) / (double)(nodes[lo + a].j - nodes[lo + b].j);
+            v = v + w * nodes[lo + a].s;
+            tv += w * nodes[lo + a].theta;
+        }
+        W.states2[j] = v;
+        if (ccz4) W.theta[j] = tv;
+    }
+}
+
+// one RK4 step of size Dk restricted to the points of level Lv, using that level's stencil spacing; optionally stores the stages
+void Spacetime::rk4_masked(BSSNSlice& W, const SubLevel& Lv, double Dk, std::vector<BSSNSlice>* stages)
+{
+    rhs_mask = &Lv.mask; rhs_res_fac = &Lv.rf; rhs_do_sommerfeld = (Lv.k == n_levels_sub);
+    W.forced_res_fac = &Lv.rf;
+
+    current_slice_ptr = &W;
+    BSSNSlice s1 = slice_rhs(&W);
+    BSSNSlice t1 = W + (0.5 * Dk) * s1; t1.forced_res_fac = &Lv.rf;
+    current_slice_ptr = &t1;
+    BSSNSlice s2 = slice_rhs(&t1);
+    BSSNSlice t2 = W + (0.5 * Dk) * s2; t2.forced_res_fac = &Lv.rf;
+    current_slice_ptr = &t2;
+    BSSNSlice s3 = slice_rhs(&t2);
+    BSSNSlice t3 = W + Dk * s3; t3.forced_res_fac = &Lv.rf;
+    current_slice_ptr = &t3;
+    BSSNSlice s4 = slice_rhs(&t3);
+
+    W = W + (Dk / 6.) * (s1 + 2. * s2 + 2. * s3 + s4);
+    W.forced_res_fac = nullptr;
+    if (stages) { stages->assign(4, BSSNSlice()); (*stages)[0] = s1; (*stages)[1] = s2; (*stages)[2] = s3; (*stages)[3] = s4; }
+    rhs_mask = nullptr; rhs_res_fac = nullptr; rhs_do_sommerfeld = true;
+}
+
+// advances level k by Dk and then, recursively, all finer levels by two steps of Dk / 2; m = index of this step within
+// the step of level k+1
+void Spacetime::subcycle_level(int k, BSSNSlice& cur, double Dk, int m)
+{
+    const SubLevel& Lv = sublevels[k - 1];
+
+    BSSNSlice W = cur;
+    if (k < n_levels_sub)
+        fill_outer_buffer(W, cur, k, m);
+
+    if (k > 1)
+    {   // keep what level k-1 needs to fill its outer buffer
+        sub_start[k - 1] = cur;
+        sub_step[k - 1] = Dk;
+        rk4_masked(W, Lv, Dk, &sub_stages[k - 1]);
+    }
+    else
+        rk4_masked(W, Lv, Dk);
+
+    for (int j : Lv.writeback)
+    {
+        cur.states2[j] = W.states2[j];
+        if (use_CCZ4 && W.theta.size() == cur.theta.size()) cur.theta[j] = W.theta[j];
+        if (cur.states2[j].bssn.chi < min_chi) cur.states2[j].bssn.chi = min_chi;
+    }
+    make_A_traceless(&cur);
+
+    if (k > 1)
+    {
+        subcycle_level(k - 1, cur, 0.5 * Dk, 0);
+        subcycle_level(k - 1, cur, 0.5 * Dk, 1);
+    }
+}
+
 //Time evolution! Must have initialized using a constructed BosonStar first.
 void Spacetime::evolve()
 {
     dr = R / (n_gridpoints - 1.0);
     dt = courant_factor * dr;
     if (critical_study) ricci_4_ctr_max = 0.0;
+
+    const bool subcycling = adaptive_timestep && !refinement_points.empty();
+    if (subcycling)
+    {
+        setup_subcycling();
+        dt = courant_factor * dr * (1 << (n_levels_sub - 1)); //step of the coarsest level, i.e. of the time loop
+    }
+    point_updates = 0;
 
     if (!run_quietly && mpi_rank == 0)
         cout << "dr = " << dr << ", dt = " << dt <<  "   " << endl;
@@ -3187,20 +3385,7 @@ void Spacetime::evolve()
     {
         double t = start_time + time_step * dt;
 
-        int skipped_levels = 0;
-
-        //work out how many outer refinement levels to skip updating based on current time step
-        if (adaptive_timestep && !refinement_points.empty() && time_step > 0)
-        {
-            int skipped_levels = refinement_levels.back() - 1;
-            int skip = time_step;
-            while (skip % 2 == 0 && skipped_levels > 0)
-            {
-                skip /= 2;
-                skipped_levels--;
-            }
-            //cout << "Skipping " << skipped_levels << " refinement levels at time step " << time_step << endl;
-        }
+        int skipped_levels = 0; //skipping of outer levels is superseded by subcycling (adaptive_timestep = 1)
 
         //fill out array until we've reached maximum number of stored slices, then update last element + rotate at end.
         int n = (time_step > max_stored_slices - 2) ? (max_stored_slices - 2) : time_step;
@@ -3211,6 +3396,12 @@ void Spacetime::evolve()
             phase_ctr = central_phase(slices[n], 0);
 
         if (n > 0) compute_dtK(n);
+        if (subcycling)
+        {   // the auxiliary arrays (R_zz, ...) used by slice_mass were last written by the masked RHS evaluations of
+            // the finest level, which leave stale or buffer-contaminated values elsewhere; refresh them on this slice
+            current_slice_ptr = &slices[n];
+            compute_auxiliary_quantities(current_slice_ptr);
+        }
         M = slice_mass(current_slice_ptr); // maybe remove if causes bad bdry oscillations?
 
         // Central-point scalars needed on every rank for control flow.
@@ -3286,6 +3477,16 @@ void Spacetime::evolve()
         //from neighbors before the next RHS reads them across stencils.
         current_slice_ptr = &slices[n];
 
+        if (subcycling)
+        {
+            if (time_step % write_CN_interval == 0)
+                compute_diagnostics(current_slice_ptr); //auxiliary quantities on this slice were refreshed above
+            BSSNSlice next = slices[n];
+            subcycle_level(n_levels_sub, next, dt, 0);
+            slices[n + 1] = next;
+        }
+        else
+        {
         s1 = slice_rhs(current_slice_ptr, skipped_levels);
         t1 = slices[n]  + (0.5 * dt) * s1;
         fill_inactive_points(t1);
@@ -3312,6 +3513,7 @@ void Spacetime::evolve()
         //update slice
         get_update_slice(s1, s2, s3, s4, update_slice, dt, skipped_levels);
         slices[n + 1] = slices[n] + update_slice;
+        }
 
         //enforce that A is traceless
         current_slice_ptr = &slices[n + 1];
@@ -3446,6 +3648,8 @@ void Spacetime::evolve()
             }
         }
     }
+    if (subcycling && !run_quietly && mpi_rank == 0)
+        cout << "Subcycling: " << point_updates << " RHS point evaluations" << endl;
 }
 
 // Tune a parameter by bisection to bracket the critical threshold.

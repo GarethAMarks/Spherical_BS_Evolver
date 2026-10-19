@@ -32,7 +32,7 @@ cell_centered = 0
 BS_resolution_factor = 1 #raise BS resolution in ID solver by this factor
 
 refinement_points = -1 1000 3000 4000 #after these points, effective resolution will be halved. Set first value as 0 or negative for no refinement
-adaptive_timestep = 0
+adaptive_timestep = 0 #with refinement: subcycle levels in time (coarse levels take larger steps); serial runs only, see README
 
 #Massless real scalar field params: [0.01322275631129742, 0.01322275638580322]
 add_real_field = 0 #whether to add a real SF before evolution

@@ -100,6 +100,7 @@ class BSSNSlice
 
         double R;
         double d_z(bssn_var var, int index, int order); //takes z derivative of a BSSN variable on the current slice centred on given index
+        const std::vector<int>* forced_res_fac = nullptr; //subcycling: if set and > 0 at an index, d_z uses this stencil spacing there
         double d_zz(bssn_var var, int index);  //second z-derivative, basically syntactic sugar for d_z(var, index, 2)
 
     friend class Spacetime; //Spacetime should be able to access private BSSNSlice members
@@ -393,7 +394,7 @@ class Spacetime
         bool make_tangherlini;
         bool wave_mode; //testing purposes only, converts to wave eq'n solver
 
-        bool adaptive_timestep; // whether to use adaptive timestep based on refinement level
+        bool adaptive_timestep; // whether to subcycle refinement levels in time (Berger-Oliger), see setup_subcycling
 
         // Optional massless real scalar field configuration (injected before evolution)
         bool add_real_field;   // whether to add a real scalar field pulse before evolution
@@ -405,6 +406,34 @@ class Spacetime
         void auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j);
         void compute_auxiliary_quantities(BSSNSlice* slice_ptr, bool derivatives_computed = 0);
         BSSNSlice slice_rhs(BSSNSlice* slice_ptr, int skipped_levels = 0);
+
+        // ---- Berger-Oliger subcycling of refinement levels (adaptive_timestep = 1, requires refinement) ----
+        // Level k (spacing 2^(k-1) dr) advances with step dt_k = courant_factor * 2^(k-1) dr: the coarsest level takes one
+        // step, then each finer level takes two steps of half the size, recursively. A level evolves its own points plus
+        // buffers of subcycle_buffer points (at its own spacing) into the neighbouring levels; the values computed in the
+        // buffers are discarded. Before each substep the outer buffer of level k is filled from level k+1, using RK4 dense
+        // output (third order in time, from the stages of level k+1's last step) at the points of level k+1 and a 6-point
+        // Lagrange interpolation in space over the merged points of both levels.
+        struct SubLevel {
+            int k = 0, s = 1, a = 0, b = 0;           // level, stencil spacing, first and last index of the level
+            std::vector<int> evolve, writeback, outer_buffer;
+            std::vector<char> mask;                     // 1 at points evolved during this level's substeps
+            std::vector<int> rf;                        // stencil spacing to use at those points
+        };
+        std::vector<SubLevel> sublevels;
+        std::vector<BSSNSlice> sub_start;               // per level: slice at the start of its last step
+        std::vector<std::vector<BSSNSlice>> sub_stages; // per level: RK4 stages k1..k4 of its last step
+        std::vector<double> sub_step;                   // per level: size of its last step
+        const std::vector<char>* rhs_mask = nullptr;    // when set, slice_rhs only evaluates at points with mask 1
+        const std::vector<int>* rhs_res_fac = nullptr;  // when set, KO dissipation uses this stencil spacing
+        bool rhs_do_sommerfeld = true;
+        const int subcycle_buffer = 14; // > 12 = 4 RK4 stages x 3-point stencil (7-point KO dissipation)
+        int n_levels_sub = 1;
+        long long point_updates = 0;    // number of RHS point evaluations (cost measure, printed when subcycling)
+        void setup_subcycling();
+        void subcycle_level(int k, BSSNSlice& cur, double Dk, int m);
+        void rk4_masked(BSSNSlice& W, const SubLevel& Lv, double Dk, std::vector<BSSNSlice>* stages = nullptr);
+        void fill_outer_buffer(BSSNSlice& W, const BSSNSlice& cur, int k, int m);
         void make_A_traceless(BSSNSlice* slice_ptr);
         void compute_diagnostics(BSSNSlice* slice_ptr);
         void update_outer_boundary(double time_step);
