@@ -403,6 +403,12 @@ class Spacetime
                   double dt,
                   int skipped_levels);
 
+    // result[j] = base[j] + c * rhs[j] on this rank's owned range [owned_begin, owned_end).
+    // Non-owned slots of result are left untouched (callers must ensure exchange_ghosts
+    // is called before any reads of result's ghost zones). In serial mode owned range
+    // covers the full grid, so behavior matches the full-grid BSSNSlice operator+/* .
+    void slice_axpy(BSSNSlice& result, const BSSNSlice& base, double c, const BSSNSlice& rhs);
+
         void fill_active_points();
         void fill_refinement_levels();
         void compute_dtK(int time_index);

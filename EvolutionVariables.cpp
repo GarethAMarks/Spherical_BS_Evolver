@@ -14,6 +14,7 @@
 #include<filesystem>
 #include <complex.h>
 #include <array>
+#include <chrono>
 
 using std::cout;
 using std::cin;
@@ -2057,42 +2058,60 @@ void Spacetime::get_update_slice(const BSSNSlice& s1,
                                  double dt,
                                  int skipped_levels)
 {
-    // Compute RK4 combination into a temporary slice
-    BSSNSlice combo = (dt / 6.0) * (s1 + 2.0 * s2 + 2.0 * s3 + s4);
+    const int N = static_cast<int>(s1.states2.size());
 
     // Ensure update_slice structural fields are consistent
-    update_slice.R = combo.R;
-    update_slice.has_BH = combo.has_BH;
-    update_slice.refinement_points = combo.refinement_points;
-    update_slice.use_CCZ4 = combo.use_CCZ4;
-    update_slice.states2.resize(combo.states2.size());
+    update_slice.R = s1.R;
+    update_slice.has_BH = s1.has_BH;
+    update_slice.refinement_points = s1.refinement_points;
+    update_slice.use_CCZ4 = s1.use_CCZ4;
+    update_slice.states2.resize(N);
     if (update_slice.use_CCZ4)
-        update_slice.theta.resize(combo.theta.size());
+        update_slice.theta.resize(N);
 
-    if (skipped_levels <= 0 || refinement_levels.empty())
+    const bool do_preserve = (skipped_levels > 0 && !refinement_levels.empty());
+    const int max_ref = do_preserve ? refinement_levels.back() : 0;
+
+    // MPI: compute RK4 combination only on this rank's owned range. In serial
+    // mode owned range covers the full grid, so this matches the previous
+    // (combo = (dt/6)*(s1 + 2*s2 + 2*s3 + s4)) semantics exactly.
+    const int lo = std::max(owned_begin(), 0);
+    const int hi = std::min(owned_end(), N);
+    const double c = dt / 6.0;
+
+    for (int j = lo; j < hi; ++j)
     {
-        // No preservation requested or no refinement present: copy entire combo
-        update_slice = combo;
-        return;
+        if (do_preserve && refinement_levels[j] > max_ref - skipped_levels)
+            continue; // preserve existing update_slice[j]
+
+        update_slice.states2[j] = c * (s1.states2[j] + 2.0 * s2.states2[j] + 2.0 * s3.states2[j] + s4.states2[j]);
+        if (update_slice.use_CCZ4)
+            update_slice.theta[j] = c * (s1.theta[j] + 2.0 * s2.theta[j] + 2.0 * s3.theta[j] + s4.theta[j]);
     }
+}
 
-    // Determine the maximum refinement level at the outer boundary
-    const int max_ref = refinement_levels.back();
-    const int N = static_cast<int>(combo.states2.size());
+void Spacetime::slice_axpy(BSSNSlice& result, const BSSNSlice& base, double c, const BSSNSlice& rhs)
+{
+    const int N = static_cast<int>(base.states2.size());
 
-    // Preserve existing values in update_slice for outermost 'skipped_levels' levels
-    for (int j = 0; j < N; ++j)
+    // Structural fields follow base; sizes ensured here so first-call case
+    // (result starts with empty states2) still works.
+    result.R = base.R;
+    result.has_BH = base.has_BH;
+    result.refinement_points = base.refinement_points;
+    result.use_CCZ4 = base.use_CCZ4;
+    result.states2.resize(N);
+    if (result.use_CCZ4)
+        result.theta.resize(N);
+
+    const int lo = std::max(owned_begin(), 0);
+    const int hi = std::min(owned_end(), N);
+
+    for (int j = lo; j < hi; ++j)
     {
-        const bool in_outer_levels = (refinement_levels[j] > max_ref - skipped_levels);
-
-        if (!in_outer_levels)
-        {
-            // Use RK4 combo for interior points
-            update_slice.states2[j] = combo.states2[j];
-            if (update_slice.use_CCZ4)
-                update_slice.theta[j] = combo.theta[j];
-        }
-        // else: leave update_slice[j] as-is (preserve existing values)
+        result.states2[j] = base.states2[j] + c * rhs.states2[j];
+        if (result.use_CCZ4)
+            result.theta[j] = base.theta[j] + c * rhs.theta[j];
     }
 }
 
@@ -2767,8 +2786,16 @@ void Spacetime::evolve()
     //s_i are returned RHS's, t represents temporary RHS + current_slice quantities that must be stored so derivatives can be accessed
     BSSNSlice s1, s2, s3, s4, t1, t2, t3, update_slice;
 
+    // Pure-evolution timing: measure wall time inside the main stepping loop
+    // only. All ranks have just completed a collective (bcast of A0) so they
+    // enter the loop in sync; final cout is rank-0-only.
+    bss_mpi::barrier();
+    const auto evol_t0 = std::chrono::steady_clock::now();
+    int steps_executed = 0;
+
     for (int time_step = 0; time_step < num_timesteps; time_step++)
     {
+        ++steps_executed;
         double t = start_time + time_step * dt;
 
         int skipped_levels = 0;
@@ -2865,7 +2892,7 @@ void Spacetime::evolve()
         current_slice_ptr = &slices[n];
 
         s1 = slice_rhs(current_slice_ptr, skipped_levels);
-        t1 = slices[n]  + (0.5 * dt) * s1;
+        slice_axpy(t1, slices[n], 0.5 * dt, s1);
         fill_inactive_points(t1);
         exchange_ghosts(t1);
 
@@ -2874,13 +2901,13 @@ void Spacetime::evolve()
 
         current_slice_ptr = &t1;
         s2 = slice_rhs(current_slice_ptr, skipped_levels);
-        t2 = slices[n] + (0.5 * dt) * s2;
+        slice_axpy(t2, slices[n], 0.5 * dt, s2);
         fill_inactive_points(t2);
         exchange_ghosts(t2);
 
         current_slice_ptr = &t2;
         s3 = slice_rhs(current_slice_ptr, skipped_levels);
-        t3 = slices[n] + dt * s3;
+        slice_axpy(t3, slices[n], dt, s3);
         fill_inactive_points(t3);
         exchange_ghosts(t3);
 
@@ -2889,7 +2916,7 @@ void Spacetime::evolve()
 
         //update slice
         get_update_slice(s1, s2, s3, s4, update_slice, dt, skipped_levels);
-        slices[n + 1] = slices[n] + update_slice;
+        slice_axpy(slices[n + 1], slices[n], 1.0, update_slice);
 
         //enforce that A is traceless
         current_slice_ptr = &slices[n + 1];
@@ -3023,6 +3050,18 @@ void Spacetime::evolve()
                 break;
             }
         }
+    }
+
+    bss_mpi::barrier();
+    const auto evol_t1 = std::chrono::steady_clock::now();
+    const double evol_elapsed = std::chrono::duration<double>(evol_t1 - evol_t0).count();
+    if (mpi_rank == 0)
+    {
+        const double us_per_step = (steps_executed > 0)
+            ? (evol_elapsed * 1.0e6 / steps_executed) : 0.0;
+        cout << "[timing] evolve_loop: " << evol_elapsed << " s over "
+             << steps_executed << " timesteps ("
+             << us_per_step << " us/step) on " << mpi_size << " ranks" << endl;
     }
 }
 
