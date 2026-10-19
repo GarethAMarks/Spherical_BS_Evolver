@@ -13,10 +13,27 @@ C++ code for constructing and evolving spherical boson star solutions. The core 
 
 ```bash
 bash make_BSEvolver_gcc.sh
-./BosonStarStability
+./BosonStarStability.o
 ```
 
 The executable must be run in the same directory as `BSParams.par`.
+
+### Parallel runs with MPI
+
+The time evolution can be split across MPI ranks. Build with an MPI compiler wrapper (`mpicxx`, from Open MPI or MPICH):
+
+```bash
+bash make_BSEvolver_mpi.sh
+mpirun -np 4 ./BosonStarStability_mpi.o
+```
+
+This compiles the same sources with `-DUSE_MPI` into `BosonStarStability_mpi.o`, keeping its object files in `obj/MPI` so the serial and MPI builds can coexist. Without `-DUSE_MPI` every MPI call compiles to a no-op, so the serial build needs no MPI installation.
+
+- The grid is split into contiguous blocks of points, one per rank, exchanging 3 ghost points with each neighbour per RK4 stage. Rank 0 solves for the initial star and broadcasts it, and does all file output.
+- Output is the same as a serial run up to round-off: field differences are of order 1e-12, coming from the order of sums across ranks.
+- Restrictions for more than one rank: the grid must be uniform (`refinement_points` disabled, i.e. first entry `<= 0`) and `adaptive_timestep = 0`, and each rank needs at least 4 points. The code stops with an error otherwise.
+- Boson and Proca star evolutions both run in parallel. Only the evolution is parallelised. Use the serial build for model cycling (`cycle_only = 1`) and the linear perturbation solver (`pert_only = 1`).
+- At the end of each evolution rank 0 prints the wall time of the time-stepping loop, e.g. `[timing] evolve_loop: 35.4 s over 500 timesteps (70748 us/step) on 2 ranks`, which is useful for checking scaling.
 
 ### Proca stars
 
