@@ -58,6 +58,9 @@ struct State {
 //the BSSN variables, along with some auxiliary quantities, on a single time slice.
 class BSSNSlice
 {
+    public:
+        static int origin_mirror_shift; // ghost index -k maps to k - origin_mirror_shift across z = 0 (1 for cell-centred grids)
+
     //public vars are BSSN evolution/gauge variables; privates are auxiliary quantities used in evolution/diagnostic equations
     private:
 

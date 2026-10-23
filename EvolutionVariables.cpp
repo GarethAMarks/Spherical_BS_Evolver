@@ -16,6 +16,9 @@
 #include <array>
 #include <chrono>
 
+// reflection offset across z = 0: 0 for vertex-centred grids, 1 for cell-centred (set in Spacetime::initialize)
+int BSSNSlice::origin_mirror_shift = 0;
+
 using std::cout;
 using std::cin;
 using std::cerr;
@@ -498,11 +501,10 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
     //set of indices using which derivative will be evaluated
     vector<int> J{index - 2 * res_fac, index - res_fac, index, index + res_fac, index + 2 * res_fac};
 
-    //enforce BC at z = 0 by using symmetry
-    if (index <= 1)
-        J[0] = -J[0];
-    if (index == 0)
-        J[1] = -J[1];
+    //enforce BC at z = 0 by using symmetry: the ghost at index -k mirrors index k (vertex-centred, z_j = j dr)
+    //or index k - 1 (cell-centred, z_j = (j + 1/2) dr)
+    for (int k = 0; k < 2; k++)
+        if (J[k] < 0) J[k] = -J[k] - origin_mirror_shift;
 
 
     //At outer edge just use central value for rightmost two; this is cut off in initialize()/ overwritten with BCs anyway
@@ -643,7 +645,8 @@ void Spacetime::apply_damping_at_point(int j,
     // indices for 7-point centered stencil with symmetry fix near the origin
     std::array<int, 7> J = {j - 3 * res_fac, j - 2 * res_fac, j - 1 * res_fac, j, j + 1 * res_fac, j + 2 * res_fac, j + 3 * res_fac};
     if (j < 3) {
-        for (int k = 0; k < 7; ++k) J[k] = std::max(-J[k], J[k]);
+        for (int k = 0; k < 7; ++k)
+            if (J[k] < 0) J[k] = -J[k] - BSSNSlice::origin_mirror_shift;
     }
 
     const double h = dr * res_fac;
@@ -2654,6 +2657,7 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
         boson_star.n_gridpoints = bs_n_gridpoints_orig;
 
     grid_offset = 0.5 * (double)cell_centered;
+    BSSNSlice::origin_mirror_shift = cell_centered ? 1 : 0;
 
     if (!run_quietly)
         cout << "Read BS data" << endl;
