@@ -285,8 +285,6 @@ class Spacetime
         void init_domain_decomposition(); // sets rank/size/local_N/global_lo/global_hi
 
         // Number of doubles per gridpoint on the wire: 9 BSSN + 4 CSF + 2 RSF
-        // (RSF is always packed for simplicity; cheap). Theta (CCZ4) is
-        // exchanged as a separate message when use_CCZ4 is on.
         static constexpr int NDOF_STATE = 9 + 4 + 2;
 
         // Fill left/right NGHOST ghost slots of slice.states2 (and slice.theta
