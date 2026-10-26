@@ -3390,6 +3390,7 @@ void Spacetime::initialize(DiracStar& dirac_star, bool skip_read)
 
     const int ds_n_gridpoints_orig = dirac_star.n_gridpoints;
     bool bumped_resolution = false;
+    BS_perturbed = dirac_star.perturb;
 
     //solve the star at higher resolution and read in data to first slice, as for the BS
     if (BS_resolution_factor > 1 && start_time == 0)
@@ -3413,6 +3414,24 @@ void Spacetime::initialize(DiracStar& dirac_star, bool skip_read)
 
         omega = dirac_star.omega;
         bumped_resolution = true;
+    }
+
+    //optional perturbation of the star (scales the spinor amplitudes and re-solves the metric)
+    if (dirac_star.perturb && start_time == 0)
+    {
+        if (mpi_rank == 0)
+        {
+            dirac_star.add_perturbation(dirac_star.perturb_amp, dirac_star.perturb_spread, dirac_star.perturb_center, run_quietly);
+            dirac_star.write_field("DSdata_perturbed.dat");
+            if (isotropic)
+            {
+                dirac_star.fill_isotropic_arrays();
+                dirac_star.write_isotropic();
+            }
+        }
+        dirac_star.broadcast();
+        M = dirac_star.M;
+        r_99 = dirac_star.r_99;
     }
 
     dr = R / (n_gridpoints - 1.0);

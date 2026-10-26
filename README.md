@@ -75,6 +75,7 @@ with number density `n = (F^2 + G^2) / (2 pi alpha r^2)` and energy density `rho
 - `A_central` is the central spinor amplitude `g0 = G'(0) / sqrt(alpha(0))`, which is unchanged when the lapse is rescaled to `alpha(infinity) = 1`. The maximum-mass ground state has `A_central` of about 0.23.
 - `eigen` counts nodes of `G`; the ground state has nodeless `F` and `G`.
 - `noether_charge` is the particle number of both spinors together.
+- `perturb = 1` scales both spinor amplitudes by `1 + perturb_amp * exp(-(r - perturb_center)^2 / perturb_spread^2)` and re-solves the metric (Hamiltonian constraint for `X`, polar slicing for the lapse) with the amplitudes held fixed, so the data satisfy the constraints; at `t = 0` the amplitudes are real, so the momentum density vanishes and `K_ij = 0`. `perturb_amp > 0` makes the star denser. The perturbed profile is written to `DSdata_perturbed.dat`.
 
 Outputs are `DSdata.dat` (`r F G X phi m f g`, with `f`, `g` the physical spinor functions `F, G / (sqrt(alpha) r)`), `isotropic_dirac.dat` if `isotropic = 1`, and `DiracStars.dat` in `cycle_only` mode, with the same columns as `BosonStars.dat`. The ground-state family reaches a maximum mass `M = 0.7089 / mu` (G = 1) at `omega = 0.825 mu`, with minimum frequency `0.733 mu`; Herdeiro, Pombo & Radu (2017) give `M_max = 0.709` and minimum frequency `0.733`.
 

@@ -106,6 +106,13 @@ class DiracStar
         double compactness;
         double r_99; //solved radius containing 99% of mass
 
+        //Gaussian perturbation of the spinor amplitudes, (u, v) -> (1 + perturb_amp exp(-(r - perturb_center)^2 / perturb_spread^2)) (u, v),
+        //applied before evolution with the metric re-solved (same parameters as for the boson and Proca stars)
+        bool perturb = 0;
+        double perturb_amp = 0.;
+        double perturb_spread = 1.;
+        double perturb_center = 0.;
+
         double A0;
         double dA;
         int n_stars;
@@ -128,6 +135,8 @@ class DiracStar
         void write_isotropic();
 
         void cycle_models(int n_stars, double A_0, double delta_A);
+
+        void add_perturbation(double a, double k, double center, bool quiet = 0);
 
         void broadcast();
 

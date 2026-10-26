@@ -63,6 +63,10 @@ void DiracStar::read_parameters(bool quiet, string filename)
         fill_parameter(current_line, "n_gridpoints = ", n_gridpoints, quiet);
         fill_parameter(current_line, "courant_factor = ", courant_factor, quiet);
         fill_parameter(current_line, "stop_time = ", stop_time, quiet);
+        fill_parameter(current_line, "perturb = ", perturb, quiet);
+        fill_parameter(current_line, "perturb_amp = ", perturb_amp, quiet);
+        fill_parameter(current_line, "perturb_spread = ", perturb_spread, quiet);
+        fill_parameter(current_line, "perturb_center = ", perturb_center, quiet);
 
         fill_parameter(current_line, "cycle_only = ", cycle_only, quiet);
         fill_parameter(current_line, "A0 = ", A0, quiet);
@@ -744,6 +748,122 @@ void DiracStar::cycle_models(int n_stars, double A_0, double delta_A)
 
         phi0_values.push_back(state[0].phi);
     }
+}
+
+//Perturbs a solved star by scaling the spinor amplitudes, (u, v) -> (1 + a exp(-(r - center)^2 / k^2)) (u, v), then re-solves
+//X from the Hamiltonian constraint and phi from the polar slicing condition with u and v held fixed, as
+//ProcaStar::add_perturbation does for the Proca field. At t = 0 u and v are real, so the momentum density
+//Im(ubar u' + vbar v') / (2 pi) vanishes and K_ij = 0 remains consistent. Since the perturbed data are not stationary, the
+//energy density and radial stress are the 3+1 expressions in terms of u, v and their radial derivatives (ComplexSpinorField):
+//    S_rr^ = (v u' - u v') / (2 pi X),   S_thth^ = -u v / (2 pi r),   rho = mu (u^2 - v^2) / (2 pi) + S_rr^ + 2 S_thth^,
+//which for the unperturbed star agree with rho = omega n / alpha and p_r (a = 0 reproduces the star). a > 0 makes the star
+//denser. The lapse is rescaled to alpha(infinity) = 1 afterwards, and M, N, E_b and r_99 are recomputed.
+void DiracStar::add_perturbation(double a, double k, double center, bool quiet)
+{
+    int N = state.size();
+    double dr = R / (N - 1);
+
+    //perturbed physical spinor amplitudes on the grid
+    vector<double> u(N), v(N);
+    for (int j = 0; j < N; j++)
+    {
+        double r = j * dr;
+        double sa = exp(0.5 * state[j].phi);
+        double fac = 1. + a * exp(-pow(r - center, 2.) / (k * k));
+        u[j] = fac * ((j == 0) ? A_central : state[j].G / (sa * r));
+        v[j] = fac * ((j == 0) ? 0. : state[j].F / (sa * r));
+    }
+
+    //4th-order radial derivatives, using the parity across r = 0 (u even, v odd) and one-sided stencils at the outer edge
+    auto deriv = [&](const vector<double>& y, bool odd)
+    {
+        vector<double> d(N);
+        auto at = [&](int j) { return (j >= 0) ? y[j] : (odd ? -y[-j] : y[-j]); };
+        for (int j = 0; j < N; j++)
+        {
+            if (j <= N - 3)
+                d[j] = (at(j - 2) - 8. * at(j - 1) + 8. * at(j + 1) - y[j + 2]) / (12. * dr);
+            else
+                d[j] = (3. * y[j - 4] - 16. * y[j - 3] + 36. * y[j - 2] - 48. * y[j - 1] + 25. * y[j]) / (12. * dr);
+        }
+        return d;
+    };
+    vector<double> du = deriv(u, 0), dv = deriv(v, 1);
+
+    auto interp = [&](const vector<double>& y, double r)
+    {
+        int j0 = bound((int)floor(r / dr) - 1, 0, N - 4);
+        return cubic_interp(r, y[j0], y[j0 + 1], y[j0 + 2], y[j0 + 3], j0, dr);
+    };
+
+    //RHS of the Hamiltonian constraint (X') and polar slicing condition (phi') for given u, v, u', v'
+    auto rhs = [&](double r, double X, double uu, double vv, double duu, double dvv, double& dX, double& dPhi)
+    {
+        double S_rr = (vv * duu - uu * dvv) / (2. * M_PI * X);
+        double v_r = (r == 0.) ? dvv : vv / r;
+        double S_tt = -uu * v_r / (2. * M_PI);
+        double rho = mu * (uu * uu - vv * vv) / (2. * M_PI) + S_rr + 2. * S_tt;
+        double T1 = (r == 0.) ? 0. : 0.5 * (X * X - 1.) / r;
+        dX = X * (4. * M_PI * G * r * X * X * rho - T1);
+        dPhi = T1 + 4. * M_PI * G * r * X * X * S_rr;
+    };
+
+    //re-integrate X, phi outwards from the centre (X(0) = 1, phi(0) unchanged)
+    state[0].X = 1.;
+    for (int j = 0; j < N - 1; j++)
+    {
+        double r = j * dr, rm = r + 0.5 * dr;
+        double X = state[j].X, phi = state[j].phi;
+        double um = interp(u, rm), vm = interp(v, rm), dum = interp(du, rm), dvm = interp(dv, rm);
+        double k1X, k1p, k2X, k2p, k3X, k3p, k4X, k4p;
+
+        rhs(r, X, u[j], v[j], du[j], dv[j], k1X, k1p);
+        rhs(rm, X + 0.5 * dr * k1X, um, vm, dum, dvm, k2X, k2p);
+        rhs(rm, X + 0.5 * dr * k2X, um, vm, dum, dvm, k3X, k3p);
+        rhs(r + dr, X + dr * k3X, u[j + 1], v[j + 1], du[j + 1], dv[j + 1], k4X, k4p);
+
+        state[j + 1].X = X + (dr / 6.) * (k1X + 2. * k2X + 2. * k3X + k4X);
+        state[j + 1].phi = phi + (dr / 6.) * (k1p + 2. * k2p + 2. * k3p + k4p);
+
+        if (isnan(state[j + 1].X) || isnan(state[j + 1].phi))
+        {
+            cerr << "ERROR: constraint solve for perturbed Dirac star failed at r = " << r + dr << endl;
+            exit(1);
+        }
+    }
+
+    //store the perturbed spinor in the F, G variables (which carry the factor sqrt(alpha) r)
+    for (int j = 0; j < N; j++)
+    {
+        double r = j * dr;
+        double sa = exp(0.5 * state[j].phi);
+        state[j].G = sa * r * u[j];
+        state[j].F = sa * r * v[j];
+    }
+    A_central = u[0];
+
+    //enforce alpha(infinity) = 1 (the physical u, v are unaffected)
+    double phi_shift = -log(state[N - 1].X) - state[N - 1].phi;
+    rescale_lapse(phi_shift);
+
+    double M_old = M, N_old = noether_charge;
+    M = m(N - 1);
+    noether_charge = get_noether_charge();
+    binding_energy = M - mu * noether_charge;
+
+    int j = 0;
+    while (j < N - 1 && m(j) < 0.99 * M)
+    {
+        if (m(j + 1) != m(j))
+            r_99 = dr * j + dr * (0.99 * M - m(j)) / (m(j + 1) - m(j));
+        j++;
+    }
+    compactness = M / r_99;
+
+    if (!quiet)
+        cout << "\nPerturbed Dirac star with amplitude " << a << ", width " << k << ", centre " << center
+             << ": M = " << M_old << " -> " << M << ", N = " << N_old << " -> " << noether_charge
+             << ", binding energy = " << binding_energy << endl;
 }
 
 void DiracStar::broadcast()
