@@ -1,5 +1,6 @@
 #BS params
-proca = 0 #if 1, construct Proca stars (ProcaStar) instead of boson stars; only model construction/cycling is implemented
+proca = 0 #if 1, construct and evolve Proca stars (ProcaStar, ComplexVectorField) instead of boson stars
+dirac = 0 #if 1, construct Dirac stars (DiracStar; D = 4, free field) instead of boson stars; takes priority over proca. Evolution not implemented yet
 D = 4
 mu = 1.0
 lambda = 0

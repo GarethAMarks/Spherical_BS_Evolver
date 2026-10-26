@@ -61,6 +61,23 @@ Differences in the evolution output for Proca runs:
 - `Diagnostics.dat` has an extra trailing column with the magnitude of the Gauss constraint `|D_i E^i + mu^2 X_phi|`.
 - In `constraint_norms.dat`, `A_central`, `phi_re_central` and the complex field energy refer to `|X_phi|`, `Re X_phi` and the Proca field. For a stationary star `|X_phi(0)| = A_central`. A trailing `Gauss_L2` column gives the Gauss constraint norm relative to the norm of `mu^2 X_phi`.
 
+### Dirac stars
+
+Setting `dirac = 1` (which takes priority over `proca`) uses the `DiracStar` class to construct spherical Dirac stars: two gravitating Dirac fields of mass `mu` in the `j = 1/2`, `m_j = +-1/2` s-wave states, which together give a spherically symmetric stress tensor (as in Finster, Smoller & Yau 1999 and Herdeiro, Pombo & Radu 2017). Only `D = 4` and the free field (`lambda = 0`, `solitonic = 0`) are supported; other settings stop with an error. Evolution is not implemented yet: `cycle_only = 0` computes and writes a single star, and `cycle_only = 1` cycles a family.
+
+In the code's metric `ds^2 = -alpha^2 dt^2 + X^2 dr^2 + r^2 dOmega^2`, each spinor is `e^{-i omega t} alpha^{-1/2} r^{-1} (G(r) Omega_{-1,m}, i F(r) Omega_{+1,m})` and the Dirac equation reduces to
+
+    G' = X [  G/r + (mu + omega/alpha) F ]
+    F' = X [ -F/r + (mu - omega/alpha) G ]
+
+with number density `n = (F^2 + G^2) / (2 pi alpha r^2)` and energy density `rho = omega n / alpha`; the radial pressure and the full derivation are in `derivations/check_dirac_star.py`, which also checks that the Dirac equation separates, that the stress tensor is static and spherically symmetric, and that it is conserved. Differences in parameter meaning:
+
+- `A_central` is the central spinor amplitude `g0 = G'(0) / sqrt(alpha(0))`, which is unchanged when the lapse is rescaled to `alpha(infinity) = 1`. The maximum-mass ground state has `A_central` of about 0.23.
+- `eigen` counts nodes of `G`; the ground state has nodeless `F` and `G`.
+- `noether_charge` is the particle number of both spinors together.
+
+Outputs are `DSdata.dat` (`r F G X phi m f g`, with `f`, `g` the physical spinor functions `F, G / (sqrt(alpha) r)`), `isotropic_dirac.dat` if `isotropic = 1`, and `DiracStars.dat` in `cycle_only` mode, with the same columns as `BosonStars.dat`. The ground-state family reaches a maximum mass `M = 0.7089 / mu` (G = 1) at `omega = 0.825 mu`, with minimum frequency `0.733 mu`; Herdeiro, Pombo & Radu (2017) give `M_max = 0.709` and minimum frequency `0.733`.
+
 ---
 
 ## Output files

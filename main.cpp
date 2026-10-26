@@ -7,6 +7,7 @@
 #include <sstream>
 #include "BosonStar.h"
 #include "ProcaStar.h"
+#include "DiracStar.h"
 #include "EvolutionVariables.h"
 #include "LinearPerturbation.h"
 #include "mathutils.h"
@@ -21,11 +22,21 @@ void gauss_initialize(BosonStar& boson_star);
 void compute_linear_perturbation(BosonStar& boson_star, double A0, double dA, double n_stars);
 bool read_proca_flag();
 int run_proca_star();
+bool read_dirac_flag();
+int run_dirac_star();
 
 int main(int argc, char** argv)
 {
     bss_mpi::init(&argc, &argv);
     const int mpi_rank = bss_mpi::rank();
+
+    //if dirac = 1 in BSParams.par, construct Dirac stars instead of boson stars
+    if (read_dirac_flag())
+    {
+        int status = run_dirac_star();
+        bss_mpi::finalize();
+        return status;
+    }
 
     //if proca = 1 in BSParams.par, construct Proca stars instead of boson stars
     if (read_proca_flag())
@@ -146,6 +157,48 @@ int run_proca_star()
     if (mpi_rank == 0)
     {
         cout <<  "c4 = " << proca_star.get_c4() << endl;
+        cout << "Ending..."  << endl;
+    }
+    return 0;
+}
+
+//reads the dirac flag from BSParams.par (defaults to 0 if absent)
+bool read_dirac_flag()
+{
+    bool dirac = 0;
+    ifstream params{ "BSParams.par" };
+    string current_line{};
+
+    while (getline(params, current_line))
+        fill_parameter(current_line, "dirac = ", dirac, 1);
+
+    return dirac;
+}
+
+//constructs a Dirac star, or cycles a family of them (cycle_only = 1). Evolution is not implemented yet.
+int run_dirac_star()
+{
+    const int mpi_rank = bss_mpi::rank();
+
+    DiracStar dirac_star{};
+    dirac_star.read_parameters();
+
+    if (mpi_rank == 0)
+    {
+        if (dirac_star.cycle_only)
+            dirac_star.cycle_models(dirac_star.n_stars, dirac_star.A0, dirac_star.dA);
+        else
+        {
+            dirac_star.solve();
+            if (dirac_star.isotropic)
+            {
+                dirac_star.fill_isotropic_arrays();
+                dirac_star.write_isotropic();
+            }
+            dirac_star.write_field();
+            cout << "c4 = " << dirac_star.get_c4() << endl;
+            cout << "NOTE: evolution of Dirac stars is not implemented yet; only the stationary solution was computed." << endl;
+        }
         cout << "Ending..."  << endl;
     }
     return 0;
