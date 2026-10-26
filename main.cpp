@@ -175,7 +175,7 @@ bool read_dirac_flag()
     return dirac;
 }
 
-//constructs a Dirac star, or cycles a family of them (cycle_only = 1). Evolution is not implemented yet.
+//constructs a Dirac star, then either cycles a family of them (cycle_only = 1) or evolves it with ComplexSpinorField matter.
 int run_dirac_star()
 {
     const int mpi_rank = bss_mpi::rank();
@@ -183,22 +183,37 @@ int run_dirac_star()
     DiracStar dirac_star{};
     dirac_star.read_parameters();
 
+    if (dirac_star.cycle_only)
+    {
+        if (mpi_rank == 0)
+        {
+            dirac_star.cycle_models(dirac_star.n_stars, dirac_star.A0, dirac_star.dA);
+            cout << "Ending..."  << endl;
+        }
+        return 0;
+    }
+
     if (mpi_rank == 0)
     {
-        if (dirac_star.cycle_only)
-            dirac_star.cycle_models(dirac_star.n_stars, dirac_star.A0, dirac_star.dA);
-        else
+        dirac_star.solve();
+        if (dirac_star.isotropic)
         {
-            dirac_star.solve();
-            if (dirac_star.isotropic)
-            {
-                dirac_star.fill_isotropic_arrays();
-                dirac_star.write_isotropic();
-            }
-            dirac_star.write_field();
-            cout << "c4 = " << dirac_star.get_c4() << endl;
-            cout << "NOTE: evolution of Dirac stars is not implemented yet; only the stationary solution was computed." << endl;
+            dirac_star.fill_isotropic_arrays();
+            dirac_star.write_isotropic();
         }
+        dirac_star.write_field();
+    }
+    dirac_star.broadcast();
+
+    Spacetime st{};
+    st.initialize(dirac_star);
+    st.write_current_slice();
+    st.write_diagnostics();
+    st.evolve();
+
+    if (mpi_rank == 0)
+    {
+        cout <<  "c4 = " << dirac_star.get_c4() << endl;
         cout << "Ending..."  << endl;
     }
     return 0;

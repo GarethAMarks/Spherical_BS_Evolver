@@ -11,5 +11,6 @@ mpicxx -Wall -fexceptions -g -DUSE_MPI -I.  -c "EvolutionVariables.cpp" -o obj/M
 mpicxx -Wall -fexceptions -g -DUSE_MPI -I.  -c "main.cpp" -o obj/MPI/main.o
 mpicxx -Wall -fexceptions -g -DUSE_MPI -I.  -c "ComplexScalarField.cpp" -o obj/MPI/ComplexScalarField.o
 mpicxx -Wall -fexceptions -g -DUSE_MPI -I.  -c "ComplexVectorField.cpp" -o obj/MPI/ComplexVectorField.o
+mpicxx -Wall -fexceptions -g -DUSE_MPI -I.  -c "ComplexSpinorField.cpp" -o obj/MPI/ComplexSpinorField.o
 mpicxx -Wall -fexceptions -g -DUSE_MPI -I.  -c "RealScalarField.cpp" -o obj/MPI/RealScalarField.o
-mpicxx  -o BosonStarStability_mpi.o obj/MPI/BosonStar.o obj/MPI/ProcaStar.o obj/MPI/DiracStar.o obj/MPI/LinearPerturbation.o obj/MPI/EvolutionVariables.o obj/MPI/main.o obj/MPI/mathutils.o obj/MPI/ComplexScalarField.o obj/MPI/ComplexVectorField.o obj/MPI/RealScalarField.o  -lm
+mpicxx  -o BosonStarStability_mpi.o obj/MPI/BosonStar.o obj/MPI/ProcaStar.o obj/MPI/DiracStar.o obj/MPI/LinearPerturbation.o obj/MPI/EvolutionVariables.o obj/MPI/main.o obj/MPI/mathutils.o obj/MPI/ComplexScalarField.o obj/MPI/ComplexVectorField.o obj/MPI/ComplexSpinorField.o obj/MPI/RealScalarField.o  -lm

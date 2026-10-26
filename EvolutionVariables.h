@@ -10,6 +10,8 @@
 #include "RealScalarField.h"   // for RSF in composite State
 #include "ComplexVectorField.h" // for CVF in composite State
 #include "ProcaStar.h"
+#include "ComplexSpinorField.h" // for CSpF in composite State
+#include "DiracStar.h"
 
 class ComplexScalarField; // forward declaration for friendship
 
@@ -39,7 +41,11 @@ enum bssn_var
     v_Xphi_re,
     v_Xphi_im,
     v_Z_re,
-    v_Z_im
+    v_Z_im,
+    v_u_re, //Dirac variables (ComplexSpinorField): u (even in z), v (odd in z)
+    v_u_im,
+    v_v_re,
+    v_v_im
 };
 
 //a set of BSSN evolution variables at a point in spacetime
@@ -64,6 +70,7 @@ struct State {
     BSSNState bssn;  // geometric and gauge variables
     RSF rsf;        // real scalar field variables if enabled
     CVF cvf;        // complex vector (Proca) field variables if enabled
+    CSpF spf;       // two-spinor Dirac field variables if enabled
 };
 
 //the BSSN variables, along with some auxiliary quantities, on a single time slice.
@@ -87,8 +94,9 @@ class BSSNSlice
 
         void read_BS_data(BosonStar& boson_star,int BS_resolution_factor = 1., bool isotropic = 1, bool cell_centered = 0);
         void read_PS_data(ProcaStar& proca_star, int BS_resolution_factor = 1, bool isotropic = 1, bool cell_centered = 0);
-        void read_checkpoint(int time, int n_gridpoints, bool read_cvf = 0);
-        void write_slice( std::string file_name = "SliceData.dat", bool write_cvf = 0);
+        void read_DS_data(DiracStar& dirac_star, int BS_resolution_factor = 1, bool isotropic = 1, bool cell_centered = 0);
+        void read_checkpoint(int time, int n_gridpoints, bool read_cvf = 0, bool read_spf = 0);
+        void write_slice( std::string file_name = "SliceData.dat", bool write_cvf = 0, bool write_spf = 0);
 
         int get_refinement_level(int j, std::vector<int>& refinement_points);
         std::vector<bool> active_points; //for now just give each slice a copy of the active_points array; can probably be optimized
@@ -120,6 +128,7 @@ class Spacetime
         
         void initialize(BosonStar& boson_star, bool skip_read = false);// If skip_read is true, do not read BSParams.par again (use existing in-memory settings).
         void initialize(ProcaStar& proca_star, bool skip_read = false);// as above, evolving a Proca star with ComplexVectorField matter
+        void initialize(DiracStar& dirac_star, bool skip_read = false);// as above, evolving a Dirac star with ComplexSpinorField matter
         void write_diagnostics(std::string file_name = "Diagnostics.dat");
         void evolve();
         void write_current_slice( std::string file_name = "SliceData.dat");
@@ -171,14 +180,17 @@ class Spacetime
         friend class ComplexScalarField; // allow matter models to access potential V, dV
         friend class RealScalarField;    // allow RSF to access spacetime internals (e.g., D, min_z)
         friend class ComplexVectorField; // allow CVF to access spacetime internals (e.g., D, min_z, mu, proca_damping)
+        friend class ComplexSpinorField; // allow the Dirac field to access spacetime internals (e.g., min_z, mu)
 
         // Matter model instances reused across evaluations to avoid per-point construction
         ComplexScalarField csf_model;
         RealScalarField    rsf_model;
         ComplexVectorField cvf_model;
+        ComplexSpinorField spf_model;
 
         bool proca = false;          // if true, matter is a complex Proca field (ComplexVectorField) instead of the complex scalar
         double proca_damping = 1.0;  // kappa in the Gauss-constraint damping equation d_t Z = alpha (C - kappa Z) + ...
+        bool dirac = false;          // if true, matter is the two-spinor Dirac field (ComplexSpinorField) instead of the complex scalar
         std::vector<double> Gauss;   // |Gauss constraint| D_i E^i + mu^2 X_phi on current slice (Proca only)
         double Gauss_L2 = 0.;        // its L2 norm, normalised like Ham_L2
 
@@ -308,10 +320,10 @@ class Spacetime
 
         void init_domain_decomposition(); // sets rank/size/local_N/global_lo/global_hi
 
-        // Number of doubles per gridpoint on the wire: 9 BSSN + 4 CSF + 2 RSF + 8 CVF
-        // (RSF and CVF are always packed for simplicity; cheap). Theta (CCZ4) is
+        // Number of doubles per gridpoint on the wire: 9 BSSN + 4 CSF + 2 RSF + 8 CVF + 4 CSpF
+        // (RSF, CVF and CSpF are always packed for simplicity; cheap). Theta (CCZ4) is
         // exchanged as a separate message when use_CCZ4 is on.
-        static constexpr int NDOF_STATE = 9 + 4 + 2 + 8;
+        static constexpr int NDOF_STATE = 9 + 4 + 2 + 8 + 4;
 
         // Fill left/right NGHOST ghost slots of slice.states2 (and slice.theta
         // when use_CCZ4) with owned data from the left/right neighbor.

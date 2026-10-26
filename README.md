@@ -63,7 +63,7 @@ Differences in the evolution output for Proca runs:
 
 ### Dirac stars
 
-Setting `dirac = 1` (which takes priority over `proca`) uses the `DiracStar` class to construct spherical Dirac stars: two gravitating Dirac fields of mass `mu` in the `j = 1/2`, `m_j = +-1/2` s-wave states, which together give a spherically symmetric stress tensor (as in Finster, Smoller & Yau 1999 and Herdeiro, Pombo & Radu 2017). Only `D = 4` and the free field (`lambda = 0`, `solitonic = 0`) are supported; other settings stop with an error. Evolution is not implemented yet: `cycle_only = 0` computes and writes a single star, and `cycle_only = 1` cycles a family.
+Setting `dirac = 1` (which takes priority over `proca`) uses the `DiracStar` class to construct spherical Dirac stars: two gravitating Dirac fields of mass `mu` in the `j = 1/2`, `m_j = +-1/2` s-wave states, which together give a spherically symmetric stress tensor (as in Finster, Smoller & Yau 1999 and Herdeiro, Pombo & Radu 2017). Only `D = 4` and the free field (`lambda = 0`, `solitonic = 0`) are supported; other settings stop with an error. `cycle_only = 1` cycles a family; `cycle_only = 0` solves a single star and evolves it with the `ComplexSpinorField` matter model.
 
 In the code's metric `ds^2 = -alpha^2 dt^2 + X^2 dr^2 + r^2 dOmega^2`, each spinor is `e^{-i omega t} alpha^{-1/2} r^{-1} (G(r) Omega_{-1,m}, i F(r) Omega_{+1,m})` and the Dirac equation reduces to
 
@@ -77,6 +77,18 @@ with number density `n = (F^2 + G^2) / (2 pi alpha r^2)` and energy density `rho
 - `noether_charge` is the particle number of both spinors together.
 
 Outputs are `DSdata.dat` (`r F G X phi m f g`, with `f`, `g` the physical spinor functions `F, G / (sqrt(alpha) r)`), `isotropic_dirac.dat` if `isotropic = 1`, and `DiracStars.dat` in `cycle_only` mode, with the same columns as `BosonStars.dat`. The ground-state family reaches a maximum mass `M = 0.7089 / mu` (G = 1) at `omega = 0.825 mu`, with minimum frequency `0.733 mu`; Herdeiro, Pombo & Radu (2017) give `M_max = 0.709` and minimum frequency `0.733`.
+
+In the evolution the tetrad is fixed by the time gauge (`e_0 = n`) and the symmetric spatial triad, which in spherical symmetry is aligned with the diagonal `h_zz`, `h_ww`, so it is a function of the BSSN variables and no extra variables are evolved. The evolved variables are the complex orthonormal-frame amplitudes `u` (even in `z`) and `v` (odd), with `u = e^{-i omega t} g`, `v = e^{-i omega t} f` for a stationary star:
+
+    d_t u = beta u' + (alpha K/2 - i alpha mu) u + i alpha [ sqrt(chi/h_zz) (v' + L v) + (sqrt(chi/h_zz) + sqrt(chi/h_ww)) v / z ]
+    d_t v = beta v' + (alpha K/2 + i alpha mu) v - i alpha [ sqrt(chi/h_zz) (u' + L u) + (sqrt(chi/h_zz) - sqrt(chi/h_ww)) u / z ]
+
+with `L = (h_ww'/h_ww - chi'/chi + alpha'/alpha) / 2`. These and the matter sources are derived and checked in `derivations/check_dirac_3p1.py`. Like the Proca system the equations are first order in space, and the evolution is unstable at the origin without Kreiss-Oliger dissipation: use `damping_factor` of about 1. MPI runs are supported (uniform grid, as for the other matter models).
+
+Differences in the evolution output for Dirac runs:
+
+- `SliceData.dat` and checkpoints have 4 extra trailing columns: `u_re u_im v_re v_im`.
+- In `constraint_norms.dat`, `A_central`, `phi_re_central` and the complex field energy refer to `|u(0)|`, `Re u(0)` and the Dirac field, and the Noether charge is the particle number of both spinors. For a stationary star `|u(0)| = A_central`.
 
 ---
 
