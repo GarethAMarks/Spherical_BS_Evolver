@@ -1836,7 +1836,7 @@ void Spacetime::compute_diagnostics (BSSNSlice* slice_ptr)
 
         double A_zzww_diff = (z <= min_z) ? 0. : ((A_zz - A_ww) / z) ; //difference between A_zz and A_ww, vanishing when z = 0 as required
 
-        Mom_Z[j] = - n * d_z(v_K,j) /(D - 1.) + n * h_WW[j] * (A_zzww_diff - - 0.5 * h_WW[j] * A_ww * d_z(v_h_ww,j))
+        Mom_Z[j] = - n * d_z(v_K,j) /(D - 1.) + n * h_WW[j] * (A_zzww_diff - 0.5 * h_WW[j] * A_ww * d_z(v_h_ww,j))
                - n * h_WW[j] * chris_Zww[j] * A_zz + h_ZZ[j] * (d_z(v_A_zz,j) - 2. * chris_Zzz[j] * A_zz - (D - 1.) * A_zz * d_z(v_chi,j) / (2. * chi)) - 8. * M_PI * j_z[j];
 
         det_h[j] =  h_zz * pow(h_ww,n);
