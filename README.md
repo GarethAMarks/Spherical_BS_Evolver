@@ -63,7 +63,7 @@ Differences in the evolution output for Proca runs:
 
 ### Dirac stars
 
-Setting `dirac = 1` (which takes priority over `proca`) uses the `DiracStar` class to construct spherical Dirac stars: two gravitating Dirac fields of mass `mu` in the `j = 1/2`, `m_j = +-1/2` s-wave states, which together give a spherically symmetric stress tensor (as in Finster, Smoller & Yau 1999 and Herdeiro, Pombo & Radu 2017). Only `D = 4` is supported. `lambda` adds a quartic (Soler-type) self-interaction (see below); `solitonic = 1` is not supported for Dirac stars and stops with an error. `cycle_only = 1` cycles a family; `cycle_only = 0` solves a single star and evolves it with the `ComplexSpinorField` matter model.
+Setting `dirac = 1` (which takes priority over `proca`) uses the `DiracStar` class to construct spherical Dirac stars: two gravitating Dirac fields of mass `mu` in the `j = 1/2`, `m_j = +-1/2` s-wave states, which together give a spherically symmetric stress tensor (as in Finster, Smoller & Yau 1999 and Herdeiro, Pombo & Radu 2017). Only `D = 4` is supported. `lambda` adds a quartic (Soler-type) self-interaction and `solitonic = 1` the degenerate-vacuum potential with vacuum set by `sigma` (both described below). `cycle_only = 1` cycles a family; `cycle_only = 0` solves a single star and evolves it with the `ComplexSpinorField` matter model.
 
 In the code's metric `ds^2 = -alpha^2 dt^2 + X^2 dr^2 + r^2 dOmega^2`, each spinor is `e^{-i omega t} alpha^{-1/2} r^{-1} (G(r) Omega_{-1,m}, i F(r) Omega_{+1,m})` and the Dirac equation reduces to
 
@@ -106,6 +106,68 @@ Evolution tests at `lambda = 1000` (`R = 150`, `dr = 0.05`, `BS_resolution_facto
   - Unperturbed, truncation error triggers collapse at `t = 275.5`.
   - `perturb_amp = -0.01` migrates: the star expands to `|u(0)| = 0.025` and then oscillates about the stable-branch star with the same particle number (`A_central = 0.042`). The particle number is conserved to `1e-5` until ejected matter reaches the outer boundary. The trajectory agrees with `dr = 0.025` to `1e-5`.
 
+#### Degenerate-vacuum potential
+
+`solitonic = 1` gives the Dirac analogue of the solitonic boson-star potential. The mass term and self-interaction combine into
+
+    W(S) = mu S + U(S) = mu S (1 - S/S0)^2,     S0 = sigma^2 / (4 pi),
+
+which vanishes at `S = 0` and at the second (degenerate) vacuum `S = S0`. At the centre of a star `S = A_central^2 / (2 pi)`, so the vacuum is at `A_central = sigma / sqrt(2)`, as for the solitonic boson stars. The fermions are massless in that vacuum: `mu_eff = mu (1 - S/S0)(1 - 3 S/S0)`. In the notation of Herdeiro & Radu (2020), this is their quartic-sextic potential with `beta = 1/4`. It can be combined with `lambda`. The potential is implemented in `DiracPotential.h` and used by both the solver and the evolution. The symbolic checks cover any `U = (lambda/2) S^2 + kappa S^3`, which includes this case.
+
+The shooting solver works for `sigma` of about 0.3 and above. For smaller `sigma` the stars develop thin walls and it fails. `relaxation/` contains a relaxation solver for these models:
+
+- `dirac_relax.py` solves the same equations, written for the physical amplitudes `f`, `g`, with `m`, `phi` and the frequency promoted to a grid variable (`omega' = 0`).
+  - Boundary conditions: regularity at the centre, `alpha -> 1`, and exponential decay.
+  - Method: scipy's `solve_bvp` (4th-order collocation). The mesh is redistributed at every step so that thin walls stay resolved.
+  - Families are followed by pseudo-arclength continuation in `(A_central, omega, ln M)`.
+- `families.py <sigma> <dir> <binary>` computes a whole family. It is seeded by one shooting solution at `A_central = sigma / (2 sqrt 2)`.
+- `stability.py` applies the turning-point method. Stability can only change at the joint extrema of `M` and `N`, which are cusps in the `(N, M)` plane. At each cusp, the branch with the larger `M - omega_c N` at a given `N` has one more unstable mode. The count starts from the stable Newtonian end.
+- `plot_families.py` plots the compactness and mass along the families and marks:
+  - the ends of the stable branches;
+  - the onset of light rings;
+  - where the energy conditions first fail.
+
+For `sigma = 0.3` the relaxation solver agrees with shooting to a few parts in `1e6` in `M`, `N` and `omega`. Halving the tolerance, moving the inner boundary or enlarging the domain changes `M` by about `1e-8`. Along the families `dM = omega dN` holds to about 1% (the residual is from finite differences between neighbouring models).
+
+Each family has the following structure:
+- a tiny Newtonian stable branch, ending at a maximum mass of about `0.5 sigma` (for `sigma <= 0.07` it lies below the computed amplitudes);
+- an unstable branch, down to a minimum of the mass at `A_central = 0.43 sigma/sqrt 2`;
+- a long stable branch from that minimum to the main maximum mass, slightly beyond the vacuum amplitude;
+- an unstable spiral after the main maximum.
+
+Results along the main stable branch (`G = mu = 1`, `C = M / r_99`, `C_max = max m(r)/r`):
+
+| `sigma` | `M_max` | `M_max sigma^2` | `omega` | `C` | `C_max` | `A_central / (sigma/sqrt 2)` | `C` at light-ring onset |
+|---|---|---|---|---|---|---|---|
+| 0.3 | 2.810 | 0.253 | 0.1101 | 0.416 | 0.417 | 1.277 | 0.322 |
+| 0.2 | 5.812 | 0.233 | 0.0634 | 0.434 | 0.430 | 1.213 | 0.333 |
+| 0.15 | 9.655 | 0.217 | 0.0432 | 0.442 | 0.437 | 1.188 | 0.337 |
+| 0.1 | 19.63 | 0.196 | 0.0252 | 0.448 | 0.444 | 1.147 | 0.340 |
+| 0.07 | 36.54 | 0.179 | 0.0156 | 0.451 | 0.448 | 1.116 | 0.341 |
+| 0.05 | 65.64 | 0.164 | 0.0099 | 0.452 | 0.451 | 1.099 | 0.336 |
+| 0.035 | 122.2 | 0.150 | 0.0060 | 0.454 | 0.453 | 1.082 | 0.341 |
+| 0.025 | 219.8 | 0.137 | 0.0038 | 0.454 | 0.454 | 1.069 | 0.340 |
+| 0.018 | > 388.2 | > 0.126 | < 0.0024 | > 0.453 | > 0.453 | > 1.033 | 0.338 |
+| 0.0125 | > 696.9 | > 0.109 | < 0.0015 | > 0.445 | > 0.445 | > 1.009 | 0.337 |
+
+The maximum mass ends the stable branch. For `sigma = 0.018` and `0.0125` the continuation stalls on the stable branch just before the maximum, so those entries are bounds. These runs reached the following (on two cores):
+- `sigma = 0.025`: about 35 minutes for the whole family.
+- `sigma = 0.0125`: `M = 697` and `C = 0.445`, with the walls about `1e-3` of the stellar radius.
+
+The table and the plot come from
+
+    python3 relaxation/families.py 0.1 <dir> ./BosonStarStability.o
+    python3 relaxation/plot_families.py <dir> families.png
+
+Light rings appear on the stable branch at `C` of about 0.34, so a large part of every stable branch has light rings. These stars are expected to suffer the nonlinear light-ring instability, which the turning-point method does not capture.
+
+These compactnesses exceed the Buchdahl bound 4/9, which assumes isotropic, positive pressure no larger than the density. The classical Dirac energy density `rho = (omega/alpha) n - P(S)` is not positive definite, and the cores of these stars violate the energy conditions:
+- **Dominant energy condition:** `|p| <= rho` first fails at `omega` of about 0.35 for every `sigma`, at `C` from 0.16 (`sigma = 0.3`) down to 0.0005 (`sigma = 0.0125`). Beyond that, the pressure in the core exceeds the energy density by large factors.
+- **Weak energy condition:** the energy density becomes negative in the core. The minimum, relative to the maximum of `rho`, is about -2% for `sigma = 0.3` and about -3e-4 for `sigma = 0.0125`. Beyond 0.1% it first appears at `C` of about 0.13–0.26 for `0.035 <= sigma <= 0.3`.
+- **Thin-wall limit:** in the locally homogeneous approximation the interior sits just above the vacuum, with `mu_eff = omega/alpha`. There `rho = -2 mu S0 (S/S0 - 1)^2 < 0` and `p = omega S0 / alpha > 0`, so the mass sits in the wall.
+
+These are classical-field solutions. For fermions, a quantised treatment would not allow negative energy densities.
+
 In the evolution the tetrad is fixed by the time gauge (`e_0 = n`) and the symmetric spatial triad, which in spherical symmetry is aligned with the diagonal `h_zz`, `h_ww`, so it is a function of the BSSN variables and no extra variables are evolved. The evolved variables are the complex orthonormal-frame amplitudes `u` (even in `z`) and `v` (odd), with `u = e^{-i omega t} g`, `v = e^{-i omega t} f` for a stationary star:
 
     d_t u = beta u' + (alpha K/2 - i alpha mu) u + i alpha [ sqrt(chi/h_zz) (v' + L v) + (sqrt(chi/h_zz) + sqrt(chi/h_ww)) v / z ]
@@ -145,7 +207,7 @@ Differences in the evolution output for Dirac runs:
 | `D` | `4` | Spacetime dimension |
 | `mu` | `1.0` | Scalar field mass |
 | `lambda` | `0` | Quartic self-coupling coefficient (Dirac stars: `U = (lambda/2) (psibar psi)^2`, see above) |
-| `solitonic` | `0` | Use solitonic potential `V = mu^2 (1 - 2(A/sigma)^2)^2`; if false, use mini-BS potential |
+| `solitonic` | `0` | Use solitonic potential `V = mu^2 (1 - 2(A/sigma)^2)^2`; if false, use mini-BS potential. Dirac stars: the degenerate-vacuum potential `mu S (1 - S/S0)^2`, `S0 = sigma^2 / (4 pi)` (see Dirac stars) |
 | `sigma` | `0.2` | Solitonic potential parameter (only used when `solitonic = 1`) |
 | `G` | `1.0` | Newton's constant |
 | `eigen` | `0` | Eigenstate index: 0 = ground state, 1 = first excited state, etc. |

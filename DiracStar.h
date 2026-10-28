@@ -3,6 +3,7 @@
 
 #include<vector>
 #include<math.h>
+#include "DiracPotential.h"
 #include <iostream>
 #include<string>
 #include <fstream>
@@ -15,21 +16,22 @@
    matter:  two Dirac spinors of mass mu, L = -psibar (gamma^a nabla_a + mu) psi each ({gamma^a, gamma^b} = 2 eta^{ab}),
             occupying the j = 1/2 (kappa = -1, s-wave) states with m_j = +1/2 and -1/2, so that T_ab is spherically
             symmetric (the configuration of Finster, Smoller & Yau 1999 and Herdeiro, Pombo & Radu 2017), with an optional
-            quartic (Soler-type) self-interaction -U(S) in L, U(S) = (lambda/2) S^2, S = sum_m psibar_m psi_m. Each spinor
-            then obeys (gamma^a nabla_a + mu_eff) psi = 0 with mu_eff = mu + lambda S; lambda > 0 is repulsive (with the
-            sign conventions of Dzhunushaliev & Folomeev 2019, lambda = -lambda_DF and lambda_bar_DF = -lambda / (4 pi G)
-            for mu = 1).
+            self-interaction -U(S) in L, S = sum_m psibar_m psi_m (DiracPotential.h): the quartic (Soler-type)
+            U = (lambda/2) S^2 and/or, with solitonic = 1, the degenerate-vacuum potential mu S + U = mu S (1 - S/S0)^2,
+            S0 = sigma^2 / (4 pi). Each spinor then obeys (gamma^a nabla_a + mu_eff) psi = 0 with mu_eff = mu + U'(S).
+            For the quartic, lambda > 0 is repulsive (with the sign conventions of Dzhunushaliev & Folomeev 2019,
+            lambda = -lambda_DF and lambda_bar_DF = -lambda / (4 pi G) for mu = 1).
    ansatz:  psi_m = e^{-i omega t} alpha^{-1/2} r^{-1} ( G(r) Omega_{-1,m}, i F(r) Omega_{+1,m} )   (Dirac representation,
             Omega_{kappa,m} the spinor spherical harmonics, Omega_{+1,m} = -(sigma . n) Omega_{-1,m}).
 
  With this ansatz the Dirac equation separates into
        G' = X [  G/r + (mu_eff + omega/alpha) F ],      F' = X [ -F/r + (mu_eff - omega/alpha) G ],
- with mu_eff = mu + lambda S and S = (G^2 - F^2) / (2 pi alpha r^2), and the stress tensor summed over both spinors is
- (orthonormal frame; T_ab = T^kin_ab + g_ab (lambda/2) S^2)
+ with mu_eff = mu + U'(S) and S = (G^2 - F^2) / (2 pi alpha r^2), and the stress tensor summed over both spinors is
+ (orthonormal frame; T_ab = T^kin_ab + g_ab P(S), P = S U' - U)
        n   = (F^2 + G^2) / (2 pi alpha r^2)                      (number density; Q = int n sqrt(gamma) d^3x)
-       rho = (omega / alpha) n - (lambda/2) S^2
-       p_r = [ (omega/alpha)(F^2 + G^2) - mu (G^2 - F^2) + 2 F G / r ] / (2 pi alpha r^2) - (lambda/2) S^2
-       p_t = -F G / (2 pi alpha r^3) + (lambda/2) S^2,
+       rho = (omega / alpha) n - P(S)
+       p_r = [ (omega/alpha)(F^2 + G^2) - mu (G^2 - F^2) + 2 F G / r ] / (2 pi alpha r^2) - U(S)
+       p_t = -F G / (2 pi alpha r^3) + P(S),
  so that, as for the boson and Proca stars,
        X'   = X (1 - X^2) / (2 r) + 4 pi G r X^3 rho,      phi' = (X^2 - 1) / (2 r) + 4 pi G r X^2 p_r.
  These are derived (and the separation, symmetry and conservation of T_ab checked) in derivations/check_dirac_star.py.
@@ -38,13 +40,15 @@
  (Dzhunushaliev & Folomeev: 0.41 sqrt(|lambda_bar|) M_Pl^2 / mu) and M/R = 0.21 at the maximum mass.
 
  Regularity at the origin: G = g0 sqrt(alpha0) r + O(r^3), F = (mu_eff0 - omega/alpha0) g0 sqrt(alpha0) r^2 / 3 + O(r^4), with
- mu_eff0 = mu + lambda g0^2 / (2 pi), where
+ mu_eff0 = mu_eff(g0^2 / (2 pi)), where
  g0 = |upper spinor component| * sqrt(4 pi) at r = 0 is the physical central amplitude (invariant under the rescaling
  alpha -> k alpha, omega -> k omega, (F, G) -> sqrt(k) (F, G) used to impose alpha(infinity) = 1). A_central = g0.
 
  Shooting on omega counts the nodes of G: the ground state has nodeless F and G, eigen = n gives n nodes of G.
 
- The stored state variables are F, G, X and phi. D = 4 only; the solitonic potential is not supported.
+ The stored state variables are F, G, X and phi. D = 4 only.
+ For small sigma the shooting fails (thin walls); relaxation/dirac_relax.py (collocation with the frequency as a grid
+ variable, see README) constructs those models.
 */
 
 struct DiracFieldState
@@ -66,7 +70,8 @@ class DiracStar
     private:
         double mu; //fermion mass
         double lambda; //quartic self-coupling, U(S) = (lambda/2) S^2 with S = sum psibar psi (lambda > 0 repulsive)
-        bool solitonic; //read only to reject the solitonic potential
+        bool solitonic; //degenerate-vacuum potential mu S (1 - S/S0)^2, S0 = sigma^2 / (4 pi)
+        DiracPotential pot; //U(S), U'(S), set from mu, lambda, solitonic, sigma by read_parameters
         double G; //Newton's constant
         double sigma;
         int eigen; //desired number of nodes in G, 0 for ground state

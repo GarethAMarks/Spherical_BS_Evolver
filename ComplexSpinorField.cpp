@@ -1,5 +1,6 @@
 #include "ComplexSpinorField.h"
 #include "EvolutionVariables.h"  // for BSSNState and Spacetime
+#include "DiracPotential.h"
 #include <cmath>
 
 CSpF operator+(const CSpF& a, const CSpF& b) { return CSpF{a.u_re + b.u_re, a.u_im + b.u_im, a.v_re + b.v_re, a.v_im + b.v_im}; }
@@ -7,10 +8,16 @@ CSpF operator-(const CSpF& a, const CSpF& b) { return CSpF{a.u_re - b.u_re, a.u_
 CSpF operator*(const CSpF& a, const CSpF& b) { return CSpF{a.u_re * b.u_re, a.u_im * b.u_im, a.v_re * b.v_re, a.v_im * b.v_im}; }
 CSpF operator*(double c, const CSpF& a) { return CSpF{c * a.u_re, c * a.u_im, c * a.v_re, c * a.v_im}; }
 
-// scalar density S = sum psibar psi = (|u|^2 - |v|^2) / (2 pi), which sets mu_eff = mu + lambda S and the potential terms
+// scalar density S = sum psibar psi = (|u|^2 - |v|^2) / (2 pi), which sets mu_eff = mu + U'(S) and the potential terms
 static inline double scalar_density(const CSpF& s)
 {
     return (s.u_re * s.u_re + s.u_im * s.u_im - s.v_re * s.v_re - s.v_im * s.v_im) / (2. * M_PI);
+}
+
+// the self-interaction potential of the spacetime's Dirac field (DiracPotential.h)
+DiracPotential ComplexSpinorField::potential() const
+{
+    return DiracPotential{st->mu, st->lambda, st->solitonic, st->sigma};
 }
 
 CSpF ComplexSpinorField::rhs_CSpF(const CSpF& s, const BSSNState& bssn, const CSpF& d_z_s,
@@ -19,7 +26,7 @@ CSpF ComplexSpinorField::rhs_CSpF(const CSpF& s, const BSSNState& bssn, const CS
     const double alpha = bssn.alpha;
     const double beta = bssn.beta;
     const double chi = (bssn.chi <= 0.0 ? 1e-300 : bssn.chi);
-    const double mu = st->mu + st->lambda * scalar_density(s); // mu_eff
+    const double mu = potential().mu_eff(scalar_density(s)); // mu_eff
 
     const double cz = std::sqrt(chi / bssn.h_zz);   // 1 / sqrt(g_zz)
     const double cw = std::sqrt(chi / bssn.h_ww);   // 1 / sqrt(g_ww)
@@ -55,17 +62,16 @@ double ComplexSpinorField::number_density(const CSpF& s) const
     return (s.u_re * s.u_re + s.u_im * s.u_im + s.v_re * s.v_re + s.v_im * s.v_im) / (2. * M_PI);
 }
 
-// S_rr^ = Re(vbar u' - u vbar') / (2 pi sqrt(g_zz)) + (lambda/2) S^2
+// S_rr^ = Re(vbar u' - u vbar') / (2 pi sqrt(g_zz)) + P(S)
 double ComplexSpinorField::S_rr_hat(const CSpF& s, const BSSNState& bssn, const CSpF& d_z_s) const
 {
     const double chi = (bssn.chi <= 0.0 ? 1e-300 : bssn.chi);
     const double cz = std::sqrt(chi / bssn.h_zz);
     const double re = (s.v_re * d_z_s.u_re + s.v_im * d_z_s.u_im) - (s.u_re * d_z_s.v_re + s.u_im * d_z_s.v_im);
-    const double S = scalar_density(s);
-    return cz * re / (2. * M_PI) + 0.5 * st->lambda * S * S;
+    return cz * re / (2. * M_PI) + potential().P(scalar_density(s));
 }
 
-// S_thth^ = -Re(u vbar) / (2 pi z sqrt(g_ww)) + (lambda/2) S^2; v / z -> v' at the origin
+// S_thth^ = -Re(u vbar) / (2 pi z sqrt(g_ww)) + P(S); v / z -> v' at the origin
 double ComplexSpinorField::S_tt_hat(const CSpF& s, const BSSNState& bssn, const CSpF& d_z_s, double z) const
 {
     const double chi = (bssn.chi <= 0.0 ? 1e-300 : bssn.chi);
@@ -73,15 +79,15 @@ double ComplexSpinorField::S_tt_hat(const CSpF& s, const BSSNState& bssn, const 
     const bool origin = (z <= st->min_z);
     const double vz_re = origin ? d_z_s.v_re : s.v_re / z;
     const double vz_im = origin ? d_z_s.v_im : s.v_im / z;
-    const double S = scalar_density(s);
-    return -cw * (s.u_re * vz_re + s.u_im * vz_im) / (2. * M_PI) + 0.5 * st->lambda * S * S;
+    return -cw * (s.u_re * vz_re + s.u_im * vz_im) / (2. * M_PI) + potential().P(scalar_density(s));
 }
 
 double ComplexSpinorField::rho(const CSpF& s, const BSSNState& bssn, const CSpF& d_z_s, double z) const
 {
-    // rho = mu S + (lambda/2) S^2 + kinetic stresses; S_rr_hat + 2 S_tt_hat include 3 (lambda/2) S^2, hence the -lambda S^2
+    // rho = mu S + U(S) + kinetic stresses; S_rr_hat + 2 S_tt_hat include 3 P(S), which is subtracted
     const double S = scalar_density(s);
-    return st->mu * S - st->lambda * S * S + S_rr_hat(s, bssn, d_z_s) + 2. * S_tt_hat(s, bssn, d_z_s, z);
+    const DiracPotential pot = potential();
+    return st->mu * S + pot.U(S) - 3. * pot.P(S) + S_rr_hat(s, bssn, d_z_s) + 2. * S_tt_hat(s, bssn, d_z_s, z);
 }
 
 // j_z = sqrt(g_zz) j_r^ = Im(ubar u' + vbar v') / (2 pi)

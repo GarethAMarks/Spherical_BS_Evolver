@@ -1,6 +1,8 @@
 #ifndef COMPLEX_SPINOR_FIELD_H
 #define COMPLEX_SPINOR_FIELD_H
 
+#include "DiracPotential.h"
+
 // Forward declarations to avoid heavy includes in this header
 struct BSSNState;   // defined in EvolutionVariables.h
 class Spacetime;    // defined in EvolutionVariables.h/.cpp
@@ -18,13 +20,13 @@ class Spacetime;    // defined in EvolutionVariables.h/.cpp
      d_t u = beta u' + (alpha K/2 - i alpha mu_eff) u + i alpha [ sqrt(chi/h_zz) (v' + L v) + (sqrt(chi/h_zz) + sqrt(chi/h_ww)) v / z ]
      d_t v = beta v' + (alpha K/2 + i alpha mu_eff) v - i alpha [ sqrt(chi/h_zz) (u' + L u) + (sqrt(chi/h_zz) - sqrt(chi/h_ww)) u / z ]
      L = (h_ww'/h_ww - chi'/chi + alpha'/alpha) / 2,
- with mu_eff = mu + lambda S for the quartic self-interaction U(S) = (lambda/2) S^2 (lambda = 0: free field), and, with
- overbars for complex conjugates and hats for orthonormal-frame components,
+ with mu_eff = mu + U'(S) for the self-interaction U(S) of DiracPotential.h (quartic and/or degenerate vacuum), and, with
+ P = S U' - U, overbars for complex conjugates and hats for orthonormal-frame components,
      n        = (|u|^2 + |v|^2) / (2 pi)                               (number density; Q = int n sqrt(gamma) d^3x)
      S        = (|u|^2 - |v|^2) / (2 pi)                               (scalar density sum psibar psi)
-     S_rr^    = Re( vbar u' - u vbar' ) / (2 pi sqrt(g_zz)) + (lambda/2) S^2
-     S_thth^  = -Re( u vbar ) / (2 pi z sqrt(g_ww)) + (lambda/2) S^2
-     rho      = mu S + (lambda/2) S^2 + [kinetic parts of S_rr^ + 2 S_thth^]
+     S_rr^    = Re( vbar u' - u vbar' ) / (2 pi sqrt(g_zz)) + P(S)
+     S_thth^  = -Re( u vbar ) / (2 pi z sqrt(g_ww)) + P(S)
+     rho      = mu S + U(S) + [kinetic parts of S_rr^ + 2 S_thth^]
      j_r^     = Im( ubar u' + vbar v' ) / (2 pi sqrt(g_zz)).
  Derived and checked in derivations/check_dirac_3p1.py (free field), derivations/check_dirac_selfint_3p1.py (the
  self-interaction terms) and, for the stationary equations, derivations/check_dirac_star.py.
@@ -73,6 +75,9 @@ public:
 
 private:
     Spacetime* st; // non-owning pointer to the spacetime context
+
+    // self-interaction potential U(S) built from the spacetime's mu, lambda, solitonic, sigma
+    DiracPotential potential() const;
 
     // orthonormal-frame stresses S_rr^, S_thth^ (shared by rho and the S_ij)
     double S_rr_hat(const CSpF& s, const BSSNState& bssn, const CSpF& d_z_s) const;

@@ -5,11 +5,12 @@ and the (-,+,+,+) signature:
     ds^2 = -alpha^2 dt^2 + X^2 dr^2 + r^2 dOmega^2,     alpha = exp(phi),  r areal,  D = 4.
 
 Matter: two Dirac spinors of mass mu, occupying the j = 1/2 (kappa = -1, s-wave) states with m_j = +1/2 and -1/2,
-which gives a spherically symmetric stress tensor, with an optional quartic (Soler-type) self-interaction
-    L = sum_m -psibar_m (gamma^a nabla_a + mu) psi_m - U(S),   U(S) = (lambda/2) S^2,   S = sum_m psibar_m psi_m,
-so that each spinor obeys (gamma^a nabla_a + mu_eff) psi_m = 0 with mu_eff = mu + U'(S) = mu + lambda S (lambda > 0 is
-repulsive: the effective mass grows with the density), and T_ab = T^kin_ab + g_ab (S U'(S) - U(S)) = T^kin_ab + g_ab (lambda/2) S^2
-(the on-shell Lagrangian). lambda = 0 is the free field. Conventions:
+which gives a spherically symmetric stress tensor, with an optional self-interaction
+    L = sum_m -psibar_m (gamma^a nabla_a + mu) psi_m - U(S),   U(S) = (lambda/2) S^2 + kappa S^3,   S = sum_m psibar_m psi_m,
+so that each spinor obeys (gamma^a nabla_a + mu_eff) psi_m = 0 with mu_eff = mu + U'(S) = mu + lambda S + 3 kappa S^2, and
+T_ab = T^kin_ab + g_ab P(S), P = S U'(S) - U(S) = (lambda/2) S^2 + 2 kappa S^3 (the on-shell Lagrangian). The quartic
+(Soler) case is kappa = 0 (lambda > 0 repulsive); the degenerate-vacuum potential mu S + U = mu S (1 - S/S0)^2 is
+lambda = -4 mu / S0, kappa = mu / S0^2. lambda = kappa = 0 is the free field. Conventions:
     Clifford algebra {gamma^a, gamma^b} = 2 eta^{ab}, eta = diag(-1, 1, 1, 1)  (gamma^a = -i gamma_Dirac^a),
     Dirac equation   (gamma^a nabla_a + mu) psi = 0,   L = -psibar (gamma^a nabla_a + mu) psi,  psibar = psi^dag i gamma^0,
     stress tensor    T_ab = (1/4) (X_ab + X_ba),  X_ab = psibar gamma_a nabla_b psi - (nabla_a psibar) gamma_b psi
@@ -24,16 +25,16 @@ The script
   1. computes the spin connection and checks it vanishes in flat space (alpha = X = 1);
   2. inserts the ansatz into the Dirac equation and checks that it separates into the radial equations
          G' = X [  G/r + (mu_eff + omega/alpha) F ]
-         F' = X [ -F/r + (mu_eff - omega/alpha) G ],     mu_eff = mu + lambda S,   S = (G^2 - F^2) / (2 pi alpha r^2)
+         F' = X [ -F/r + (mu_eff - omega/alpha) G ],     mu_eff = mu + U'(S),   S = (G^2 - F^2) / (2 pi alpha r^2)
      (the alpha^{-1/2} and 1/r factors absorb the spin-connection terms; in flat space these are the textbook
       kappa = -1 radial equations);
   3. computes T_ab summed over both spinors, checks it is static (T_0i = 0) and spherically symmetric, and reads off
-         rho = (omega/alpha) n - (lambda/2) S^2,
-         p_r = [ (omega/alpha)(F^2 + G^2) - mu (G^2 - F^2) + 2 F G / r ] / (2 pi alpha r^2) - (lambda/2) S^2,
-         p_t = -F G / (2 pi alpha r^3) + (lambda/2) S^2,
+         rho = (omega/alpha) n - P(S),
+         p_r = [ (omega/alpha)(F^2 + G^2) - mu (G^2 - F^2) + 2 F G / r ] / (2 pi alpha r^2) - U(S),
+         p_t = -F G / (2 pi alpha r^3) + P(S),
      with n = (F^2 + G^2) / (2 pi alpha r^2) and S = sum_m psibar_m psi_m = (G^2 - F^2) / (2 pi alpha r^2);
   4. checks conservation  p_r' + (rho + p_r) alpha'/alpha + 2 (p_r - p_t)/r = 0  identically, for arbitrary alpha, X
-     (for lambda != 0 this fixes the relative normalisation of the g_ab (lambda/2) S^2 term);
+     (with the interaction this fixes the relative normalisation of the g_ab P(S) term);
   5. prints the Einstein equations (G = 1) used by the solver:
          X'   = X (1 - X^2) / (2 r) + 4 pi r X^3 rho
          phi' = (X^2 - 1) / (2 r) + 4 pi r X^2 p_r.
@@ -43,7 +44,10 @@ import sympy as sp
 
 t, r, th, ph = sp.symbols('t r theta phi', positive=True)
 w, mu = sp.symbols('omega mu', positive=True)
-lam = sp.symbols('lambda', real=True)
+lam, kap = sp.symbols('lambda kappa', real=True)
+U_of = lambda S: lam/2*S**2 + kap*S**3
+dU_of = lambda S: lam*S + 3*kap*S**2
+P_of = lambda S: S*dU_of(S) - U_of(S)
 al = sp.Function('alpha')(r)
 X = sp.Function('X')(r)
 F = sp.Function('F')(r)
@@ -150,9 +154,9 @@ def nabla_frame(psi):
     nc = nabla_coord(psi)
     return [sum((E[a, m] * nc[m] for m in range(4)), sp.zeros(4, 1)) for a in range(4)]
 
-# self-interaction: S = sum_m psibar_m psi_m (checked below), mu_eff = mu + lambda S
+# self-interaction: S = sum_m psibar_m psi_m (checked below), mu_eff = mu + U'(S)
 S_dens = (G**2 - F**2) / (2*sp.pi*al*r**2)
-mu_eff = mu + lam * S_dens
+mu_eff = mu + dU_of(S_dens)
 # radial equations to be verified
 dG = X * (G/r + (mu_eff + w/al) * F)
 dF = X * (-F/r + (mu_eff - w/al) * G)
@@ -194,7 +198,7 @@ for psi, nf in nab:
             Xab[a, b] = (psibar * gam_low[a] * nf[b])[0] - (nfbar[a] * gam_low[b] * psi)[0]
     T += (Xab + Xab.T) / 4
     n_dens += (dagger(psi) * psi)[0]
-T += eta * (lam / 2) * S_dens**2   # g_ab (S U' - U) in the orthonormal frame
+T += eta * P_of(S_dens)   # g_ab (S U' - U) in the orthonormal frame
 
 def ev(e, pt):
     return simp(at_point(e, pt).subs({dG_: dG_val, dF_: dF_val}))
@@ -223,27 +227,28 @@ S_expected = (G_**2 - F_**2) / (2*sp.pi*a_*r**2)
 assert simp(n_dens - n_expected) == 0
 assert simp(ev(S_check, pt0) - S_expected) == 0, 'psibar psi summed over both spinors'
 assert simp(at_point(S_dens, pt0) - S_expected) == 0
-assert simp(rho - (w/a_) * n_expected + lam/2 * S_expected**2) == 0
-pr_expected = ((w/a_) * (F_**2 + G_**2) - mu * (G_**2 - F_**2) + 2*F_*G_/r) / (2*sp.pi*a_*r**2) - lam/2 * S_expected**2
-pt_expected = -(F_*G_ / r) / (2*sp.pi*a_*r**2) + lam/2 * S_expected**2
+assert simp(rho - (w/a_) * n_expected + P_of(S_expected)) == 0
+pr_expected = ((w/a_) * (F_**2 + G_**2) - mu * (G_**2 - F_**2) + 2*F_*G_/r) / (2*sp.pi*a_*r**2) - U_of(S_expected)
+pt_expected = -(F_*G_ / r) / (2*sp.pi*a_*r**2) + P_of(S_expected)
 assert simp(p_r - pr_expected) == 0, sp.factor(p_r)
 assert simp(p_t - pt_expected) == 0, ('p_t', sp.factor(p_t))
 print('   n   = (F^2 + G^2) / (2 pi alpha r^2),   S = sum psibar psi = (G^2 - F^2) / (2 pi alpha r^2)')
-print('   rho = (omega/alpha) n - (lambda/2) S^2')
-print('   p_r = [ (omega/alpha)(F^2 + G^2) - mu (G^2 - F^2) + 2 F G / r ] / (2 pi alpha r^2) - (lambda/2) S^2')
-print('   p_t = -F G / (2 pi alpha r^3) + (lambda/2) S^2')
+print('   rho = (omega/alpha) n - P(S),   P = S U\'(S) - U(S),   U = (lambda/2) S^2 + kappa S^3')
+print('   p_r = [ (omega/alpha)(F^2 + G^2) - mu (G^2 - F^2) + 2 F G / r ] / (2 pi alpha r^2) - U(S)')
+print('   p_t = -F G / (2 pi alpha r^3) + P(S)')
 
 # ---------------- conservation ----------------
 # d/dr along a solution: chain rule through a, F_, G_ (alpha' = da arbitrary, X arbitrary)
 dpr = sp.diff(pr_expected, r) + sp.diff(pr_expected, a_) * da_ + sp.diff(pr_expected, F_) * dF_val + sp.diff(pr_expected, G_) * dG_val
 cons = simp(dpr + (rho + pr_expected) * da_ / a_ + 2 * (pr_expected - pt_expected) / r)
 assert cons == 0, cons
-# and the coefficient of the g_ab S^2 term is fixed by conservation: any other value fails
-kk = sp.Symbol('k')
-pr_k, pt_k, rho_k = pr_expected + (kk - lam/2) * S_expected**2, pt_expected + (kk - lam/2) * S_expected**2, rho - (kk - lam/2) * S_expected**2
+# and the normalisation of the g_ab P term is fixed by conservation: c P with c != 1 fails
+cc = sp.Symbol('c')
+dP = (cc - 1) * P_of(S_expected)
+pr_k, pt_k, rho_k = pr_expected + dP, pt_expected + dP, rho - dP
 dpr_k = sp.diff(pr_k, r) + sp.diff(pr_k, a_) * da_ + sp.diff(pr_k, F_) * dF_val + sp.diff(pr_k, G_) * dG_val
 cons_k = simp(dpr_k + (rho_k + pr_k) * da_ / a_ + 2 * (pr_k - pt_k) / r)
-assert sp.solve(cons_k, kk) == [lam/2], sp.solve(cons_k, kk)
+assert sp.solve(cons_k, cc) == [1], sp.solve(cons_k, cc)
 print('4. p_r\' + (rho + p_r) alpha\'/alpha + 2 (p_r - p_t)/r = 0 identically (any alpha, X): OK')
 
 print('5. Einstein equations (G = 1):  X\' = X (1 - X^2)/(2r) + 4 pi r X^3 rho,   phi\' = (X^2 - 1)/(2r) + 4 pi r X^2 p_r')

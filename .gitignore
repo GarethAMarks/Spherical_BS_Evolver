@@ -32,3 +32,4 @@
 	obj/*
 	update_boundaries
 	*.dat
+__pycache__/

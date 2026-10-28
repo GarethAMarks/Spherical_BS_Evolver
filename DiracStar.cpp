@@ -77,7 +77,7 @@ void DiracStar::read_parameters(bool quiet, string filename)
     check_supported();
 }
 
-//the Dirac star solver is implemented in D = 4 only, for the free field or the quartic self-interaction
+//the Dirac star solver is implemented in D = 4 only; sets the self-interaction potential
 void DiracStar::check_supported()
 {
     if (D != 4.)
@@ -85,12 +85,12 @@ void DiracStar::check_supported()
         cerr << "ERROR: Dirac stars are only implemented for D = 4 (the number of spinors and their angular structure depend on D)" << endl;
         exit(1);
     }
-    if (solitonic)
+    if (solitonic && sigma <= 0.)
     {
-        cerr << "ERROR: the solitonic potential is not implemented for Dirac stars: set solitonic = 0 (lambda gives the quartic"
-             << " self-interaction U = (lambda/2) (psibar psi)^2)" << endl;
+        cerr << "ERROR: the degenerate-vacuum Dirac potential needs sigma > 0" << endl;
         exit(1);
     }
+    pot = DiracPotential{mu, lambda, solitonic, sigma};
 }
 
 //scalar density S = sum_m psibar_m psi_m = (G^2 - F^2) / (2 pi alpha r^2); at r = 0, S = A_central^2 / (2 pi)
@@ -104,13 +104,13 @@ double DiracStar::scalar_density(double r, const DiracFieldState& s)
 
 //number density n, energy density rho and radial pressure p_r of the two spinors at radius r (orthonormal frame);
 //at r = 0 the regular limits G/r -> g0 sqrt(alpha0), F/r -> 0, F/r^2 -> (mu_eff - omega/alpha0) g0 sqrt(alpha0) / 3 are used.
-//With the self-interaction, rho = (omega/alpha) n - (lambda/2) S^2 and p_r = [...] - (lambda/2) S^2 (see DiracStar.h)
+//With the self-interaction, rho = (omega/alpha) n - P(S) and p_r = [...] - U(S) (see DiracStar.h)
 void DiracStar::matter_terms(double r, long double frequency, const DiracFieldState& s, double& rho, double& p_r, double& n)
 {
     double alpha = exp(s.phi);
     double w_a = static_cast<double>(frequency) / alpha;
     double S = scalar_density(r, s);
-    double mu_eff = mu + lambda * S;
+    double mu_eff = pot.mu_eff(S);
 
     double Gr, Fr, FG_r3; //G/r, F/r and F G / r^3
     if (r == 0.)
@@ -128,8 +128,8 @@ void DiracStar::matter_terms(double r, long double frequency, const DiracFieldSt
 
     double norm = 1. / (2. * M_PI * alpha);
     n = norm * (Fr * Fr + Gr * Gr);
-    rho = w_a * n - 0.5 * lambda * S * S;
-    p_r = norm * (w_a * (Fr * Fr + Gr * Gr) - mu * (Gr * Gr - Fr * Fr) + 2. * FG_r3) - 0.5 * lambda * S * S;
+    rho = w_a * n - pot.P(S);
+    p_r = norm * (w_a * (Fr * Fr + Gr * Gr) - mu * (Gr * Gr - Fr * Fr) + 2. * FG_r3) - pot.U(S);
 }
 
 //right-hand side of the Einstein-Dirac system
@@ -152,7 +152,7 @@ DiracFieldState DiracStar::state_RHS(const double radius, const long double freq
     double Gr = (r == 0.) ? A_central * exp(0.5 * s.phi) : s.G / r;
     double Fr = (r == 0.) ? 0. : s.F / r;
 
-    double mu_eff = mu + lambda * scalar_density(r, s);
+    double mu_eff = pot.mu_eff(scalar_density(r, s));
     double dF = s.X * (-Fr + (mu_eff - w_a) * s.G);
     double dG = s.X * (Gr + (mu_eff + w_a) * s.F);
 
@@ -199,7 +199,7 @@ void DiracStar::rk4_solve (const long double freq)
         //and after the metric becomes singular G can change sign, giving spurious zero crossings. Stop as soon as the
         //physical amplitude g = G / (sqrt(alpha) r) or f exceeds 3 A_central (bound states have |f|, |g| <~ A_central).
         //Not applied to the free field, whose shooting is unchanged.
-        if (lambda != 0.)
+        if (!pot.free_field())
         {
             double bound_amp = 3. * A_central * (j + 1) * dr * exp(0.5 * state[j + 1].phi);
             if (abs(state[j + 1].G) > bound_amp || abs(state[j + 1].F) > bound_amp)
@@ -783,8 +783,8 @@ void DiracStar::cycle_models(int n_stars, double A_0, double delta_A)
 //ProcaStar::add_perturbation does for the Proca field. At t = 0 u and v are real, so the momentum density
 //Im(ubar u' + vbar v') / (2 pi) vanishes and K_ij = 0 remains consistent. Since the perturbed data are not stationary, the
 //energy density and radial stress are the 3+1 expressions in terms of u, v and their radial derivatives (ComplexSpinorField):
-//    S_rr^ = (v u' - u v') / (2 pi X) + (lambda/2) S^2,   S_thth^ = -u v / (2 pi r) + (lambda/2) S^2,
-//    rho = mu S + (lambda/2) S^2 + [kinetic parts of S_rr^ + 2 S_thth^],   S = (u^2 - v^2) / (2 pi),
+//    S_rr^ = (v u' - u v') / (2 pi X) + P(S),   S_thth^ = -u v / (2 pi r) + P(S),
+//    rho = mu S + U(S) + [kinetic parts of S_rr^ + 2 S_thth^],   S = (u^2 - v^2) / (2 pi),
 //which for the unperturbed star agree with rho = omega n / alpha and p_r (a = 0 reproduces the star). a > 0 makes the star
 //denser. The lapse is rescaled to alpha(infinity) = 1 afterwards, and M, N, E_b and r_99 are recomputed.
 void DiracStar::add_perturbation(double a, double k, double center, bool quiet)
@@ -832,8 +832,8 @@ void DiracStar::add_perturbation(double a, double k, double center, bool quiet)
         double S_rr = (vv * duu - uu * dvv) / (2. * M_PI * X);
         double v_r = (r == 0.) ? dvv : vv / r;
         double S_tt = -uu * v_r / (2. * M_PI);
-        double rho = mu * S + 0.5 * lambda * S * S + S_rr + 2. * S_tt;
-        S_rr += 0.5 * lambda * S * S;
+        double rho = mu * S + pot.U(S) + S_rr + 2. * S_tt;
+        S_rr += pot.P(S);
         double T1 = (r == 0.) ? 0. : 0.5 * (X * X - 1.) / r;
         dX = X * (4. * M_PI * G * r * X * X * rho - T1);
         dPhi = T1 + 4. * M_PI * G * r * X * X * S_rr;
