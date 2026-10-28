@@ -24,7 +24,7 @@ an unknown parameter, which follows the family through turning points in A. scip
 adaptive mesh refinement) is used, which resolves thin walls automatically.
 
 Diagnostics: M = m(R), N = int 2 r^2 X (f^2 + g^2) dr (both spinors), r_99 (99% of M), C = M / r_99, C_max = max m/r, the
-light rings (zeros of d/dr (alpha / r), i.e. r phi' = 1), the energy conditions (wec = min rho / max rho, negative if the
+light rings (zeros of d/dr (alpha / r), i.e. r phi' = 1), C4 = M / r4 (BosonStar::get_c4), omega / alpha(0), the energy conditions (wec = min rho / max rho, negative if the
 weak energy condition fails; dec = max(|p_r|, |p_t|) - rho, over max rho, positive if the dominant one fails), and the
 first-law residual along a family (dM = omega dN).
 """
@@ -132,6 +132,17 @@ class DiracRelax:
         j = np.searchsorted(m, 0.99 * M)
         r99 = np.interp(0.99 * M, m[max(j - 1, 0):j + 1], sol.x[max(j - 1, 0):j + 1]) if 0 < j < len(m) else np.nan
         cm = m / sol.x
+        # C4 (Collodel et al., as BosonStar::get_c4): M / r4, r4 the outermost radius where X^2 deviates from its
+        # Schwarzschild value 1 / (1 - 2M/r) by more than 1e-3 (relative), on a fine uniform grid
+        rf = np.linspace(sol.x[0], sol.x[-1], 200001)[1:-1]
+        mf = sol.sol(rf)[2]
+        dev = np.abs((1. - 2. * M / rf) / (1. - 2. * mf / rf) - 1.)
+        out = np.where(dev > 1e-3)[0]
+        if len(out) and out[-1] + 1 < len(rf):
+            j4 = out[-1]
+            r4 = rf[j4] + (rf[j4 + 1] - rf[j4]) * (1e-3 - dev[j4]) / (dev[j4 + 1] - dev[j4])
+        else:
+            r4 = np.nan
         # light rings: r phi' = 1 (stationary points of alpha / r)
         h = sol.x * dphi - 1.
         lr = sol.x[1:][np.sign(h[1:]) != np.sign(h[:-1])]
@@ -142,7 +153,7 @@ class DiracRelax:
         dec = (np.maximum(np.abs(pr), np.abs(pt)) - rho).max() / rmax
         return dict(A=A, omega=w[0], M=M, N=N, Eb=M - self.pot.mu * N, r99=r99, C=M / r99, Cmax=cm.max(),
                     r_Cmax=sol.x[cm.argmax()], phi0=phi[0], alpha0=np.exp(phi[0]), light_rings=lr,
-                    nodes=len(sol.x), g_nodes=int(np.sum(np.sign(g[1:]) != np.sign(g[:-1]))), wec=wec, dec=dec)
+                    nodes=len(sol.x), g_nodes=int(np.sum(np.sign(g[1:]) != np.sign(g[:-1]))), wec=wec, dec=dec, C4=M / r4, omega_c=w[0] / np.exp(phi[0]))
 
 
 def seed_from_DSdata(path, r_mesh):

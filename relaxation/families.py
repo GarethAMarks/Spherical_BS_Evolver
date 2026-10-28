@@ -51,17 +51,38 @@ def family(sigma, work, binary, seed_ratio=0.5, A_max_ratio=4., A_min_ratio=1e-4
                                                                          time.time() - t), flush=True)
         branches.append(out)
     fam = branches[1][::-1] + branches[0][1:]          # ordered from low to high amplitude along the arc
-    keys = ['A', 'omega', 'M', 'N', 'Eb', 'r99', 'C', 'Cmax', 'r_Cmax', 'alpha0', 'nodes', 'wec', 'dec']
+    keys = ['A', 'omega', 'M', 'N', 'Eb', 'r99', 'C', 'Cmax', 'r_Cmax', 'alpha0', 'nodes', 'wec', 'dec', 'C4', 'omega_c']
     data = {k: np.array([d[k] for d in fam]) for k in keys}
     data['n_light_rings'] = np.array([len(d['light_rings']) for d in fam])
     data['light_rings'] = np.array([np.pad(d['light_rings'][:2], (0, 2 - min(2, len(d['light_rings']))), constant_values=np.nan)
                                     for d in fam])
     data['sigma'] = sigma
     np.savez(os.path.join(work, 'family_%g.npz' % sigma), **data)
+    write_dat(data, os.path.join(work, 'DiracStars_sigma%g.dat' % sigma))
     # keep a few profiles (every 10th point) for inspection
     prof = [(d['A'], d['sol'].x, d['sol'].y) for d in fam[::10]]
     pickle.dump(prof, open(os.path.join(work, 'profiles_%g.pkl' % sigma), 'wb'))
     return data
+
+
+def write_dat(data, path):
+    """the family in the format of BosonStars.dat / DiracStars.dat (cycle_models), ordered along the family, with extra columns:
+        A_central M r_99 noether_charge binding_energy omega omega_unrescaled phi0 C4 Cmax
+        | unstable_modes n_light_rings wec dec
+    omega_unrescaled has no unique meaning without shooting (it depends on the initial guess for the central lapse); here
+    it is omega / alpha(0), the frequency normalised to alpha(0) = 1. unstable_modes is the number of unstable radial modes
+    from the turning-point analysis (stability.py); wec = min rho / max rho, dec = max(|p_r|, |p_t|) - rho over max rho."""
+    from stability import turning_points, mode_count
+    M, N, w = data['M'], data['N'], data['omega']
+    count, _ = mode_count(M, N, turning_points(M, N), w)
+    cols = np.column_stack([data['A'], M, data['r99'], N, data['Eb'], w, data['omega_c'], np.log(data['alpha0']), data['C4'],
+                            data['Cmax'], count, data['n_light_rings'], data['wec'], data['dec']])
+    hdr = ('Dirac stars, degenerate-vacuum potential mu S (1 - S/S0)^2, S0 = sigma^2/(4 pi), sigma = %g, G = mu = 1 '
+           '(relaxation/families.py); rows ordered along the family\n'
+           'A_central M r_99 noether_charge binding_energy omega omega_unrescaled phi0 C4 Cmax unstable_modes n_light_rings wec dec\n'
+           'omega_unrescaled = omega / alpha(0); unstable_modes from the turning-point analysis; n_light_rings counts those inside '
+           'the computational domain; wec = min rho / max rho; dec = max(|p_r|, |p_t|, over r) - rho, over max rho' % data['sigma'])
+    np.savetxt(path, cols, header=hdr, fmt=['%.10g'] * 10 + ['%d', '%d', '%.4e', '%.4e'])
 
 
 if __name__ == '__main__':

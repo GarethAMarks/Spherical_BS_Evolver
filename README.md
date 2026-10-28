@@ -120,7 +120,10 @@ The shooting solver works for `sigma` of about 0.3 and above. For smaller `sigma
   - Boundary conditions: regularity at the centre, `alpha -> 1`, and exponential decay.
   - Method: scipy's `solve_bvp` (4th-order collocation). The mesh is redistributed at every step so that thin walls stay resolved.
   - Families are followed by pseudo-arclength continuation in `(A_central, omega, ln M)`.
-- `families.py <sigma> <dir> <binary>` computes a whole family. It is seeded by one shooting solution at `A_central = sigma / (2 sqrt 2)`.
+- `families.py <sigma> <dir> <binary>` computes a whole family. It is seeded by one shooting solution at `A_central = sigma / (2 sqrt 2)`. It writes `DiracStars_sigma<sigma>.dat`, ordered along the family:
+  - first the columns of `BosonStars.dat`: `A_central M r_99 noether_charge binding_energy omega omega_unrescaled phi0 C4 Cmax`;
+  - then `unstable_modes` (from the turning-point analysis), `n_light_rings` and two energy-condition measures, `wec = min rho / max rho` and `dec = max(|p_r|, |p_t|) - rho` over `max rho`.
+  - Without shooting, `omega_unrescaled` has no unique meaning, since it depends on the initial guess for the central lapse. It is given as `omega / alpha(0)`.
 - `stability.py` applies the turning-point method. Stability can only change at the joint extrema of `M` and `N`, which are cusps in the `(N, M)` plane. At each cusp, the branch with the larger `M - omega_c N` at a given `N` has one more unstable mode. The count starts from the stable Newtonian end.
 - `plot_families.py` plots the compactness and mass along the families and marks:
   - the ends of the stable branches;
