@@ -63,7 +63,7 @@ Differences in the evolution output for Proca runs:
 
 ### Dirac stars
 
-Setting `dirac = 1` (which takes priority over `proca`) uses the `DiracStar` class to construct spherical Dirac stars: two gravitating Dirac fields of mass `mu` in the `j = 1/2`, `m_j = +-1/2` s-wave states, which together give a spherically symmetric stress tensor (as in Finster, Smoller & Yau 1999 and Herdeiro, Pombo & Radu 2017). Only `D = 4` and the free field (`lambda = 0`, `solitonic = 0`) are supported; other settings stop with an error. `cycle_only = 1` cycles a family; `cycle_only = 0` solves a single star and evolves it with the `ComplexSpinorField` matter model.
+Setting `dirac = 1` (which takes priority over `proca`) uses the `DiracStar` class to construct spherical Dirac stars: two gravitating Dirac fields of mass `mu` in the `j = 1/2`, `m_j = +-1/2` s-wave states, which together give a spherically symmetric stress tensor (as in Finster, Smoller & Yau 1999 and Herdeiro, Pombo & Radu 2017). Only `D = 4` is supported. `lambda` adds a quartic (Soler-type) self-interaction (see below); `solitonic = 1` is not supported for Dirac stars and stops with an error. `cycle_only = 1` cycles a family; `cycle_only = 0` solves a single star and evolves it with the `ComplexSpinorField` matter model.
 
 In the code's metric `ds^2 = -alpha^2 dt^2 + X^2 dr^2 + r^2 dOmega^2`, each spinor is `e^{-i omega t} alpha^{-1/2} r^{-1} (G(r) Omega_{-1,m}, i F(r) Omega_{+1,m})` and the Dirac equation reduces to
 
@@ -75,16 +75,43 @@ with number density `n = (F^2 + G^2) / (2 pi alpha r^2)` and energy density `rho
 - `A_central` is the central spinor amplitude `g0 = G'(0) / sqrt(alpha(0))`, which is unchanged when the lapse is rescaled to `alpha(infinity) = 1`. The maximum-mass ground state has `A_central` of about 0.23.
 - `eigen` counts nodes of `G`; the ground state has nodeless `F` and `G`.
 - `noether_charge` is the particle number of both spinors together.
+- `lambda` is the coupling of the quartic self-interaction, described in the next subsection (`lambda = 0`: free field).
 - `perturb = 1` scales both spinor amplitudes by `1 + perturb_amp * exp(-(r - perturb_center)^2 / perturb_spread^2)` and re-solves the metric (Hamiltonian constraint for `X`, polar slicing for the lapse) with the amplitudes held fixed, so the data satisfy the constraints; at `t = 0` the amplitudes are real, so the momentum density vanishes and `K_ij = 0`. `perturb_amp > 0` makes the star denser. The perturbed profile is written to `DSdata_perturbed.dat`.
 
 Outputs are `DSdata.dat` (`r F G X phi m f g`, with `f`, `g` the physical spinor functions `F, G / (sqrt(alpha) r)`), `isotropic_dirac.dat` if `isotropic = 1`, and `DiracStars.dat` in `cycle_only` mode, with the same columns as `BosonStars.dat`. The ground-state family reaches a maximum mass `M = 0.7089 / mu` (G = 1) at `omega = 0.825 mu`, with minimum frequency `0.733 mu`; Herdeiro, Pombo & Radu (2017) give `M_max = 0.709` and minimum frequency `0.733`.
+
+#### Quartic self-interaction
+
+With `lambda != 0` the Lagrangian of the two spinors gains a term `-U(S)`, `U(S) = (lambda/2) S^2`, with `S = sum_m psibar_m psi_m` the scalar density (Soler model). Each spinor then obeys the Dirac equation with the effective mass `mu_eff = mu + lambda S`, so `lambda > 0` is repulsive; the stress tensor gains `g_ab (lambda/2) S^2`. In the solver variables `S = (G^2 - F^2) / (2 pi alpha r^2)`, `mu -> mu_eff` in the radial equations, and
+
+    rho = (omega/alpha) n - (lambda/2) S^2,   p_r = [ (omega/alpha)(F^2 + G^2) - mu (G^2 - F^2) + 2 F G / r ] / (2 pi alpha r^2) - (lambda/2) S^2.
+
+In the evolution, `S = (|u|^2 - |v|^2) / (2 pi)`, `mu -> mu_eff` in the equations for `u` and `v`, `rho = mu S + (lambda/2) S^2 + (kinetic stresses)`, and both orthonormal stresses gain `(lambda/2) S^2`. `derivations/check_dirac_star.py` checks the stationary equations and the conservation of the stress tensor with the interaction, and `derivations/check_dirac_selfint_3p1.py` checks the 3+1 sources against the evolution equations through energy and momentum conservation (both fix the coefficient of the `g_ab S^2` term).
+
+In terms of Dzhunushaliev & Folomeev (2019), whose `lambda > 0` is attractive, `lambda_bar_DF = -lambda / (4 pi)` (`G = mu = 1`). At strong coupling (`lambda mu^2 >> 1/G`) the star approaches a fluid with `rho = mu n + lambda n^2 / 2`, `p = lambda n^2 / 2` (locally `mu_eff = omega / alpha`, `F -> 0`). Its TOV sequence has `M_max = 0.1158 sqrt(lambda)` (`G = 1`, i.e. `0.41 sqrt(|lambda_bar_DF|) M_Pl^2 / mu`) and `M / R = 0.21` at the maximum mass, stiffer than the scalar quartic (CSW) boson stars, which reach `M / R = 0.16`. With the solver (`G = mu = 1`):
+
+| `lambda` | `M_max` | `M_max / sqrt(lambda)` | `A_central` at `M_max` | `omega` at `M_max` | `M / r_99` at `M_max` |
+|---|---|---|---|---|---|
+| 0 | 0.7089 | | 0.23 | 0.824 | |
+| 100 | 1.309 | 0.131 | 0.17 | 0.777 | 0.159 |
+| 1000 | 3.708 | 0.1172 | 0.064 | 0.755 | 0.210 |
+
+At strong coupling the shooting is exponentially sensitive to the frequency inside the star, where small deviations of the field run away (`mu_eff` grows with the field). Diverging trial solutions are therefore stopped once `|f|` or `|g|` exceeds `3 A_central` (only for `lambda != 0`, so the free-field solver is unchanged). Even so, deep on the unstable branch the frequency cannot be resolved in double precision and the solver fails (for `lambda = 1000`, beyond `A_central` of about 0.11, about twice the maximum-mass amplitude).
+
+Evolution tests at `lambda = 1000` (`R = 150`, `dr = 0.05`, `BS_resolution_factor = 4`, `isotropic = 1`, `damping_factor = 1`), on either side of the maximum mass at `A_central = 0.064`:
+
+- Stable branch, `A_central = 0.04` (`M = 3.216`): unperturbed, `|u(0)|` stays constant to `1e-5` up to `t = 1000`. With `perturb_amp = +-0.02` the star oscillates about equilibrium with a non-growing amplitude (about 1% of `A_central`).
+- Unstable branch, `A_central = 0.09` (`M = 3.420`):
+  - `perturb_amp = +0.01` collapses, with an apparent horizon at `t = 121.5` (`121.2` at `dr = 0.025`).
+  - Unperturbed, truncation error triggers collapse at `t = 275.5`.
+  - `perturb_amp = -0.01` migrates: the star expands to `|u(0)| = 0.025` and then oscillates about the stable-branch star with the same particle number (`A_central = 0.042`). The particle number is conserved to `1e-5` until ejected matter reaches the outer boundary. The trajectory agrees with `dr = 0.025` to `1e-5`.
 
 In the evolution the tetrad is fixed by the time gauge (`e_0 = n`) and the symmetric spatial triad, which in spherical symmetry is aligned with the diagonal `h_zz`, `h_ww`, so it is a function of the BSSN variables and no extra variables are evolved. The evolved variables are the complex orthonormal-frame amplitudes `u` (even in `z`) and `v` (odd), with `u = e^{-i omega t} g`, `v = e^{-i omega t} f` for a stationary star:
 
     d_t u = beta u' + (alpha K/2 - i alpha mu) u + i alpha [ sqrt(chi/h_zz) (v' + L v) + (sqrt(chi/h_zz) + sqrt(chi/h_ww)) v / z ]
     d_t v = beta v' + (alpha K/2 + i alpha mu) v - i alpha [ sqrt(chi/h_zz) (u' + L u) + (sqrt(chi/h_zz) - sqrt(chi/h_ww)) u / z ]
 
-with `L = (h_ww'/h_ww - chi'/chi + alpha'/alpha) / 2`. These and the matter sources are derived and checked in `derivations/check_dirac_3p1.py`. Like the Proca system the equations are first order in space, and the evolution is unstable at the origin without Kreiss-Oliger dissipation: use `damping_factor` of about 1. MPI runs are supported (uniform grid, as for the other matter models).
+with `L = (h_ww'/h_ww - chi'/chi + alpha'/alpha) / 2` (and `mu -> mu_eff` with the self-interaction). These and the matter sources are derived and checked in `derivations/check_dirac_3p1.py`. Like the Proca system the equations are first order in space, and the evolution is unstable at the origin without Kreiss-Oliger dissipation: use `damping_factor` of about 1. MPI runs are supported (uniform grid, as for the other matter models).
 
 Differences in the evolution output for Dirac runs:
 
@@ -117,7 +144,7 @@ Differences in the evolution output for Dirac runs:
 | `proca` | `0` | Construct (and evolve) Proca stars instead of boson stars; see below |
 | `D` | `4` | Spacetime dimension |
 | `mu` | `1.0` | Scalar field mass |
-| `lambda` | `0` | Quartic self-coupling coefficient |
+| `lambda` | `0` | Quartic self-coupling coefficient (Dirac stars: `U = (lambda/2) (psibar psi)^2`, see above) |
 | `solitonic` | `0` | Use solitonic potential `V = mu^2 (1 - 2(A/sigma)^2)^2`; if false, use mini-BS potential |
 | `sigma` | `0.2` | Solitonic potential parameter (only used when `solitonic = 1`) |
 | `G` | `1.0` | Newton's constant |

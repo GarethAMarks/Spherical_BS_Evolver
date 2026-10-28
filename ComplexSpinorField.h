@@ -15,16 +15,19 @@ class Spacetime;    // defined in EvolutionVariables.h/.cpp
 
  The tetrad is fixed by the time gauge e_0 = n and the symmetric spatial triad (aligned with the diagonal h_zz, h_ww), so it
  is an algebraic function of the BSSN variables. The evolution equations are (' = d_z)
-     d_t u = beta u' + (alpha K/2 - i alpha mu) u + i alpha [ sqrt(chi/h_zz) (v' + L v) + (sqrt(chi/h_zz) + sqrt(chi/h_ww)) v / z ]
-     d_t v = beta v' + (alpha K/2 + i alpha mu) v - i alpha [ sqrt(chi/h_zz) (u' + L u) + (sqrt(chi/h_zz) - sqrt(chi/h_ww)) u / z ]
+     d_t u = beta u' + (alpha K/2 - i alpha mu_eff) u + i alpha [ sqrt(chi/h_zz) (v' + L v) + (sqrt(chi/h_zz) + sqrt(chi/h_ww)) v / z ]
+     d_t v = beta v' + (alpha K/2 + i alpha mu_eff) v - i alpha [ sqrt(chi/h_zz) (u' + L u) + (sqrt(chi/h_zz) - sqrt(chi/h_ww)) u / z ]
      L = (h_ww'/h_ww - chi'/chi + alpha'/alpha) / 2,
- and, with overbars for complex conjugates and hats for orthonormal-frame components,
+ with mu_eff = mu + lambda S for the quartic self-interaction U(S) = (lambda/2) S^2 (lambda = 0: free field), and, with
+ overbars for complex conjugates and hats for orthonormal-frame components,
      n        = (|u|^2 + |v|^2) / (2 pi)                               (number density; Q = int n sqrt(gamma) d^3x)
-     S_rr^    = Re( vbar u' - u vbar' ) / (2 pi sqrt(g_zz))
-     S_thth^  = -Re( u vbar ) / (2 pi z sqrt(g_ww))
-     rho      = mu (|u|^2 - |v|^2) / (2 pi) + S_rr^ + 2 S_thth^
+     S        = (|u|^2 - |v|^2) / (2 pi)                               (scalar density sum psibar psi)
+     S_rr^    = Re( vbar u' - u vbar' ) / (2 pi sqrt(g_zz)) + (lambda/2) S^2
+     S_thth^  = -Re( u vbar ) / (2 pi z sqrt(g_ww)) + (lambda/2) S^2
+     rho      = mu S + (lambda/2) S^2 + [kinetic parts of S_rr^ + 2 S_thth^]
      j_r^     = Im( ubar u' + vbar v' ) / (2 pi sqrt(g_zz)).
- Derived and checked in derivations/check_dirac_3p1.py (and the stationary equations in derivations/check_dirac_star.py).
+ Derived and checked in derivations/check_dirac_3p1.py (free field), derivations/check_dirac_selfint_3p1.py (the
+ self-interaction terms) and, for the stationary equations, derivations/check_dirac_star.py.
  At z = 0: v / z -> v', and (sqrt(chi/h_zz) - sqrt(chi/h_ww)) u / z -> 0 since h_zz - h_ww = O(z^2).
  As for the Proca system, the equations are first order in space; Kreiss-Oliger dissipation (damping_factor ~ 1) is recommended.
 */
