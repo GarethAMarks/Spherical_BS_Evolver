@@ -111,6 +111,8 @@ dynamic_cutoff = 0
 
 #model cycling params: for model construction/ linear perturbations
 cycle_only = 1 #if 1 will only cycle thru model construction. Priority over pert_only!
+dirac_profile = 0 #Dirac stars: if 1, read the star from dirac_profile_file (relaxation/export_profile.py) instead of shooting
+dirac_profile_file = DSprofile.dat
 A0 = 0.001 #initial central amp
 dA = 0.0005 #step central amp
 n_stars = 1800 #number of BS models to cycle thru

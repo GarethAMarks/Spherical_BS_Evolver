@@ -9,6 +9,7 @@
 #include "mathutils.h"
 #include "mpi_helpers.h"
 #include <sstream>
+#include <algorithm>
 #include<iomanip>
 
 using namespace std;
@@ -69,6 +70,8 @@ void DiracStar::read_parameters(bool quiet, string filename)
         fill_parameter(current_line, "perturb_center = ", perturb_center, quiet);
 
         fill_parameter(current_line, "cycle_only = ", cycle_only, quiet);
+        fill_parameter(current_line, "dirac_profile = ", dirac_profile, quiet);
+        fill_parameter(current_line, "dirac_profile_file = ", dirac_profile_file, quiet);
         fill_parameter(current_line, "A0 = ", A0, quiet);
         fill_parameter(current_line, "dA = ", dA, quiet);
         fill_parameter(current_line, "n_stars = ", n_stars, quiet);
@@ -491,11 +494,133 @@ void DiracStar::rescale_lapse (double phi_shift)
     omega *= exp(phi_shift);
 }
 
-//simply calls find_frequency and fill_asymptotic in one; return 1 iff successful
+//simply calls find_frequency and fill_asymptotic in one; return 1 iff successful. With dirac_profile = 1 the star is read
+//from a relaxation profile instead (read_profile_solution)
 bool DiracStar::solve(bool quiet)
 {
+    if (dirac_profile)
+        return read_profile_solution(quiet);
     find_frequency(quiet);
     return fill_asymptotic(quiet);
+}
+
+//Loads a star computed by the relaxation solver (relaxation/export_profile.py) onto this grid (R, n_gridpoints), in place of
+//shooting. The file has '#' header lines, among them "# omega = ...", "# sigma = ...", "# lambda = ...", "# mu = ...",
+//"# solitonic = ...", followed by columns  r f g m phi  (physical spinor amplitudes f, g = F, G / (sqrt(alpha) r), aspect mass
+//m, phi = ln alpha with alpha(infinity) = 1) on an increasing radial grid starting at r = 0. The profile is interpolated with
+//4-point Lagrange polynomials; beyond its last radius the exterior is Schwarzschild (m = M) with f, g continued as
+//exp(-k r), k = X sqrt(mu^2 - omega^2/alpha^2). The potential parameters in the file must match those of BSParams.par.
+bool DiracStar::read_profile_solution(bool quiet)
+{
+    ifstream in{dirac_profile_file};
+    if (!in)
+    {
+        cerr << "ERROR: could not open Dirac profile " << dirac_profile_file << endl;
+        exit(1);
+    }
+    vector<double> rr, ff, gg, mm, pp;
+    double w_file = -1., sig_file = sigma, lam_file = lambda, mu_file = mu, sol_file = solitonic;
+    string line;
+    while (getline(in, line))
+    {
+        if (line.empty())
+            continue;
+        if (line[0] == '#')
+        {
+            auto grab = [&](const string& key, double& v) {
+                size_t p = line.find(key);
+                if (p != string::npos) v = stod(line.substr(p + key.size()));
+            };
+            grab("omega = ", w_file); grab("sigma = ", sig_file); grab("lambda = ", lam_file); grab("mu = ", mu_file);
+            grab("solitonic = ", sol_file);
+            continue;
+        }
+        stringstream ss(line);
+        double a, b, c, d, e;
+        if (ss >> a >> b >> c >> d >> e)
+        {
+            rr.push_back(a); ff.push_back(b); gg.push_back(c); mm.push_back(d); pp.push_back(e);
+        }
+    }
+    if (w_file <= 0. || rr.size() < 8 || rr[0] != 0.)
+    {
+        cerr << "ERROR: Dirac profile " << dirac_profile_file << " needs '# omega = ...' and data from r = 0" << endl;
+        exit(1);
+    }
+    if (abs(sig_file - sigma) > 1e-12 * sigma || abs(lam_file - lambda) > 1e-12 * (1. + abs(lambda)) || abs(mu_file - mu) > 1e-12
+        || (bool)sol_file != solitonic)
+    {
+        cerr << "ERROR: the potential of Dirac profile " << dirac_profile_file << " (sigma " << sig_file << ", lambda " << lam_file
+             << ", mu " << mu_file << ", solitonic " << sol_file << ") differs from BSParams.par" << endl;
+        exit(1);
+    }
+
+    const int Nf = rr.size();
+    auto interp = [&](const vector<double>& y, double r) {
+        int j = upper_bound(rr.begin(), rr.end(), r) - rr.begin() - 2;
+        j = max(0, min(j, Nf - 4));
+        double res = 0.;
+        for (int a = 0; a < 4; a++)
+        {
+            double L = 1.;
+            for (int b = 0; b < 4; b++)
+                if (b != a)
+                    L *= (r - rr[j + b]) / (rr[j + a] - rr[j + b]);
+            res += L * y[j + a];
+        }
+        return res;
+    };
+
+    omega = w_file;
+    omega_pre_rescale = w_file;
+    A_central = gg[0];
+    state.assign(n_gridpoints, DiracFieldState{});
+    radius_array.resize(n_gridpoints);
+    blowup_point = n_gridpoints;
+    const double dr = R / (n_gridpoints - 1);
+    const double r_last = rr[Nf - 1], M_file = mm[Nf - 1];
+    const double f_last = ff[Nf - 1], g_last = gg[Nf - 1];
+    const double X_last = 1. / sqrt(1. - 2. * M_file / r_last);
+    const double k = X_last * sqrt(max(mu * mu - pow(w_file / exp(pp[Nf - 1]), 2), 1e-12));
+    for (int j = 0; j < n_gridpoints; j++)
+    {
+        double r = j * dr;
+        radius_array[j] = r;
+        double f, g, m_, phi;
+        if (r <= r_last)
+        {
+            f = interp(ff, r); g = interp(gg, r); m_ = interp(mm, r); phi = interp(pp, r);
+        }
+        else
+        {
+            double dec = exp(-k * (r - r_last));
+            f = f_last * dec; g = g_last * dec; m_ = M_file; phi = 0.5 * log(1. - 2. * M_file / r);
+        }
+        if (r == 0.)
+            m_ = 0.;
+        double sa = exp(0.5 * phi);
+        state[j] = DiracFieldState{sa * r * f, sa * r * g, (r == 0.) ? 1. : 1. / sqrt(1. - 2. * m_ / r), phi};
+    }
+
+    M = m(n_gridpoints - 1);
+    int j = 0;
+    while (j < n_gridpoints - 1 && m(j) < 0.99 * M)
+    {
+        if (m(j + 1) != m(j))
+            r_99 = dr * j + dr * (0.99 * M - m(j)) / (m(j + 1) - m(j));
+        j++;
+    }
+    noether_charge = get_noether_charge();
+    binding_energy = M - mu * noether_charge;
+    compactness = M / r_99;
+    if (!quiet)
+    {
+        cout << "\nRead Dirac star from " << dirac_profile_file << " (" << Nf << " points to r = " << r_last << "): omega = " << omega
+             << ", A_central = " << A_central << "\nMass is M =  " << M << "\nNoether charge (particle number of both spinors) is N = "
+             << noether_charge << "\nBinding energy is E = " << binding_energy << "\nr_99 = " << r_99 << ", C = M / r_99 = "
+             << compactness << ", Cmax = " << get_cmax() << endl;
+    }
+    return 1;
 }
 
 //returns the total particle number of both spinors, Q = int n sqrt(gamma) d^3x = int 2 (F^2 + G^2) X / alpha dr.

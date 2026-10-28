@@ -110,6 +110,7 @@ class DiracStar
         double f_RHS(double r, double f);
         double r_areal (int j_iso);
         void check_supported();
+        bool read_profile_solution(bool quiet = 0); //load a relaxation solution (dirac_profile = 1) instead of shooting
 
     public:
         double A_central; //central amplitude g0 (see above)
@@ -134,6 +135,11 @@ class DiracStar
 
         bool isotropic; //whether we will use isotropic coordinates (otherwise polar-areal)
         bool cycle_only = 0;
+
+        //read the star from a profile written by relaxation/export_profile.py instead of shooting (for the ultracompact
+        //stars of the degenerate-vacuum potential, where shooting fails); see read_profile_solution
+        bool dirac_profile = 0;
+        std::string dirac_profile_file = "DSprofile.dat";
 
         DiracStar() = default;
         void rk4_solve (const long double freq);

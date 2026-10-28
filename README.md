@@ -124,6 +124,10 @@ The shooting solver works for `sigma` of about 0.3 and above. For smaller `sigma
   - first the columns of `BosonStars.dat`: `A_central M r_99 noether_charge binding_energy omega omega_unrescaled phi0 C4 Cmax`;
   - then `unstable_modes` (from the turning-point analysis), `n_light_rings` and two energy-condition measures, `wec = min rho / max rho` and `dec = max(|p_r|, |p_t|) - rho` over `max rho`.
   - Without shooting, `omega_unrescaled` has no unique meaning, since it depends on the initial guess for the central lapse. It is given as `omega / alpha(0)`.
+- `export_profile.py <dir> <sigma> list | <index> <file>` lists the stored solutions of a family (every 10th point, with their stability and light rings) or exports one for evolution. The exported file has `#` header lines with `omega`, `sigma`, `lambda`, `mu` and `solitonic`, then the columns `r f g m phi` on a uniform grid. It is evaluated from the collocation interpolant after re-solving at tolerance `1e-8`. Setting `dirac_profile = 1` and `dirac_profile_file = <file>` in `BSParams.par` makes `DiracStar` read this profile instead of shooting:
+  - It is interpolated onto the evolution grid with 4-point Lagrange polynomials, with a Schwarzschild exterior beyond its last radius.
+  - The potential parameters must match `BSParams.par`.
+  - Everything downstream works as for a shot star: `BS_resolution_factor`, isotropic coordinates, `perturb` and evolution.
 - `stability.py` applies the turning-point method. Stability can only change at the joint extrema of `M` and `N`, which are cusps in the `(N, M)` plane. At each cusp, the branch with the larger `M - omega_c N` at a given `N` has one more unstable mode. The count starts from the stable Newtonian end.
 - `plot_families.py` plots the compactness and mass along the families and marks:
   - the ends of the stable branches;
