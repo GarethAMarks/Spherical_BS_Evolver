@@ -175,6 +175,21 @@ These compactnesses exceed the Buchdahl bound 4/9, which assumes isotropic, posi
 
 These are classical-field solutions. For fermions, a quantised treatment would not allow negative energy densities.
 
+**Evolutions.** Models read from relaxation profiles (`dirac_profile = 1`) were evolved with `isotropic = 1` and `damping_factor = 1`. They start stationary, with the Hamiltonian constraint at about `1e-11` inside the star. The turning-point method does not capture their dynamics: much of the turning-point-stable branch is dynamically unstable.
+
+- **Unstable modes:** the instability is oscillatory, a complex eigenvalue as known for solitary waves of nonlinear Dirac equations. It does not appear at an extremum of `M`, so the turning-point method cannot see it.
+- **Resolution checks:**
+  - It is seeded by truncation error. For `sigma = 0.3`, `C = 0.137`, the growth rate is 0.307, 0.321 and 0.320 at `dr = 0.05, 0.025, 0.0125`, with period about 8.
+  - The growing perturbation satisfies the momentum constraint to 4th order. It is a physical solution, not a constraint-violating mode.
+- **`sigma = 0.3`:** models with `C = 0.014, 0.029, 0.052` stay stationary. The deviation stays at the truncation level up to `t = 200`, and to `t = 2000` for `C = 0.052`. At `C = 0.086` (`A_central = 0.91 A_vac`) a slow instability appears, and at `C = 0.137` it e-folds in about 3.
+- **`sigma = 0.07`, light-ring regime:** all three models collapse to black holes. The apparent horizon forms with essentially the whole mass, enclosing the frozen core (central lapse about `0.03`).
+  - The perturbation grows just inside the wall, e-folding in about 11.
+  - `C = 0.403` (light rings): horizon at `t = 65`.
+  - `C = 0.450` (Buchdahl-violating, turning-point stable): horizon at `t = 99.5`, or `104.3` at `dr = 0.025`.
+  - `C = 0.449` (just past the maximum mass): horizon at `t = 108`.
+
+The momentum-constraint diagnostic `Mom_Z` had a sign error in its `A_ww h_ww'` term, now fixed. In dynamical runs it produced a resolution-independent residual. It now converges at 4th order and agrees with the constraint computed independently from the slices. Values of `Mom_L2` from earlier runs should not be relied on.
+
 In the evolution the tetrad is fixed by the time gauge (`e_0 = n`) and the symmetric spatial triad, which in spherical symmetry is aligned with the diagonal `h_zz`, `h_ww`, so it is a function of the BSSN variables and no extra variables are evolved. The evolved variables are the complex orthonormal-frame amplitudes `u` (even in `z`) and `v` (odd), with `u = e^{-i omega t} g`, `v = e^{-i omega t} f` for a stationary star:
 
     d_t u = beta u' + (alpha K/2 - i alpha mu) u + i alpha [ sqrt(chi/h_zz) (v' + L v) + (sqrt(chi/h_zz) + sqrt(chi/h_ww)) v / z ]
