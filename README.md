@@ -183,10 +183,67 @@ These are classical-field solutions. For fermions, a quantised treatment would n
   - The growing perturbation satisfies the momentum constraint to 4th order. It is a physical solution, not a constraint-violating mode.
 - **`sigma = 0.3`:** models with `C = 0.014, 0.029, 0.052` stay stationary. The deviation stays at the truncation level up to `t = 200`, and to `t = 2000` for `C = 0.052`. At `C = 0.086` (`A_central = 0.91 A_vac`) a slow instability appears, and at `C = 0.137` it e-folds in about 3.
 - **`sigma = 0.07`, light-ring regime:** all three models collapse to black holes. The apparent horizon forms with essentially the whole mass, enclosing the frozen core (central lapse about `0.03`).
-  - The perturbation grows just inside the wall, e-folding in about 11.
+  - The perturbation grows just inside the wall. Its growth rate rises from about 0.05 to 0.20 by `t = 60`, as the fastest mode takes over.
   - `C = 0.403` (light rings): horizon at `t = 65`.
   - `C = 0.450` (Buchdahl-violating, turning-point stable): horizon at `t = 99.5`, or `104.3` at `dr = 0.025`.
   - `C = 0.449` (just past the maximum mass): horizon at `t = 108`.
+
+**Radial pulsation modes.** `derivations/dirac_pulsation.py` derives the linearised radial perturbation equations for two spinors with any `U(S)`, in the polar-areal gauge `ds^2 = -alpha^2 dt^2 + X^2 dr^2 + r^2 dOmega^2`.
+- It computes the Einstein tensor and checks the Hamiltonian constraint, the momentum constraint `X_t = -4 pi r alpha X^2 j` and the polar slicing condition.
+- It linearises the Dirac equations in the frame rotating with the star, `u = e^{-i omega t} (g + uR + i uI)` and `v = e^{-i omega t} (f + vR + i vI)`, together with `dX` and `dphi`. All perturbations go as `e^{lambda t}`, with `X_t` eliminated by the momentum constraint.
+- It checks that the background satisfies the `DiracStar` equations and that the global phase rotation is a zero mode.
+- It writes the coefficients to `relaxation/dirac_pulsation_coeffs.py`.
+- With `lambda = -i sigma`, real `sigma` is a stable mode: the field components oscillate at `omega +- sigma`. `Re lambda > 0` is unstable, and the instability is oscillatory when `Im lambda != 0`.
+
+`relaxation/dirac_modes.py` (`ModeSolver`) solves the generalised eigenproblem `A Y = lambda B Y`:
+- The six fields are discretised by Chebyshev collocation on `[-R, R]`, folded by parity (`u`, `dX`, `dphi` even; `v` odd).
+- Boundary conditions: `u = v = 0` at `R`, `dX(0) = 0` and `dphi(R) + dX(R)/X(R) = 0`.
+- The collocation coordinate mixes `r` with the tortoise coordinate `int X/alpha dr` (weight 0.8). Without this, the short local wavelengths in the redshifted cores of compact stars are unresolved and give spurious unstable eigenvalues.
+
+`relaxation/scan_modes.py <dir> <sigma> <out.npz> [stride] [a_lo] [a_hi] [N1] [N2]` computes the spectrum along a family from `families.py`, which must be run with a small `profile_stride` (6th argument) so that the profiles are stored.
+- It keeps eigenvalues that agree between two resolutions, and frequencies the coarser grid resolves.
+- It records the largest real and oscillatory growth rates and the three lowest stable frequencies.
+
+`relaxation/shoot_modes.py <binary> <out.npy> <A1,A2,...> [lambda] [solitonic] [sigma]` does the same for single stars found by shooting (free, quartic, `sigma >~ 0.3`).
+
+Weakly unstable modes at high frequency (`Re lambda ~ 1e-3`, `|Im lambda| ~ 2`) come from the reflecting outer boundary: their growth rate falls as `R` grows. Only growth rates above 0.01 are counted below.
+
+Validation against the 1D evolutions:
+
+| model | eigenvalue | evolution |
+|---|---|---|
+| quartic `lambda = 1000`, `A = 0.04`: `sigma_1, sigma_2, sigma_3` | 0.0184, 0.0474, 0.0665 | 0.0188, 0.0474, 0.067 (FFT of `A_central(t)`) |
+| quartic `A = 0.09` (past the maximum mass) | real 0.0330 | growth 0.034–0.036 |
+| `sigma = 0.3`, `C = 0.086` | 0.037 + 1.678 i | envelope growth 0.0375 |
+| `sigma = 0.3`, `C = 0.137` | 0.375 + 0.769 i | 0.376 + (0.76–0.78) i |
+| `sigma = 0.07`, `C = 0.450` | real 0.199, localised just inside the wall | late-time growth 0.199, near the wall |
+
+Results (`G = mu = 1`):
+- **Free and quartic stars:**
+  - The fundamental `sigma_1^2` decreases through zero at the maximum mass (`A_central = 0.23` free; about `0.063` for `lambda = 1000`) and becomes a real unstable mode, so the turning-point method is right for these families.
+  - Free stars: `sigma_1` = 0.0078, 0.0258, 0.0340, 0.0269, 0.0121 at `A_central` = 0.02, 0.08, 0.14, 0.20, 0.225.
+  - Free stars past the maximum: `lambda` = 0.020 at `A_central = 0.24` and 0.090 at 0.35.
+  - No oscillatory instabilities.
+- **Degenerate potential:** the turning-point-stable branch has two dynamical instabilities that the turning-point method misses.
+  - **Oscillatory instability:** a complex quartet `lambda = Re +- i Im` sets in at `A_central` of about `0.9 A_vac` for every `sigma`. Its growth rate peaks near `A_central = A_vac` and falls towards the maximum mass. This happens long before light rings form.
+
+    | `sigma` | `C` at onset | peak `Re lambda` | `C` at the peak |
+    |---|---|---|---|
+    | 0.3 | 0.086 | 0.47 | 0.17–0.19 |
+    | 0.2 | 0.045 | 0.55 | 0.1 |
+    | 0.1 | 0.012 | 0.61 | 0.03 |
+    | 0.07 | 0.006 | 0.63 | 0.02 |
+
+  - **Real (non-oscillatory) unstable mode** at larger `C`, localised at the inner edge of the wall (none for `sigma = 0.3`). It decreases towards the maximum mass, to 0.18 at `C = 0.447` for `sigma = 0.1` and 0.20 at `C = 0.448` for `sigma = 0.07`.
+
+    | `sigma` | appears at `C` | initial `lambda` |
+    |---|---|---|
+    | 0.2 | 0.21 | 0.44 |
+    | 0.1 | 0.059 | 0.69 |
+    | 0.07 | 0.029 | 0.72 |
+
+  - Only the low-compactness end of each stable branch is dynamically stable: `C < 0.086` for `sigma = 0.3`, and `C < 0.006` for `sigma = 0.07`. All the light-ring and Buchdahl-violating models are linearly unstable, with e-folding times between about 3 and 8 (in units of `1/mu`).
+  - The lowest stable frequency rises from about 0.03–0.05 at the minimum mass to 0.55–0.77, then falls to zero at the maximum mass.
 
 The momentum-constraint diagnostic `Mom_Z` had a sign error in its `A_ww h_ww'` term, now fixed. In dynamical runs it produced a resolution-independent residual. It now converges at 4th order and agrees with the constraint computed independently from the slices. Values of `Mom_L2` from earlier runs should not be relied on.
 

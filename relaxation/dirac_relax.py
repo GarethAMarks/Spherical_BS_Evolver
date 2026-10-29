@@ -51,6 +51,13 @@ class Potential:
             du = du + self.mu * (3 * y * y - 4 * y)
         return du
 
+    def ddU(self, S):
+        ddu = self.lam + 0. * S
+        if self.solitonic:
+            y = S / self.S0
+            ddu = ddu + self.mu * (6 * y - 4) / self.S0
+        return ddu
+
     def mu_eff(self, S):
         return self.mu + self.dU(S)
 

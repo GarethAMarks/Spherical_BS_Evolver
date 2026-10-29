@@ -28,7 +28,8 @@ def shoot_seed(sigma, A, work, binary, R=100., n=10001):
     return os.path.join(work, 'DSdata.dat'), w
 
 
-def family(sigma, work, binary, seed_ratio=0.5, A_max_ratio=4., A_min_ratio=1e-4, ds_max=0.05, n_steps=600, verbose=True):
+def family(sigma, work, binary, seed_ratio=0.5, A_max_ratio=4., A_min_ratio=1e-4, ds_max=0.05, n_steps=600, verbose=True,
+           profile_stride=10):
     A_vac = sigma / np.sqrt(2.)
     A_seed = seed_ratio * A_vac
     path, w = shoot_seed(sigma, A_seed, os.path.join(work, 'seed_%g' % sigma), binary)
@@ -59,8 +60,8 @@ def family(sigma, work, binary, seed_ratio=0.5, A_max_ratio=4., A_min_ratio=1e-4
     data['sigma'] = sigma
     np.savez(os.path.join(work, 'family_%g.npz' % sigma), **data)
     write_dat(data, os.path.join(work, 'DiracStars_sigma%g.dat' % sigma))
-    # keep a few profiles (every 10th point) for inspection
-    prof = [(d['A'], d['sol'].x, d['sol'].y) for d in fam[::10]]
+    # keep the profiles of every profile_stride-th point (export_profile.py, dirac_modes.py)
+    prof = [(d['A'], d['sol'].x, d['sol'].y) for d in fam[::profile_stride]]
     pickle.dump(prof, open(os.path.join(work, 'profiles_%g.pkl' % sigma), 'wb'))
     return data
 
@@ -89,4 +90,5 @@ if __name__ == '__main__':
     sigma, work, binary = float(sys.argv[1]), sys.argv[2], sys.argv[3]
     seed_ratio = float(sys.argv[4]) if len(sys.argv) > 4 else 0.5
     A_max_ratio = float(sys.argv[5]) if len(sys.argv) > 5 else 2.5
-    family(sigma, work, binary, seed_ratio=seed_ratio, A_max_ratio=A_max_ratio)
+    stride = int(sys.argv[6]) if len(sys.argv) > 6 else 10
+    family(sigma, work, binary, seed_ratio=seed_ratio, A_max_ratio=A_max_ratio, profile_stride=stride)

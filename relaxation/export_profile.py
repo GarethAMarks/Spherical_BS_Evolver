@@ -19,6 +19,7 @@ from stability import turning_points, mode_count
 
 
 def load(work, sigma):
+    """stored profiles, family data, turning-point mode count, and the family index of each profile"""
     prof = pickle.load(open(os.path.join(work, 'profiles_%g.pkl' % sigma), 'rb'))
     fam = np.load(os.path.join(work, 'family_%g.npz' % sigma))
     M, N, w = fam['M'], fam['N'], fam['omega']
