@@ -206,7 +206,7 @@ These are classical-field solutions. For fermions, a quantised treatment would n
 
 `relaxation/shoot_modes.py <binary> <out.npy> <A1,A2,...> [lambda] [solitonic] [sigma]` does the same for single stars found by shooting (free, quartic, `sigma >~ 0.3`).
 
-Weakly unstable modes at high frequency (`Re lambda ~ 1e-3`, `|Im lambda| ~ 2`) come from the reflecting outer boundary: their growth rate falls as `R` grows. Only growth rates above 0.01 are counted below.
+Weakly unstable modes at high frequency (`Re lambda ~ 1e-3`, `|Im lambda| ~ 2`) come from the reflecting outer boundary: their growth rate falls as `R` grows. Only growth rates above 0.01 are counted below, except where an onset is extrapolated.
 
 Validation against the 1D evolutions:
 
@@ -225,24 +225,27 @@ Results (`G = mu = 1`):
   - Free stars past the maximum: `lambda` = 0.020 at `A_central = 0.24` and 0.090 at 0.35.
   - No oscillatory instabilities.
 - **Degenerate potential:** the turning-point-stable branch has two dynamical instabilities that the turning-point method misses.
-  - **Oscillatory instability:** a complex quartet `lambda = Re +- i Im` sets in at `A_central` of about `0.9 A_vac` for every `sigma`. Its growth rate peaks near `A_central = A_vac` and falls towards the maximum mass. This happens long before light rings form.
+  - **Oscillatory instability:** a complex quartet `lambda = +-Re +- i Im` sets in at `A_central` of about `0.89 A_vac` and `omega` of about 0.52–0.56 for every `sigma`. It leaves the high-frequency part of the spectrum (`Im lambda` about 1.8–2.1 at onset), with `Re lambda` growing linearly along the family. Its growth rate peaks near `A_central = A_vac` and falls towards the maximum mass. This happens long before light rings form. The onsets below come from spectra at every stored model, extrapolating `Re lambda` to zero:
 
-    | `sigma` | `C` at onset | peak `Re lambda` | `C` at the peak |
-    |---|---|---|---|
-    | 0.3 | 0.086 | 0.47 | 0.17–0.19 |
-    | 0.2 | 0.045 | 0.55 | 0.1 |
-    | 0.1 | 0.012 | 0.61 | 0.03 |
-    | 0.07 | 0.006 | 0.63 | 0.02 |
+    | `sigma` | `omega` at onset | `M` at onset | `C` at onset | `Im lambda` at onset | peak `Re lambda` | `C` at the peak |
+    |---|---|---|---|---|---|---|
+    | 0.3 | 0.522 | 0.341 | 0.080 | 1.82 | 0.47 | 0.17–0.19 |
+    | 0.2 | 0.542 | 0.177 | 0.038 | 1.93 | 0.55 | 0.1 |
+    | 0.1 | 0.557 | 0.048 | 0.010 | 2.05 | 0.61 | 0.03 |
+    | 0.07 | 0.556 | 0.024 | 0.005 | 2.01 | 0.63 | 0.02 |
 
-  - **Real (non-oscillatory) unstable mode** at larger `C`, localised at the inner edge of the wall (none for `sigma = 0.3`). It decreases towards the maximum mass, to 0.18 at `C = 0.447` for `sigma = 0.1` and 0.20 at `C = 0.448` for `sigma = 0.07`.
+  - **Real (non-oscillatory) unstable modes** at larger `C`, localised at the inner edge of the wall (none for `sigma = 0.3`). The lowest-frequency complex quartet reaches the real axis (`Im lambda -> 0`) and splits into two real pairs. The larger one decreases towards the maximum mass, to 0.18 at `C = 0.447` for `sigma = 0.1` and 0.20 at `C = 0.448` for `sigma = 0.07`. For `sigma = 0.2` the two real pairs merge again into a complex quartet at `C = 0.345`.
 
-    | `sigma` | appears at `C` | initial `lambda` |
-    |---|---|---|
-    | 0.2 | 0.21 | 0.44 |
-    | 0.1 | 0.059 | 0.69 |
-    | 0.07 | 0.029 | 0.72 |
+    | `sigma` | `omega` | `M` | `C` | `lambda` when the quartet reaches the real axis |
+    |---|---|---|---|---|
+    | 0.2 | 0.209 | 1.336 | 0.196 | 0.43 |
+    | 0.1 | 0.264 | 0.347 | 0.049 | 0.58 |
+    | 0.07 | 0.269 | 0.178 | 0.025 | 0.60 |
 
-  - Only the low-compactness end of each stable branch is dynamically stable: `C < 0.086` for `sigma = 0.3`, and `C < 0.006` for `sigma = 0.07`. All the light-ring and Buchdahl-violating models are linearly unstable, with e-folding times between about 3 and 8 (in units of `1/mu`).
+  - The number of strongly unstable modes grows along the branch, from one at the onset to 5–10 with `|lambda| < 2.5` at `C` of about 0.1. At least some enter from frequencies above the scan window (`|lambda| = 2.5`), so their first appearance is not located here. Near the maximum mass the deeply redshifted core supports a dense band of low-frequency unstable modes, with `Re lambda` up to about 0.1.
+  - Beyond `Im lambda` of about 3, a weak band of evenly spaced unstable modes (spacing about `pi / R`) also appears once the core is unstable. Its growth rate depends on the domain size, so it is not an eigenmode of the infinite problem. It may reflect convective amplification in the core.
+  - The small Newtonian stable branches (`omega -> mu`) have no resolved unstable modes.
+  - Only the low-compactness end of each stable branch is dynamically stable: `C < 0.080` for `sigma = 0.3`, and `C < 0.005` for `sigma = 0.07`. All the light-ring and Buchdahl-violating models are linearly unstable, with e-folding times between about 3 and 8 (in units of `1/mu`).
   - The lowest stable frequency rises from about 0.03–0.05 at the minimum mass to 0.55–0.77, then falls to zero at the maximum mass.
 
 The momentum-constraint diagnostic `Mom_Z` had a sign error in its `A_ww h_ww'` term, now fixed. In dynamical runs it produced a resolution-independent residual. It now converges at 4th order and agrees with the constraint computed independently from the slices. Values of `Mom_L2` from earlier runs should not be relied on.
