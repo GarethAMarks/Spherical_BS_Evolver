@@ -215,7 +215,7 @@ Validation against the 1D evolutions:
 | quartic `lambda = 1000`, `A = 0.04`: `sigma_1, sigma_2, sigma_3` | 0.0184, 0.0474, 0.0665 | 0.0188, 0.0474, 0.067 (FFT of `A_central(t)`) |
 | quartic `A = 0.09` (past the maximum mass) | real 0.0330 | growth 0.034–0.036 |
 | `sigma = 0.3`, `C = 0.086` | 0.037 + 1.678 i | envelope growth 0.0375 |
-| `sigma = 0.3`, `C = 0.137` | 0.375 + 0.769 i | 0.376 + (0.76–0.78) i |
+| `sigma = 0.3`, `C = 0.137` | 0.375 + 0.769 i | 0.379–0.386 + 0.761–0.763 i (fit of `|u(0)|` in the linear regime, `dr = 0.0125`) |
 | `sigma = 0.07`, `C = 0.450` | real 0.199, localised just inside the wall | late-time growth 0.199, near the wall |
 
 Results (`G = mu = 1`):
@@ -246,7 +246,8 @@ Results (`G = mu = 1`):
   - Beyond `Im lambda` of about 3, a weak band of evenly spaced unstable modes (spacing about `pi / R`) also appears once the core is unstable. Its growth rate depends on the domain size, so it is not an eigenmode of the infinite problem. It may reflect convective amplification in the core.
   - The small Newtonian stable branches (`omega -> mu`) have no resolved unstable modes.
   - Only the low-compactness end of each stable branch is dynamically stable: `C < 0.080` for `sigma = 0.3`, and `C < 0.005` for `sigma = 0.07`. All the light-ring and Buchdahl-violating models are linearly unstable, with e-folding times between about 3 and 8 (in units of `1/mu`).
-  - The lowest stable frequency rises from about 0.03–0.05 at the minimum mass to 0.55–0.77, then falls to zero at the maximum mass.
+  - The lowest stable frequency goes to zero at both turning points. Between them, for most of the low-compactness part of each branch, it sits at the continuum edge `mu - omega`: it is then a box mode of the discretised continuum, not a bound internal mode. A bound mode below the edge separates at larger `C` (about 0.04–0.06 for `sigma = 0.3`, 0.02–0.03 for `sigma = 0.07`), reaching 0.55–0.77 before it falls to zero at the maximum mass.
+  - The continuous spectrum is `|Im lambda| >= mu - omega`, with embedded thresholds at `+-(mu + omega)`: one or both sidebands `omega +- sigma` of a mode radiate. Near the onset of the oscillatory instability, the growth rate depends on the domain size by about 20% (for example 0.034 at `R = 34` and 0.037 at `R = 69` for `sigma = 0.3`, `C = 0.086`). The onset is therefore located to about `+-0.01` in `A_central / A_vac`. The evolution at `R = 160` grows at 0.0375.
 
 The momentum-constraint diagnostic `Mom_Z` had a sign error in its `A_ww h_ww'` term, now fixed. In dynamical runs it produced a resolution-independent residual. It now converges at 4th order and agrees with the constraint computed independently from the slices. Values of `Mom_L2` from earlier runs should not be relied on.
 
