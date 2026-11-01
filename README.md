@@ -249,6 +249,57 @@ Results (`G = mu = 1`):
   - The lowest stable frequency goes to zero at both turning points. Between them, for most of the low-compactness part of each branch, it sits at the continuum edge `mu - omega`: it is then a box mode of the discretised continuum, not a bound internal mode. A bound mode below the edge separates at larger `C` (about 0.04–0.06 for `sigma = 0.3`, 0.02–0.03 for `sigma = 0.07`), reaching 0.55–0.77 before it falls to zero at the maximum mass.
   - The continuous spectrum is `|Im lambda| >= mu - omega`, with embedded thresholds at `+-(mu + omega)`: one or both sidebands `omega +- sigma` of a mode radiate. Near the onset of the oscillatory instability, the growth rate depends on the domain size by about 20% (for example 0.034 at `R = 34` and 0.037 at `R = 69` for `sigma = 0.3`, `C = 0.086`). The onset is therefore located to about `+-0.01` in `A_central / A_vac`. The evolution at `R = 160` grows at 0.0375.
 
+**Free stars: radial modes of the first excited state.** With `eigen = 1` (one node in `G`; built by shooting and re-solved with `dirac_relax.py`), the radial spectrum has an oscillatory unstable quartet at every amplitude, the analogue of the decay of excited boson stars towards the ground state. A real unstable mode appears in addition past the excited family's maximum mass (`M = 1.410` at `A_central` about 0.2).
+
+| `A_central` | `omega` | `M` | oscillatory `lambda` | real `lambda` |
+|---|---|---|---|---|
+| 0.02 | 0.9822 | 0.729 | 0.0018 + 0.0109 i | – |
+| 0.05 | 0.9575 | 1.059 | 0.0048 + 0.0277 i | – |
+| 0.11 | 0.9153 | 1.329 | 0.0115 + 0.0570 i | – |
+| 0.17 | 0.8821 | 1.406 | 0.0189 + 0.0817 i | – |
+| 0.20 | 0.8687 | 1.410 | 0.0227 + 0.0923 i | 0.0062 |
+| 0.30 | 0.8373 | 1.348 | 0.0354 + 0.1189 i | 0.0323 |
+| 0.40 | 0.8226 | 1.245 | 0.0467 + 0.1320 i | 0.0583 |
+
+### Non-radial (axisymmetric) perturbations of free Dirac stars
+
+`derivations/dirac_nonradial.py` derives the linearised equations for perturbations of total angular momentum `L` beyond spherical symmetry (free field, `D = 4`):
+- **Symmetry.** The background pair (`m_j = +-1/2`) is invariant under rotations combined with a flavour rotation of the doublet, so modes carry an integer `L`. In the axisymmetric (`M = 0`), polar (parity `(-1)^L`) sector the `+` spinor perturbation is
+  `e^{-i omega t} ( a1 Y chi_up + a2 e^{i phi} Y' chi_dn,  i (sigma.n)(b1 Y chi_up + b2 e^{i phi} Y' chi_dn) )`, `Y = P_L(cos theta)`,
+  i.e. the `kappa = -(L+1)` and `kappa = L` channels. The `-` spinor follows from the `R_x(pi)` x flavour-swap symmetry (the relative sign of the spin-flip part is fixed by requiring no axial parts in `T_ab`; the other sign mixes in the `L +- 1` axial sectors).
+- **Metric.** Regge-Wheeler gauge, `h_tt = alpha^2 H0 Y`, `h_tr = H1 Y`, `h_rr = X^2 H2 Y`, `h_AB = r^2 K Y Omega_AB`, symmetric tetrad perturbation. Unlike for scalar and Proca stars, `H0 != H2`: the traceless angular Einstein equation is sourced by the spin-flip amplitudes `a2`, `b2` (anisotropic stress at linear order), so the single-function ansatz of arXiv:2501.05342 does not apply to Dirac stars.
+- **Method.** General `L` through `Y'' = -cot Y' - L(L+1) Y`, with the projections evaluated at generic rational points on the sphere. Output: `relaxation/dirac_nonradial_coeffs.py` (8 Dirac rows and all 7 Einstein components).
+- **Checks** (in the script): the background equations, closure of the angular projections at two points, no axial components, the `-` spinor as the symmetry image of the `+` one, and a pure-gauge test (in progress, slow).
+- **Independent checks** of the tables (`relaxation/nonradial_checks/`):
+  - the projected Bianchi identities hold to finite-difference accuracy in the exterior for arbitrary metric perturbations, and inside the star with on-shell matter;
+  - static vacuum solutions are reproduced (flat tidal field; Schwarzschild `L = 2`, `H = r (r - 2M)`, `K = r^2 - 2M^2`);
+  - for `L = 0` (with `K = H1 = 0`) the tables reproduce the radial spectrum of `dirac_modes.py` to six digits (e.g. `sigma = 0.017851, 0.034784, 0.042215` at `A_central = 0.05`; unstable 0.02823 vs 0.02824 at 0.25).
+
+`relaxation/dirac_nonradial_modes.py` (`NonRadialModes`, `classified`) solves the eigenproblem; see its docstring for the formulation. Its main choices:
+- Einstein components imposed: `Eb, Erth, Etth, Etr`. The Bianchi identities then give `Ett = Ea = 0` for `lambda != 0`. Using the Hamiltonian constraint instead leaves two constraint-violating branches and spurious growing modes.
+- Centre: the leading power `r^L` (`r^(L-1)` for `b`, `H1`) is factored out.
+- Outer boundary: Robin conditions `F' + (lambda X/alpha + (L+1)/r) F = 0` for the metric. Dirichlet conditions spoil the interior constraints through the spectral derivative.
+- An eigenvalue counts as physical only if it converges between two resolutions and satisfies the three un-imposed Einstein components (relative residual < 1e-2).
+- `scan_nonradial.py <binary> <out.pkl> <A,...> <L,...> [R] [N1] [N2]` scans single stars of the ground-state family.
+- `L = 1` is not reliable with this system (residual gauge freedom). The translation zero mode is recovered with the overdetermined pencil (`eigen_projected(full=False)`).
+
+Results (`G = mu = 1`, `R = 60–100`, `N` up to 190):
+- **Ground state: stable for `L = 2, 3, 4`** along the whole family scanned (`A_central` 0.02–0.30, past the maximum mass at 0.23). No converged mode has `Re lambda > 0`.
+  - The lowest bound `L = 2` frequency rises from 0.050 (`A_central = 0.08`) to 0.121 (0.20), 0.134 (0.225) and 0.171 (0.30). It stays at about 0.8 of the continuum edge `mu - omega`, so there is no zero mode (no bifurcation to non-spherical solutions).
+  - Bound `L = 3` modes: 0.061 (0.08), 0.082 (0.11), 0.1415 (0.20). Bound `L = 4` modes: 0.066 (0.08), 0.162 (0.225).
+  - Audits at `A_central = 0.20` (`L = 3`) and 0.225 (`L = 4`) over five `(R, N)` combinations find no growing mode with `|lambda| < 1`.
+  - The only "unstable" eigenvalues are artefacts that fail the checks: a high-frequency band near `|Im lambda| = mu + omega`, and continuum box modes with `Re lambda < 1e-3` whose frequencies move with `R`.
+- **First excited state: unstable to `L = 2`, with a zero mode at `omega = 0.850`.** The `L = 2` spectrum has a real (non-oscillatory) unstable pair, so these stars also break spherical symmetry.
+
+  | `A_central` | 0.025 | 0.05 | 0.11 | 0.17 | 0.20 | 0.22 | 0.24 | 0.25 | 0.255 |
+  |---|---|---|---|---|---|---|---|---|---|
+  | `omega` | 0.9779 | 0.9575 | 0.9153 | 0.8821 | 0.8687 | 0.8609 | 0.8538 | 0.8506 | 0.8491 |
+  | `L = 2` `lambda` | 0.0024 | 0.0047 | 0.0092 | 0.0111 | 0.0104 | 0.0090 | 0.0061 | 0.0027 | stable (`sigma = 0.0031`) |
+
+  - At small amplitude `lambda` is about `0.095 A_central`, the Newtonian scaling, so the instability extends into the Newtonian limit. A real pair comes with a stable pair of similar magnitude (for example `+-0.0047` and `+-0.0043 i` at 0.05). This is consistent with gravity splitting the near-degenerate 2s and 1d levels of the nearly harmonic core potential.
+  - `lambda^2` crosses zero at `A_central = 0.252`, `omega = 0.850`, `M = 1.387`, just past the excited family's maximum mass. This is the Dirac analogue of the `l = 2` bifurcation of one-node scalar boson stars (`omega = 0.858` in arXiv:2501.05342). There the non-spherical (chain/ring) families branch off. Here the spherical stars remain radially unstable on both sides of the crossing.
+  - `L = 3, 4` at `A_central = 0.05`: stable (lowest frequencies 0.0098 and 0.0188).
+
 The momentum-constraint diagnostic `Mom_Z` had a sign error in its `A_ww h_ww'` term, now fixed. In dynamical runs it produced a resolution-independent residual. It now converges at 4th order and agrees with the constraint computed independently from the slices. Values of `Mom_L2` from earlier runs should not be relied on.
 
 In the evolution the tetrad is fixed by the time gauge (`e_0 = n`) and the symmetric spatial triad, which in spherical symmetry is aligned with the diagonal `h_zz`, `h_ww`, so it is a function of the BSSN variables and no extra variables are evolved. The evolved variables are the complex orthonormal-frame amplitudes `u` (even in `z`) and `v` (odd), with `u = e^{-i omega t} g`, `v = e^{-i omega t} f` for a stationary star:
