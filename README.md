@@ -269,7 +269,7 @@ Results (`G = mu = 1`):
   i.e. the `kappa = -(L+1)` and `kappa = L` channels. The `-` spinor follows from the `R_x(pi)` x flavour-swap symmetry (the relative sign of the spin-flip part is fixed by requiring no axial parts in `T_ab`; the other sign mixes in the `L +- 1` axial sectors).
 - **Metric.** Regge-Wheeler gauge, `h_tt = alpha^2 H0 Y`, `h_tr = H1 Y`, `h_rr = X^2 H2 Y`, `h_AB = r^2 K Y Omega_AB`, symmetric tetrad perturbation. Unlike for scalar and Proca stars, `H0 != H2`: the traceless angular Einstein equation is sourced by the spin-flip amplitudes `a2`, `b2` (anisotropic stress at linear order), so the single-function ansatz of arXiv:2501.05342 does not apply to Dirac stars.
 - **Method.** General `L` through `Y'' = -cot Y' - L(L+1) Y`, with the projections evaluated at generic rational points on the sphere. Output: `relaxation/dirac_nonradial_coeffs.py` (8 Dirac rows and all 7 Einstein components).
-- **Checks** (in the script): the background equations, closure of the angular projections at two points, no axial components, the `-` spinor as the symmetry image of the `+` one, and a pure-gauge test (in progress, slow).
+- **Checks** (in the script): the background equations, closure of the angular projections at two points, no axial components, the `-` spinor as the symmetry image of the `+` one, and a pure-gauge test (Kosmann Lie derivative; slow, about an hour per sign convention). The `-` sign fails; the `+` sign was still running when this was written, so this test is not yet conclusive.
 - **Independent checks** of the tables (`relaxation/nonradial_checks/`):
   - the projected Bianchi identities hold to finite-difference accuracy in the exterior for arbitrary metric perturbations, and inside the star with on-shell matter;
   - static vacuum solutions are reproduced (flat tidal field; Schwarzschild `L = 2`, `H = r (r - 2M)`, `K = r^2 - 2M^2`);
@@ -298,7 +298,7 @@ Results (`G = mu = 1`, `R = 60–100`, `N` up to 190):
 
   - At small amplitude `lambda` is about `0.095 A_central`, the Newtonian scaling, so the instability extends into the Newtonian limit. A real pair comes with a stable pair of similar magnitude (for example `+-0.0047` and `+-0.0043 i` at 0.05). This is consistent with gravity splitting the near-degenerate 2s and 1d levels of the nearly harmonic core potential.
   - `lambda^2` crosses zero at `A_central = 0.252`, `omega = 0.850`, `M = 1.387`, just past the excited family's maximum mass. This is the Dirac analogue of the `l = 2` bifurcation of one-node scalar boson stars (`omega = 0.858` in arXiv:2501.05342). There the non-spherical (chain/ring) families branch off. Here the spherical stars remain radially unstable on both sides of the crossing.
-  - `L = 3, 4` at `A_central = 0.05`: stable (lowest frequencies 0.0098 and 0.0188).
+  - `L = 3, 4` at `A_central = 0.05, 0.14, 0.25`: stable (lowest frequencies 0.0098 / 0.0188, 0.031 / 0.054, 0.061 / 0.094), so `L = 2` is the only non-radial instability found for the one-node stars.
 
 The momentum-constraint diagnostic `Mom_Z` had a sign error in its `A_ww h_ww'` term, now fixed. In dynamical runs it produced a resolution-independent residual. It now converges at 4th order and agrees with the constraint computed independently from the slices. Values of `Mom_L2` from earlier runs should not be relied on.
 
