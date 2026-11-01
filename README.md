@@ -269,7 +269,7 @@ Results (`G = mu = 1`):
   i.e. the `kappa = -(L+1)` and `kappa = L` channels. The `-` spinor follows from the `R_x(pi)` x flavour-swap symmetry (the relative sign of the spin-flip part is fixed by requiring no axial parts in `T_ab`; the other sign mixes in the `L +- 1` axial sectors).
 - **Metric.** Regge-Wheeler gauge, `h_tt = alpha^2 H0 Y`, `h_tr = H1 Y`, `h_rr = X^2 H2 Y`, `h_AB = r^2 K Y Omega_AB`, symmetric tetrad perturbation. Unlike for scalar and Proca stars, `H0 != H2`: the traceless angular Einstein equation is sourced by the spin-flip amplitudes `a2`, `b2` (anisotropic stress at linear order), so the single-function ansatz of arXiv:2501.05342 does not apply to Dirac stars.
 - **Method.** General `L` through `Y'' = -cot Y' - L(L+1) Y`, with the projections evaluated at generic rational points on the sphere. Output: `relaxation/dirac_nonradial_coeffs.py` (8 Dirac rows and all 7 Einstein components).
-- **Checks** (in the script): the background equations, closure of the angular projections at two points, no axial components, the `-` spinor as the symmetry image of the `+` one, and a pure-gauge test (Kosmann Lie derivative; slow, about an hour per sign convention). The `-` sign fails; the `+` sign was still running when this was written, so this test is not yet conclusive.
+- **Checks** (in the script): the background equations, closure of the angular projections at two points, no axial components, the `-` spinor as the symmetry image of the `+` one, and a pure-gauge test (Kosmann Lie derivative; slow, about an hour per sign convention). The `-` sign fails; the run for the `+` sign was stopped before it finished, so this test is still open (the analogous test passes for Proca stars).
 - **Independent checks** of the tables (`relaxation/nonradial_checks/`):
   - the projected Bianchi identities hold to finite-difference accuracy in the exterior for arbitrary metric perturbations, and inside the star with on-shell matter;
   - static vacuum solutions are reproduced (flat tidal field; Schwarzschild `L = 2`, `H = r (r - 2M)`, `K = r^2 - 2M^2`);
@@ -299,6 +299,42 @@ Results (`G = mu = 1`, `R = 60–100`, `N` up to 190):
   - At small amplitude `lambda` is about `0.095 A_central`, the Newtonian scaling, so the instability extends into the Newtonian limit. A real pair comes with a stable pair of similar magnitude (for example `+-0.0047` and `+-0.0043 i` at 0.05). This is consistent with gravity splitting the near-degenerate 2s and 1d levels of the nearly harmonic core potential.
   - `lambda^2` crosses zero at `A_central = 0.252`, `omega = 0.850`, `M = 1.387`, just past the excited family's maximum mass. This is the Dirac analogue of the `l = 2` bifurcation of one-node scalar boson stars (`omega = 0.858` in arXiv:2501.05342). There the non-spherical (chain/ring) families branch off. Here the spherical stars remain radially unstable on both sides of the crossing.
   - `L = 3, 4` at `A_central = 0.05, 0.14, 0.25`: stable (lowest frequencies 0.0098 / 0.0188, 0.031 / 0.054, 0.061 / 0.094), so `L = 2` is the only non-radial instability found for the one-node stars.
+
+### Non-radial (axisymmetric) perturbations of free Proca stars
+
+`derivations/proca_nonradial.py` derives the linearised polar (`M = 0`, parity `(-1)^L`) equations for free Proca stars, in ProcaStar's conventions (`A = e^{-i omega t}(f dt + i g dr)`):
+- **Perturbation.** `dA_t = e^{-i omega t} a0 Y`, `dA_r = e^{-i omega t} a1 Y`, `dA_theta = e^{-i omega t} a2 Y'`. The metric is in the same Regge-Wheeler form as for Dirac stars.
+- **Anisotropic stress.** The traceless angular Einstein equation is not sourced by the matter at linear order (`F_theta r` and `A_theta` vanish in the background), so `H0 = H2`, as assumed in arXiv:2501.05342.
+- **Checks** (in the script): the stress tensor reproduces ProcaStar's `rho`; the background equations hold; the projections close, with no `phi` or axial components; and the pure-gauge test (`h = L_zeta g`, `dA = L_zeta A`, general polar `zeta`) is satisfied identically.
+- **Coefficients** are written to `relaxation/proca_nonradial_coeffs.py`.
+
+`relaxation/proca_relax.py` re-solves ProcaStar's shooting solutions by relaxation (free field). The family has `M_max = 1.0581` at `A_central = 0.0375`, `omega = 0.874`.
+
+`relaxation/proca_nonradial_modes.py` (`ProcaModes`, `classified`) uses the formulation of the Dirac solver: Einstein components `Eb, Erth, Etth, Etr`, regularity factored out at the centre, Robin outer conditions, and classification by convergence plus the residuals of the un-imposed components.
+- The `lambda^2` terms of the `r` and `theta` Proca equations are linearised with auxiliary fields.
+- At `L = 1`, `K = 0` and `Eb` is dropped; the angular check uses `Ea - Eb`, the only combination present when `Y'' = -Y`.
+- **L = 0 check.** With `K = H1 = 0` the fundamental radial frequency converges (`sigma_1` = 0.01408, 0.01495, 0.01005, 0.00582 at `A_central` = 0.01, 0.025, 0.033, 0.036) and reaches zero between 0.036 and 0.039, at the maximum mass.
+- Drivers and checks are in `relaxation/proca_nonradial_checks/`.
+
+Results (`G = mu = 1`):
+- **L = 2: real (non-oscillatory) instability on the whole stable branch, from the Newtonian limit to just past the maximum mass.** The zero mode is at `omega = 0.8713` (`A_central = 0.0391`, `M = 1.058`). This is the `l = 2` bifurcation found for Proca stars in arXiv:2501.05342 (`omega = 0.8713`, `M = 1.0579`) with the static zero-mode method. Beyond it the `L = 2` mode is stable (`sigma` = 0.0015, 0.0022, 0.0062, 0.0090, 0.0139 at `A_central` = 0.0395, 0.040, 0.045, 0.05, 0.06). This is the quadrupolar deformation towards the prolate stars of arXiv:2311.14800. The fastest e-folding time is about 160 / mu, near `omega = 0.89`.
+
+  | `A_central` | 0.003 | 0.006 | 0.01 | 0.015 | 0.02 | 0.025 | 0.03 | 0.033 | 0.036 | 0.038 | 0.039 |
+  |---|---|---|---|---|---|---|---|---|---|---|---|
+  | `omega` | 0.9671 | 0.9502 | 0.9334 | 0.9173 | 0.9044 | 0.8938 | 0.8847 | 0.8799 | 0.8755 | 0.8727 | 0.8714 |
+  | `L = 2` `lambda` | 0.00174 | 0.00309 | 0.00448 | 0.00566 | 0.00629 | 0.00638 | 0.00584 | 0.00511 | 0.00387 | 0.00239 | 0.00069 |
+
+  At small amplitude `lambda` is about 0.06 `(mu - omega)`, the Newtonian scaling. The values are converged in `N` (to 190) and independent of `R` (0.00629 at `R` = 60 and 90 for `A_central = 0.02`), with residuals 1e-4 to 1e-3.
+- **L = 1: oscillatory instability from `omega` of about 0.928 onwards**, continuing past the maximum mass. It sets in through a Krein collision: a single stable pair at `sigma = 0.0197` for `A_central = 0.011` becomes the quartet `+-0.0008 +- 0.0204 i` at 0.012.
+
+  | `A_central` | 0.012 | 0.015 | 0.02 | 0.025 | 0.03 | 0.036 | 0.04 | 0.05 |
+  |---|---|---|---|---|---|---|---|---|
+  | `L = 1` `lambda` | 0.0008 + 0.0204 i | 0.0018 + 0.0230 i | 0.0028 + 0.0265 i | 0.0037 + 0.0295 i | 0.0043 + 0.0321 i | 0.0050 + 0.0348 i | 0.0054 + 0.0363 i | 0.0060 + 0.0397 i |
+
+  - The eigenvalue agrees to five digits between `N` = 110 and 150 and between `R` = 60 and 90. The Hamiltonian constraint holds to 1e-7 or better in the bulk.
+  - Caveat: in the RW-type gauge with `K = 0`, `L = 1` keeps a residual gauge freedom (time-dependent translations). The eigenvector carries a component of it (`H0` grows roughly linearly outwards). A gauge-invariant reformulation or an evolution should confirm this mode.
+  - In the Newtonian picture the spherical star is a "hedgehog" `A_i ~ g(r) n_i`. The perturbation `dA ~ epsilon_z psi(r)` towards a fixed-polarisation s-wave state is exactly polar `L = 1`. An oscillatory instability in this channel is the analogue of the decay of an excited state.
+- **L = 3: stable** along the family (lowest frequencies 0.014, 0.027, 0.039, 0.048, 0.053, 0.060 at `A_central` = 0.006, 0.015, 0.025, 0.033, 0.038, 0.045).
 
 The momentum-constraint diagnostic `Mom_Z` had a sign error in its `A_ww h_ww'` term, now fixed. In dynamical runs it produced a resolution-independent residual. It now converges at 4th order and agrees with the constraint computed independently from the slices. Values of `Mom_L2` from earlier runs should not be relied on.
 
