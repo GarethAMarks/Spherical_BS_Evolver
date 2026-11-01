@@ -289,10 +289,14 @@ class NonRadialModes:
         """relative residuals of the Einstein components not used (Etr, Err, Ea) on an eigenvector"""
         out = {}
         v = v[:len(self.fields) * self.N]
-        for name in ('Ett', 'Etr', 'Err', 'Ea', 'Eb', 'Erth', 'Etth'):
-            Ar, Br, Cr = self._op(nc.ROWS[name](*self.bgargs))
-            res = (Ar + lam * Br + lam**2 * Cr) @ v
-            scale = (np.abs(Ar) + abs(lam) * np.abs(Br) + abs(lam)**2 * np.abs(Cr)) @ np.abs(v)
+        # at L = 1, Y'' = -Y: the angular components only contain Ea - Eb, and Ea, Eb separately are meaningless
+        for name in ('Ett', 'Etr', 'Err', 'Ea', 'Eb', 'Erth', 'Etth', 'Ea-Eb'):
+            parts = [(1., 'Ea'), (-1., 'Eb')] if name == 'Ea-Eb' else [(1., name)]
+            res = 0.; scale = 0.
+            for sgn, nm in parts:
+                Ar, Br, Cr = self._op(nc.ROWS[nm](*self.bgargs))
+                res = res + sgn * ((Ar + lam * Br + lam**2 * Cr) @ v)
+                scale = scale + (np.abs(Ar) + abs(lam) * np.abs(Br) + abs(lam)**2 * np.abs(Cr)) @ np.abs(v)
             inner = self.r < 0.8 * self.R
             out[name] = np.max(np.abs(res[inner])) / max(np.max(scale[inner]), 1e-300)
         return out
@@ -322,7 +326,7 @@ def classified(sol, L, N1=80, N2=110, R=None, lam_max=2.5, tol=2e-3, atol=3e-4, 
     l1 = ms[0].eigen(); l1 = l1[(np.abs(l1) < lam_max) & (np.abs(l1) > 1e-8)]
     l2, V2 = ms[1].eigen(vectors=True)
     s = (np.abs(l2) < lam_max) & (np.abs(l2) > 1e-8); l2 = l2[s]; V2 = V2[:, s]
-    unused = [n for n in ('Ett', 'Err', 'Ea') if n not in ms[1].rows()]
+    unused = ['Ett', 'Err', 'Ea-Eb'] if L == 1 else [n for n in ('Ett', 'Err', 'Ea') if n not in ms[1].rows()]
     out = []
     for k, z in enumerate(l2):
         conv = len(l1) > 0 and np.min(np.abs(l1 - z)) < tol * abs(z) + atol

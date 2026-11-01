@@ -300,6 +300,36 @@ Results (`G = mu = 1`, `R = 60–100`, `N` up to 190):
   - `lambda^2` crosses zero at `A_central = 0.252`, `omega = 0.850`, `M = 1.387`, just past the excited family's maximum mass. This is the Dirac analogue of the `l = 2` bifurcation of one-node scalar boson stars (`omega = 0.858` in arXiv:2501.05342). There the non-spherical (chain/ring) families branch off. Here the spherical stars remain radially unstable on both sides of the crossing.
   - `L = 3, 4` at `A_central = 0.05, 0.14, 0.25`: stable (lowest frequencies 0.0098 / 0.0188, 0.031 / 0.054, 0.061 / 0.094), so `L = 2` is the only non-radial instability found for the one-node stars.
 
+### Non-axisymmetric modes and the axial sector of free Dirac stars
+
+**Why `M = 0` is enough.** The free two-spinor system is invariant under a rotation combined with a U(2) flavour rotation of `(psi_+, psi_-)`: both spinors have the same mass, and the Soler term `(sum psibar psi)^2` would not break this either. The background is invariant under these combined rotations. The linearised operator therefore commutes with them, and its modes form `(2L+1)`-plets labelled by total `(L, M)` and parity. A non-axisymmetric (`M != 0`, e.g. `m = 1`) mode is a rotation of an `M = 0` mode with the same `L`, parity and eigenvalue. The polar `M = 0` analysis above covers parity `(-1)^L`; the axial sector (parity `(-1)^(L+1)`) below completes the non-radial spectrum. (The `L = 0` axial sector does not couple to the metric, so its modes are those of the Dirac operator on the fixed background and are stable.)
+
+`derivations/dirac_axial.py` derives the axial `M = 0` equations with the machinery of `dirac_nonradial.py`:
+- **Ansatz.** `sigma.n` maps the polar channels `kappa = -(L+1), L` onto `kappa = L+1, -L` (the same `j'`, opposite parity). The perturbation is therefore the polar one with upper and lower components exchanged: `dpsi_+ = e^{-i omega t}((sigma.n)(c1 Y chi_up + c2 e^{i phi} Y' chi_dn), i (d1 Y chi_up + d2 e^{i phi} Y' chi_dn))`.
+- **Metric.** RW axial, `h_tphi = h0 sin Y'`, `h_rphi = h1 sin Y'`.
+- **Flavour sign.** The relative sign of the `-` spinor's spin-flip part is again `s2 = -1`; `s2 = +1` leaves polar components in `T_ab`.
+- **Checks.** The projections close, the polar Einstein components vanish, and the `-` spinor is the symmetry image of the `+` one. Only the spin-flip channel `(c2, d2)` sources the metric.
+- **Bianchi identity.** The `phi` component, `-(lambda Etph - (alpha alpha'/X^2) Erph)/alpha^2 + (Erph' - (X'/X + 1/r) Erph)/X^2 + 3 Erph/(r X^2) - (L(L+1) - 2) Ethph/r^2 = 0`, holds to 1e-8 for `L = 1, 2, 3` in the Schwarzschild exterior (arbitrary `h0`, `h1`) and inside a star with on-shell matter (`relaxation/nonradial_checks/bianchi_ax.py`).
+
+`relaxation/dirac_axial_modes.py` (`AxialModes`, `classified`):
+- **Equations imposed.** The 8 Dirac rows and `Etph, Erph` (`L >= 2`; the Bianchi identity then forces `Ethph = 0`, which is used as the check), or `Etph` with the gauge `h1 = 0` at `L = 1` (`Erph` is the check).
+- **Discretisation.** Regular factor `p = L - 1, L, L + 1` for `c`, `d`, `h0/h1`; Robin outer condition `F' + (lambda X/alpha + L/r) F = 0` for the metric.
+- **Zero mode.** At `L = 1` the solver recovers the exact zero mode predicted by the symmetry, the relative phase rotation `dpsi_+ = i psi_+`, `dpsi_- = -i psi_-` (`|lambda| < 1e-5`; the eigenvector is purely in the phases of both channels, with no metric perturbation at leading order).
+
+**Polar `L = 1` revisited.** At `L = 1`, `Y'' = -Y`, so only the combination `Ea - Eb` of the angular components exists. Checking `Ea` and `Eb` separately (as before) wrongly flagged every `L = 1` mode; `dirac_nonradial_modes.residuals` now uses `Ea - Eb`. With this, the converged `L = 1` modes are stable:
+- ground state: lowest `sigma` 0.0198, 0.0424, 0.0532, 0.0636, 0.0737, 0.1263 at `A_central` = 0.05, 0.11, 0.14, 0.17, 0.20, 0.225;
+- excited state: lowest `sigma` 0.0057, 0.0108, 0.0125, 0.0205 at `A_central` = 0.05, 0.11, 0.17, 0.25.
+
+The only growing candidate is a real eigenvalue that drifts with resolution and domain (0.048, 0.069, 0.090 at `N` = 110, 150, 190 for `A_central = 0.05`) and violates the constraints at the 0.2–0.5 level. It is presumably the residual `L = 1` gauge freedom (accelerated translations) and is not physical.
+
+**Results.** The axial sector is stable for `L = 1, 2, 3` along the ground-state family (`A_central` 0.02–0.30) and the first-excited family (0.025–0.25):
+- Apart from the flavour zero mode, no converged mode has `Re lambda > 5e-4`.
+- Lowest axial frequencies: ground state `L = 1`: 0.027, 0.042, 0.070, 0.082, 0.094, 0.104, 0.113, 0.129 (`A_central` = 0.05 ... 0.30); `L = 2`: 0.020, 0.033, 0.057, 0.069, 0.081, 0.091, 0.101 (0.05 ... 0.25).
+- Excited state, near-zero but stable: `L = 1` 0.0020 (0.025), 0.0041 (0.05); `L = 2` 0.0029, 0.0055; `L = 3` 0.0021, 0.0045.
+- The only rejected candidates are the high-frequency (`|Im lambda| ~ 0.6–0.9`) unconverged artefacts.
+
+Hence, for free Dirac stars, **there is no `m = 1` (or any `M != 0`) instability**: the non-radial instabilities are exactly those of the polar `M = 0` analysis (none for the ground state; `L = 2` for the excited state, with its `M = +-1, +-2` copies). For Proca stars the same symmetry argument (plain rotations) implies that the polar `L = 1` oscillatory instability found below also has `M = +-1` copies, i.e. an `m = 1` non-axisymmetric instability with the same eigenvalue.
+
 ### Non-radial (axisymmetric) perturbations of free Proca stars
 
 `derivations/proca_nonradial.py` derives the linearised polar (`M = 0`, parity `(-1)^L`) equations for free Proca stars, in ProcaStar's conventions (`A = e^{-i omega t}(f dt + i g dr)`):
