@@ -12,3 +12,4 @@ SBSE_WORK to a scratch directory for shooting runs and cached backgrounds (defau
 - bianchi_ax.py    phi component of the Bianchi identity for the axial tables (vacuum and on-shell interior)
 - ax1.py, ax0.py   axial spectra of single stars (python3 ax1.py A L R [exc]); inspection of near-zero eigenvalues
 - l1d.py, l1aud.py polar L = 1 spectra along a family; resolution / domain audit of L = 1 candidates
+- hiL.py           high-L sweep (python3 hiL.py A gs|exc polar|axial L1,L2,... R r_s)

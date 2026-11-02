@@ -328,6 +328,13 @@ The only growing candidate is a real eigenvalue that drifts with resolution and 
 - Excited state, near-zero but stable: `L = 1` 0.0020 (0.025), 0.0041 (0.05); `L = 2` 0.0029, 0.0055; `L = 3` 0.0021, 0.0045.
 - The only rejected candidates are the high-frequency (`|Im lambda| ~ 0.6–0.9`) unconverged artefacts.
 
+**High multipoles.** Both sectors were swept to large `L` (`relaxation/nonradial_checks/hiL.py`, regular-factor scale `r_s = 0.5`, which is better conditioned at large `L`; `N = 110, 150`):
+- polar and axial `L` = 4 (axial), 5, 6, 8, 10, 13, 16, 20, 25, 30 for ground-state stars at `A_central` = 0.05, 0.14, 0.225 and excited stars at 0.05, 0.17, 0.25;
+- `L` = 40, 50 for `A_central = 0.14` (ground) and 0.17 (excited).
+- No eigenvalue with `Re lambda > 5e-4` appears in any of these 126 spectra, converged or not.
+- The same settings recover the excited-state `L = 2` instability (0.0092 at `A_central = 0.11`), so the sweep can see instabilities of that size.
+- At large `L` the centrifugal barrier removes the bound modes and the gravitational coupling weakens, so the spectrum approaches that of the Dirac operator on the fixed background, whose frequencies are real.
+
 Hence, for free Dirac stars, **there is no `m = 1` (or any `M != 0`) instability**: the non-radial instabilities are exactly those of the polar `M = 0` analysis (none for the ground state; `L = 2` for the excited state, with its `M = +-1, +-2` copies). For Proca stars the same symmetry argument (plain rotations) implies that the polar `L = 1` oscillatory instability found below also has `M = +-1` copies, i.e. an `m = 1` non-axisymmetric instability with the same eigenvalue.
 
 ### Non-radial (axisymmetric) perturbations of free Proca stars
