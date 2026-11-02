@@ -981,8 +981,14 @@ void BosonStar::fill_isotropic_arrays()
       pert_array.resize(n_gridpoints);
 
       for (int j = 0; j < n_gridpoints; j++)
+      {
         pert_array[j] = perturb_amp * exp ( -pow (j * dr - perturb_center, 2.) / (perturb_spread * perturb_spread))
                         -mirror_gaussian * perturb_amp * exp ( -pow (j * dr - perturb_center - 2. * perturb_spread, 2.) / (perturb_spread * perturb_spread));
+
+        //l-boson stars: same regularising factor as in add_perturbation, so the perturbation ~ r^ell at the origin
+        if (ell > 0)
+            pert_array[j] *= pow(j * dr / perturb_spread, ell);
+      }
     }
 
     r_iso_array[0] = 0;

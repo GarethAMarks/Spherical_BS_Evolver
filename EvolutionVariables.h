@@ -5,6 +5,7 @@
 #include <iostream>
 #include <string>
 #include <fstream>
+#include <complex>
 #include "BosonStar.h"
 #include "ComplexScalarField.h" // for CSF in composite State
 #include "RealScalarField.h"   // for RSF in composite State
@@ -60,6 +61,7 @@ class BSSNSlice
 {
     public:
         static int origin_mirror_shift; // ghost index -k maps to k - origin_mirror_shift across z = 0 (1 for cell-centred grids)
+        static bool csf_odd_parity; // l-boson stars with odd ell: the complex field (and its momentum) is odd across z = 0
 
     //public vars are BSSN evolution/gauge variables; privates are auxiliary quantities used in evolution/diagnostic equations
     private:
@@ -164,8 +166,16 @@ class Spacetime
         ComplexScalarField csf_model;
         RealScalarField    rsf_model;
         BSSNSlice* current_slice_ptr; //pointer to current slice, updated on each time step
-        
+
         double D;
+
+        // l-boson stars: the evolved complex field is the common radial factor f(t, z) of the 2 ell + 1 fields
+        // Phi_m = sqrt(4 pi / (2 ell + 1)) f Y_{ell m}; f ~ z^ell at the origin. ell = 0 is an ordinary boson star.
+        int ell = 0;
+        double ell_LL() const { return ell * (ell + D - 3.); } // eigenvalue of -Laplacian on the unit (D-2)-sphere
+        int ctr_index() const { return (ell > 0 && !cell_centered) ? 1 : 0; } // innermost point used for "central" diagnostics
+        // "central" field value: f at the centre for ell = 0; lim f / z^ell (estimated at the innermost z > 0 point) for ell > 0
+        std::complex<double> central_field(const BSSNSlice& slice) const;
 
         bool use_CCZ4; //0 for BSSN, 1 for CCZ4
         double c1; //CCZ4 damping params

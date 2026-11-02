@@ -47,15 +47,20 @@ public:
             double z) const;
 
     // Stress-energy projections T_{ab} against 3+1 split
-    // These return the local contributions at a gridpoint, given csf and metric data in bssn
+    // These return the local contributions at a gridpoint, given csf and metric data in bssn.
+    // z is the radial coordinate of the point; it is only needed for l-boson stars (ell > 0), whose angular
+    // gradients contribute ell(ell+D-3)|f|^2/z^2 terms. The default z < 0 means "no angular terms".
         double rho(const CSF& csf, const BSSNState& bssn,
-                   const CSF& d_z_csf, const CSF& d_zz_csf) const;   // energy density
+                   const CSF& d_z_csf, const CSF& d_zz_csf, double z = -1.) const;   // energy density
         double j_z(const CSF& csf, const BSSNState& bssn,
                    const CSF& d_z_csf, const CSF& d_zz_csf) const;   // momentum density along z (radial)
         double S_zz(const CSF& csf, const BSSNState& bssn,
-                    const CSF& d_z_csf, const CSF& d_zz_csf) const;  // stress in zz
+                    const CSF& d_z_csf, const CSF& d_zz_csf, double z = -1.) const;  // stress in zz
         double S_ww(const CSF& csf, const BSSNState& bssn,
-                    const CSF& d_z_csf, const CSF& d_zz_csf) const;  // stress in angular directions (trace over sphere)
+                    const CSF& d_z_csf, const CSF& d_zz_csf, double z = -1.) const;  // stress in angular directions (trace over sphere)
+
+    // ell(ell+D-3) |f|^2 / z^2 for an l-boson star (0 for ell = 0 or z < 0); regularised at the origin, where f/z -> d_z f
+        double angular_grad2(const CSF& csf, const CSF& d_z_csf, double z) const;
 
     // Access to associated spacetime
     Spacetime* spacetime() const { return st; }

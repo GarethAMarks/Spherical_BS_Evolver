@@ -37,6 +37,22 @@ This compiles the same sources with `-DUSE_MPI` into `BosonStarStability_mpi.o`,
 
 ---
 
+## ℓ-boson stars
+
+Setting `ell > 0` constructs and evolves ℓ-boson stars: 2ℓ+1 complex fields Φ_m = √(4π/(2ℓ+1)) f(t,r) Y_ℓm locked to the spherical harmonics, so that the stress tensor (and metric) stays spherically symmetric. This is a consistent truncation for any potential invariant under U(1) × SO(3)_ℓ, in particular the mini, quartic and solitonic `V(|Φ|²)` already implemented here (with |Φ|² = Φ†Φ = |f|²). The code evolves the common radial factor f (`phi_re`, `phi_im`), exactly as for ℓ = 0, with three additions:
+
+- **Field equation:** the angular Laplacian adds a centrifugal term ℓ(ℓ+D−3) f / r² (in the evolution: `+½ α χ h^ww ℓ(ℓ+D−3) f / z²` in the `K_phi` equation).
+- **Stress tensor:** the angular gradients add ½ ℓ(ℓ+D−3)|f|²/r² (times the inverse angular metric) to ρ, subtract it from S_rr, and add ℓ(ℓ+D−3)|f|²/r² · (1/(D−2) − ½) to the angular stress, which vanishes in D = 4. The momentum density is unchanged.
+- **Regularity:** f ~ r^ℓ. The ODE solver integrates ψ = A/r^ℓ with a series step at r = 0 (so `A_central` means lim A/r^ℓ). In the evolution, f and K_phi are odd across z = 0 for odd ℓ (finite-difference and Kreiss–Oliger ghost points flip sign), and f = K_phi = 0 is enforced at a vertex-centred origin.
+
+Diagnostics: for `ell > 0`, the "central" amplitude/phase in `constraint_norms.dat` (`A_central`, `phi_re_central`, used by `stop_on_migrate` and the critical-study triggers) is lim f/z^ℓ, estimated at the innermost point with z > 0. `add_perturbation` multiplies its Gaussian by (r/`perturb_spread`)^ℓ so perturbed data stay regular.
+
+Not supported for `ell > 0`: the linear perturbation solver (`pert_only`, radial ℓ = 0 modes only), `read_thinshell` (expects ℓ = 0 data) and the defunct `solve_finding_A`/`fill_given_A` paths. The slice-mass integral is only accurate in isotropic coordinates (`isotropic = 1`), for ℓ = 0 as well.
+
+Reference: Alcubierre et al., "ℓ-Boson stars", Class. Quant. Grav. 35 (2018) 19LT01, arXiv:1805.11488.
+
+---
+
 ## Output files
 
 | File | Written every | Contents |
@@ -65,6 +81,7 @@ This compiles the same sources with `-DUSE_MPI` into `BosonStarStability_mpi.o`,
 | `sigma` | `0.2` | Solitonic potential parameter (only used when `solitonic = 1`) |
 | `G` | `1.0` | Newton's constant |
 | `eigen` | `0` | Eigenstate index: 0 = ground state, 1 = first excited state, etc. |
+| `ell` | `0` | Angular number of an ℓ-boson star (see below); 0 = ordinary boson star. For `ell > 0`, `A_central` is lim A/r^ℓ |
 | `alpha_central` | `0.5` | Initial central lapse for the ODE solver (rescaled after shooting) |
 | `A_central` | `0.05` | Central field amplitude for the boson star |
 | `frequency_guess` | `1.8` | Initial frequency guess for the shooting method |

@@ -18,6 +18,7 @@
 
 // reflection offset across z = 0: 0 for vertex-centred grids, 1 for cell-centred (set in Spacetime::initialize)
 int BSSNSlice::origin_mirror_shift = 0;
+bool BSSNSlice::csf_odd_parity = false;
 
 using std::cout;
 using std::cin;
@@ -578,6 +579,10 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
         }
 
         bool parity_is_odd = ((var == v_c_chris_Z || var == v_beta)/*|| (has_BH && (var == v_chi || var == v_alpha))*/);
+
+        //l-boson stars with odd ell: the complex field f ~ z^ell and its momentum are odd across z = 0
+        if (csf_odd_parity && (var == v_phi_re || var == v_phi_im || var == v_K_phi_re || var == v_K_phi_im))
+            parity_is_odd = true;
        //if (var == v_alpha) cout << parity_is_odd<< endl;
 
         //account for odd parity of contracted christoffel symbols and beta across z = 0
@@ -676,6 +681,14 @@ void Spacetime::apply_damping_at_point(int j,
         };
         damping_corr.bssn.c_chris_Z = odd_corr([](const State& st) { return st.bssn.c_chris_Z; });
         damping_corr.bssn.beta      = odd_corr([](const State& st) { return st.bssn.beta; });
+
+        if (BSSNSlice::csf_odd_parity) // odd-ell l-boson stars: the complex field is odd as well
+        {
+            damping_corr.csf.phi_re   = odd_corr([](const State& st) { return st.csf.phi_re; });
+            damping_corr.csf.phi_im   = odd_corr([](const State& st) { return st.csf.phi_im; });
+            damping_corr.csf.K_phi_re = odd_corr([](const State& st) { return st.csf.K_phi_re; });
+            damping_corr.csf.K_phi_im = odd_corr([](const State& st) { return st.csf.K_phi_im; });
+        }
     }
 
     rhs_states2[j] = rhs_states2[j] + damping_corr;
@@ -828,6 +841,14 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
 
     // Build contiguous arrays and their splines
     tk::spline s_X, s_A, s_phi, s_psi_iso, s_A_iso, s_phi_iso, s_pert, s_pert_iso;
+
+    // Inner boundary condition for splines of the field: even functions of z have f'(0) = 0; for l-boson stars with
+    // odd ell the field is odd (f ~ z^ell), so impose f''(0) = 0 instead.
+    const bool field_is_odd = (boson_star.ell % 2 == 1);
+    auto set_field_bc = [field_is_odd](tk::spline& sp) {
+        if (field_is_odd) sp.set_boundary(tk::spline::second_deriv, 0.0, tk::spline::second_deriv, 0.0);
+        else              sp.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
+    };
     tk::spline s_rsf_iso, s_rsf;
     if (isotropic) {
         if (!boson_star.psi_iso_array.empty()) {
@@ -835,7 +856,7 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
             s_psi_iso.set_points(X_nodes, boson_star.psi_iso_array, tk::spline::cspline);
         }
         if (!boson_star.A_iso_array.empty())   {
-            s_A_iso.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
+            set_field_bc(s_A_iso);
             s_A_iso.set_points(X_nodes, boson_star.A_iso_array, tk::spline::cspline);
         }
         if (!boson_star.phi_iso_array.empty()) {
@@ -847,7 +868,7 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
             s_rsf_iso.set_points(X_nodes, boson_star.rsf_iso_array, tk::spline::cspline);
         }
         if (boson_star.perturb && !boson_star.pert_iso_array.empty()) {
-            s_pert_iso.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
+            set_field_bc(s_pert_iso);
             s_pert_iso.set_points(X_nodes, boson_star.pert_iso_array, tk::spline::cspline);
         }
     } else {
@@ -858,13 +879,13 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
             bs_phi[k] = boson_star.state[k].phi;
         }
         s_X.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
-        s_A.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
+        set_field_bc(s_A);
         s_phi.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
         s_X.set_points(X_nodes, bs_X, tk::spline::cspline);
         s_A.set_points(X_nodes, bs_A, tk::spline::cspline);
         s_phi.set_points(X_nodes, bs_phi, tk::spline::cspline);
         if (boson_star.perturb && !boson_star.pert_array.empty()) {
-            s_pert.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
+            set_field_bc(s_pert);
             s_pert.set_points(X_nodes, boson_star.pert_array, tk::spline::cspline);
         }
         if (boson_star.add_real_field && !boson_star.rsf_array.empty()) {
@@ -1141,6 +1162,15 @@ double Spacetime::V(const double A)
         return mu * mu * A * A * pow((1. - 2. * pow(A / sigma, 2)), 2) + lambda * pow(A,4) ;
 }
 
+std::complex<double> Spacetime::central_field(const BSSNSlice& slice) const
+{
+    const int k = ctr_index();
+    std::complex<double> f(slice.states2[k].csf.phi_re, slice.states2[k].csf.phi_im);
+    if (ell > 0)
+        f /= pow((k + grid_offset) * dr, ell);
+    return f;
+}
+
 double Spacetime::dV(const double A)
 {
     if (!solitonic)
@@ -1196,6 +1226,11 @@ double Spacetime::d_alpha_asymp(double r)
 
     double mod_phi = sqrt(phi_re * phi_re + phi_im + phi_im);
     double rho0 = 2. * (K_phi_im * K_phi_im + K_phi_re * K_phi_re) +  0.5 * chi * (pow(dz_phi_re,2) + pow(dz_phi_im,2)) + 0.5 * V(mod_phi);
+
+    //l-boson stars: angular gradients of the multiplet (h_ww = 1 in this conformally flat solve)
+    if (ell > 0)
+        rho0 += 0.5 * chi * ell_LL() * ((r > min_z) ? (phi_re * phi_re + phi_im * phi_im) / (r * r)
+                                                     : (dz_phi_re * dz_phi_re + dz_phi_im * dz_phi_im));
     
     //account for real scalar field if needed
     if (add_real_field)
@@ -1367,7 +1402,7 @@ void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
 
     // |phi|
     double mod_phi = sqrt(phi_re * phi_re + phi_im * phi_im);
-    if (j == 0) test_ctr = mod_phi;
+    if (j == ctr_index()) test_ctr = (ell > 0) ? mod_phi / pow(z, ell) : mod_phi;
 
     // matter quantities via ComplexScalarField helpers (reuse member to avoid per-point construction)
     CSF csf = slice_ptr->states2[j].csf;
@@ -1376,10 +1411,10 @@ void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
     CSF d_z_csf{d_z_phi_re, d_z_phi_im, 0.0, 0.0};
     CSF d_zz_csf{0.0, 0.0, 0.0, 0.0};
 
-    rho[j] = csf_model.rho(csf, bssn, d_z_csf, d_zz_csf);
+    rho[j] = csf_model.rho(csf, bssn, d_z_csf, d_zz_csf, z);
     j_z[j] = csf_model.j_z(csf, bssn, d_z_csf, d_zz_csf);
-    S_zz[j] = csf_model.S_zz(csf, bssn, d_z_csf, d_zz_csf);
-    S_ww[j] = csf_model.S_ww(csf, bssn, d_z_csf, d_zz_csf);
+    S_zz[j] = csf_model.S_zz(csf, bssn, d_z_csf, d_zz_csf, z);
+    S_ww[j] = csf_model.S_ww(csf, bssn, d_z_csf, d_zz_csf, z);
 
     // If configured, add massless real scalar field contributions
     if (add_real_field)
@@ -1603,6 +1638,10 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
         // add damping away from edges
         if (damping_factor != 0. && j < n_gridpoints - 3 * res_fac_outer)
             apply_damping_at_point(j, slice_ptr, rhs.states2, rhs.theta);
+
+        // l-boson stars: f ~ z^ell, so f = K_phi = 0 at the origin for all time
+        if (ell > 0 && z <= min_z)
+            rhs.states2[j].csf = CSF{0., 0., 0., 0.};
     }
 
     //apply Sommerfeld boundary conditions at outer boundary
@@ -1705,7 +1744,7 @@ void Spacetime::compute_scalar_energies(BSSNSlice* slice_ptr)
             const CSF csf = slice_ptr->states2[j].csf;
             const CSF d_z_csf{slice_ptr->d_z(v_phi_re, j), slice_ptr->d_z(v_phi_im, j), 0.0, 0.0};
             const CSF d_zz_csf{0.0, 0.0, 0.0, 0.0};
-            const double rho_phi = csf_model.rho(csf, bssn, d_z_csf, d_zz_csf);
+            const double rho_phi = csf_model.rho(csf, bssn, d_z_csf, d_zz_csf, z);
             e_phi += quad_weights[j] * sphere_area * rho_phi * std::pow(z, D - 2.) * std::pow(chi, 0.5 * (1.0 - D));
         }
 
@@ -2512,6 +2551,8 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
     wave_mode = 0; //make 1 for MR testing purposes only
     ah_radius = -1.;
     D = boson_star.D;
+    ell = boson_star.ell;
+    BSSNSlice::csf_odd_parity = (ell % 2 == 1);
 
     //inherit parameters from BS
     n_gridpoints = boson_star.n_gridpoints;
@@ -2714,6 +2755,16 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
 
     compute_auxiliary_quantities(current_slice_ptr);
     rho0_init = make_tangherlini ? 1. : rho[0];
+
+    //l-boson stars: the central energy density is zero for ell >= 2 (and small, gradient-only, for ell = 1),
+    //so normalise the constraint norms by the maximum initial energy density instead
+    if (ell > 0 && !make_tangherlini)
+    {
+        double rho_max = 0.;
+        for (int j = owned_begin(); j < owned_end(); j++)
+            rho_max = std::max(rho_max, rho[j]);
+        rho0_init = bss_mpi::max(rho_max);
+    }
     compute_diagnostics(current_slice_ptr);
     dtK_L2 = 0;
 
@@ -2781,7 +2832,8 @@ void Spacetime::evolve()
     // in the general case; broadcast so all ranks share the same value.
     double A0 = 0.0;
     if (owns_origin())
-        A0 = sqrt (pow(slices[0].states2[0].csf.phi_re,2) + pow(slices[0].states2[0].csf.phi_im,2));
+        A0 = (ell > 0) ? std::abs(central_field(slices[0]))
+                       : sqrt (pow(slices[0].states2[0].csf.phi_re,2) + pow(slices[0].states2[0].csf.phi_im,2));
     bss_mpi::bcast_doubles(&A0, 1);
 
     if (!run_quietly && mpi_rank == 0)
@@ -2824,7 +2876,7 @@ void Spacetime::evolve()
         // MPI: states2[0] is only valid on rank 0. Compute central-point diagnostics
         // on rank 0 and broadcast the few scalars other ranks need for control flow.
         if (owns_origin())
-            phase_ctr = std::arg( std::complex<double>(slices[n].states2[0].csf.phi_re, slices[n].states2[0].csf.phi_im));
+            phase_ctr = std::arg(central_field(slices[n]));
 
         double omega_approx = (phase_ctr - phase_last) / dt;
 
@@ -2843,10 +2895,12 @@ void Spacetime::evolve()
             const double Ap0 = sqrt (pow(slices[n].states2[0].csf.phi_re,2) + pow(slices[n].states2[0].csf.phi_im,2));
             const double Ap1 = sqrt (pow(slices[n].states2[1].csf.phi_re,2) + pow(slices[n].states2[1].csf.phi_im,2));
             central[0] = (cell_centered) ? (Ap0 - 0.5 * dr * (Ap1 - Ap0)) : Ap0;
+            if (ell > 0) // l-boson stars: lim f/z^ell, since f itself vanishes at the centre
+                central[0] = std::abs(central_field(slices[n]));
             central[1] = (make_tangherlini || slices[n].states2[0].bssn.chi < 10 * min_chi) ? 1.0 : 0.0;
             central[2] = slices[n].states2[0].bssn.chi;
             central[3] = slices[n].states2[0].bssn.alpha;
-            central[4] = slices[n].states2[0].csf.phi_re;
+            central[4] = (ell > 0) ? central_field(slices[n]).real() : slices[n].states2[0].csf.phi_re;
             central[5] = phase_ctr;
             central[6] = test_ctr;
         }

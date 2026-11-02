@@ -6,6 +6,7 @@ solitonic = 1 #if false will use mini BS potential
 G = 1.0 
 sigma = 0.2
 eigen = 0 #0 for ground state BS
+ell = 0 #angular number of an l-boson star (2l+1 fields locked to Y_lm); 0 = ordinary boson star. For ell > 0, A_central = lim A/r^ell
 alpha_central = 0.5 #starting central lapse, will be rescaled
 A_central = 0.05 #0.0135, 0.014
 frequency_guess = 1.8

@@ -23,16 +23,31 @@ CSF operator*(double c, const CSF& a) {
 }
 
 
+// l-boson stars: sum over the multiplet of the angular gradients. With Phi_m = sqrt(4 pi/(2 ell+1)) f Y_{ell m},
+// sum_m |Phi_m|^2 = |f|^2 and, in the cartoon w-direction at w = 0, sum_m |d_w Phi_m|^2 = ell(ell+D-3)|f|^2 / (n z^2)
+// per transverse direction (n = D - 2). This helper returns ell(ell+D-3)|f|^2/z^2.
+double ComplexScalarField::angular_grad2(const CSF& csf, const CSF& d_z_csf, double z) const {
+    if (!st || st->ell == 0 || z < 0.0)
+        return 0.0;
+    const double LL = st->ell_LL();
+    if (z <= st->min_z) // f ~ z^ell: f/z -> d_z f at the origin (non-zero only for ell = 1)
+        return LL * (d_z_csf.phi_re * d_z_csf.phi_re + d_z_csf.phi_im * d_z_csf.phi_im);
+    return LL * (csf.phi_re * csf.phi_re + csf.phi_im * csf.phi_im) / (z * z);
+}
+
 // Energy density rho = n^a n^b T_ab
 double ComplexScalarField::rho(const CSF& csf, const BSSNState& bssn,
-                               const CSF& d_z_csf, const CSF& /*d_zz_csf*/) const {
+                               const CSF& d_z_csf, const CSF& /*d_zz_csf*/, double z) const {
     const double chi = (bssn.chi <= 0.0 ? 1e-300 : bssn.chi);
     const double h_ZZ = 1.0 / bssn.h_zz;
     const double mod_phi = std::sqrt(csf.phi_re * csf.phi_re + csf.phi_im * csf.phi_im);
     const double K2 = csf.K_phi_re * csf.K_phi_re + csf.K_phi_im * csf.K_phi_im;
     const double grad2 = d_z_csf.phi_re * d_z_csf.phi_re + d_z_csf.phi_im * d_z_csf.phi_im;
     double Vphi = st ? st->V(mod_phi) : 0.0;
-    return 2.0 * K2 + 0.5 * h_ZZ * chi * grad2 + 0.5 * Vphi;
+    double r = 2.0 * K2 + 0.5 * h_ZZ * chi * grad2 + 0.5 * Vphi;
+    if (st && st->ell > 0) // + (1/2) gamma^{AB} sum_m d_A Phi_m^* d_B Phi_m
+        r += 0.5 * chi * angular_grad2(csf, d_z_csf, z) / bssn.h_ww;
+    return r;
 }
 
 // Momentum density j_z = -n^a gamma^b{}_z T_ab
@@ -43,19 +58,22 @@ double ComplexScalarField::j_z(const CSF& csf, const BSSNState& /*bssn*/,
 
 // Stress S_zz = gamma^a{}_z gamma^b{}_z T_ab
 double ComplexScalarField::S_zz(const CSF& csf, const BSSNState& bssn,
-                                const CSF& d_z_csf, const CSF& /*d_zz_csf*/) const {
+                                const CSF& d_z_csf, const CSF& /*d_zz_csf*/, double z) const {
     const double chi = (bssn.chi <= 0.0 ? 1e-300 : bssn.chi);
     const double h_zz = bssn.h_zz;
     const double mod_phi = std::sqrt(csf.phi_re * csf.phi_re + csf.phi_im * csf.phi_im);
     const double K2 = csf.K_phi_re * csf.K_phi_re + csf.K_phi_im * csf.K_phi_im;
     const double grad2 = d_z_csf.phi_re * d_z_csf.phi_re + d_z_csf.phi_im * d_z_csf.phi_im;
     double Vphi = st ? st->V(mod_phi) : 0.0;
-    return 0.5 * grad2 - 0.5 * h_zz * (Vphi - 4.0 * K2) / chi;
+    double s = 0.5 * grad2 - 0.5 * h_zz * (Vphi - 4.0 * K2) / chi;
+    if (st && st->ell > 0) // - (1/2) gamma_zz gamma^{AB} sum_m d_A Phi_m^* d_B Phi_m
+        s -= 0.5 * h_zz * angular_grad2(csf, d_z_csf, z) / bssn.h_ww;
+    return s;
 }
 
 // Stress S_ww (angular trace component)
 double ComplexScalarField::S_ww(const CSF& csf, const BSSNState& bssn,
-                                const CSF& d_z_csf, const CSF& /*d_zz_csf*/) const {
+                                const CSF& d_z_csf, const CSF& /*d_zz_csf*/, double z) const {
     const double chi = (bssn.chi <= 0.0 ? 1e-300 : bssn.chi);
     const double h_ww = bssn.h_ww;
     const double h_ZZ = 1.0 / bssn.h_zz;
@@ -63,7 +81,10 @@ double ComplexScalarField::S_ww(const CSF& csf, const BSSNState& bssn,
     const double K2 = csf.K_phi_re * csf.K_phi_re + csf.K_phi_im * csf.K_phi_im;
     const double grad2 = d_z_csf.phi_re * d_z_csf.phi_re + d_z_csf.phi_im * d_z_csf.phi_im;
     double Vphi = st ? st->V(mod_phi) : 0.0;
-    return -0.5 * h_ww * (h_ZZ * grad2 + (Vphi - 4.0 * K2) / chi);
+    double s = -0.5 * h_ww * (h_ZZ * grad2 + (Vphi - 4.0 * K2) / chi);
+    if (st && st->ell > 0) // sum_m |d_w Phi_m|^2 - (1/2) gamma_ww gamma^{AB} (...) = ell(ell+D-3)|f|^2/z^2 (1/n - 1/2); zero in D = 4
+        s += angular_grad2(csf, d_z_csf, z) * (1.0 / (st->D - 2.0) - 0.5);
+    return s;
 }
 
 // Full RHS using available local data and field derivatives.
@@ -118,6 +139,18 @@ CSF ComplexScalarField::rhs_CSF(const CSF& csf, const BSSNState& bssn,
                                         + alpha * ( h_ZZ * cD_zz_phi_im + n * h_WW * cD_ww_phi_im )
                                     )
                                 + 0.25 * (Ddim - 3.0) * alpha * h_ZZ * d_z_chi * d_z_csf.phi_im;
+
+    // l-boson stars: angular part of the Laplacian, Delta_S Y_lm = -ell(ell+D-3) Y_lm, gives a centrifugal term
+    // -(1/2) alpha * (-chi h^ww ell(ell+D-3) f / z^2). f ~ z^ell, so f and K_phi vanish at the origin for ell > 0:
+    // there the RHS is pinned to zero (see also slice_rhs, which re-pins after dissipation).
+    if (st && st->ell > 0)
+    {
+        if (z <= st->min_z)
+            return CSF{0.0, 0.0, 0.0, 0.0};
+        const double cent = 0.5 * alpha * chi * h_WW * st->ell_LL() / (z * z);
+        rhs.K_phi_re += cent * csf.phi_re;
+        rhs.K_phi_im += cent * csf.phi_im;
+    }
 
     return rhs;
 }
