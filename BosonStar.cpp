@@ -84,6 +84,7 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "G = ", G, quiet);
         fill_parameter(current_line, "sigma = ", sigma, quiet);
         fill_parameter(current_line, "eigen = ", eigen, quiet);
+        fill_parameter(current_line, "ell = ", ell, quiet);
         fill_parameter(current_line, "alpha_central = ", alpha_central, quiet);
         fill_parameter(current_line, "A_central = ", A_central, quiet);
         fill_parameter(current_line, "frequency_guess = ", frequency_guess, quiet);
@@ -118,6 +119,14 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "dA = ", dA, quiet);
         fill_parameter(current_line, "n_stars = ", n_stars, quiet);
     }
+
+    if (ell < 0)
+    {
+        std::cerr << "ERROR: ell must be non-negative" << std::endl;
+        exit(1);
+    }
+    if (ell > 0 && pert_only)
+        std::cerr << "WARNING: the linear perturbation solver assumes ell = 0; results for ell = " << ell << " are not meaningful" << std::endl;
 }
 
 //right-hand side of the EKG system of equations
@@ -138,24 +147,117 @@ FieldState BosonStar::state_RHS(const double radius, const long double frequency
     if (radius == 0.)
         {T1 = 0; T3 = 0;}
 
-    double dPhi = T1 + F1 * (T2 - V(s.A));
+    //effective potential: for l-boson stars the angular gradients of the multiplet add ell(ell+D-3) A^2 / r^2 to rho and
+    //subtract it from S_r, i.e. V -> V + ell(ell+D-3) A^2/r^2 in both metric equations. Untouched for ell = 0.
+    double Veff = V(s.A);
+    double centrifugal = 0.; // extra term ell(ell+D-3) A / r^2 in the Klein-Gordon equation
+    if (ell > 0 && radius > 0.)
+    {
+        Veff += ell_LL() * s.A * s.A / (r * r);
+        centrifugal = ell_LL() * s.A / (r * r);
+    }
+
+    double dPhi = T1 + F1 * (T2 - Veff);
     double eta_corr = (radius == 0.) ? (1. / (D - 1.)) : 1.;
 
     //in the asymptotic region, evolve phi and X normally but do not update A, eta (these will be hard-coded to asymptotic expressions)
     if (asymptotic_region)
     {
-        return  FieldState{0., s.X * ( F1 * (T2 + V(s.A)) - T1 ), dPhi, 0.};
+        return  FieldState{0., s.X * ( F1 * (T2 + Veff) - T1 ), dPhi, 0.};
     }
-    else if (given_A) //return RHS of field state variables outside of asymptotic region, A excepted
+
+    double eta_rhs = static_cast<double>(eta_corr * (-(D - 2.) * T3 - s.eta * dPhi + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi))));
+    if (ell > 0)
+        eta_rhs += s.X * centrifugal;
+
+    if (given_A) //return RHS of field state variables outside of asymptotic region, A excepted
     {
-        return  FieldState{0, s.X * ( F1 * (T2 + V(s.A)) - T1 ), dPhi,
-        static_cast<double>(eta_corr *(-(D - 2.) * T3 - s.eta * dPhi + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi)))) };
+        return  FieldState{0, s.X * ( F1 * (T2 + Veff) - T1 ), dPhi, eta_rhs};
     }
 
     else //return RHS of field state variables outside of asymptotic region
     {
-        return  FieldState {s.X * s.eta, s.X * ( F1 * (T2 + V(s.A)) - T1 ), dPhi,
-        static_cast<double>(eta_corr * (-(D - 2.) * T3 - s.eta * dPhi + s.X * s.A * (dV(s.A) - frequency * frequency  / exp(2 * s.phi))))};
+        return  FieldState {s.X * s.eta, s.X * ( F1 * (T2 + Veff) - T1 ), dPhi, eta_rhs};
+    }
+}
+
+//right-hand side for l-boson stars in terms of the regular variable psi = A / r^ell. s holds {psi, X, phi, psi'}.
+//With A = r^ell psi the Klein-Gordon equation becomes
+//  psi'' = -(2 ell + D - 2) psi'/r - (phi' - X'/X)(psi' + ell psi/r) + X^2 (dV - w^2/alpha^2) psi + ell(ell+D-3)(X^2 - 1) psi/r^2,
+//every term of which is regular at r = 0; the metric equations are those of state_RHS with V -> V + ell(ell+D-3) A^2/r^2.
+FieldState BosonStar::state_RHS_ell(const double r, const long double frequency, FieldState s)
+{
+    const double LL = ell_LL();
+    const double psi = s.A, dpsi = s.eta, X = s.X;
+    const double W = static_cast<double>(frequency * frequency) / exp(2. * s.phi); // omega^2 / alpha^2
+
+    if (r == 0.)
+    {
+        //series at the origin: psi = psi0 + psi2 r^2 / 2, X^2 = 1 + X2 r^2, phi' = P2 r. Only ell = 1 has a non-zero central
+        //energy density (built entirely from gradients: A ~ psi0 r).
+        const double psi0 = psi;
+        const double rho_c = (ell == 1) ? 0.5 * (1. + LL) * psi0 * psi0 : 0.;
+        const double S_c   = (ell == 1) ? 0.5 * (1. - LL) * psi0 * psi0 : 0.;
+        const double X2 = 16. * M_PI * G * rho_c / ((D - 2.) * (D - 1.));
+        const double P2 = 0.5 * (D - 3.) * X2 + 8. * M_PI * G * S_c / (D - 2.);
+        const double c = (dV(0.) - W) * psi0 - ell * (P2 - X2) * psi0 + LL * X2 * psi0;
+        return FieldState{0., 0., 0., c / (2. * ell + D - 1.)};
+    }
+
+    const double rl = pow(r, ell);
+    const double A = rl * psi;
+    const double dA = ell * pow(r, ell - 1) * psi + rl * dpsi;
+    const double eta = dA / X; // physical eta = A'/X
+
+    const double T1 = 0.5 * (D - 3.) * (X * X - 1) / r;
+    const double T2 = eta * eta + W * A * A;
+    const double F1 = 4. * M_PI * G * r * X * X / (D - 2.);
+    const double Veff = V(A) + LL * pow(r, 2 * ell - 2) * psi * psi;
+
+    const double dPhi = T1 + F1 * (T2 - Veff);
+    const double dX = X * (F1 * (T2 + Veff) - T1);
+
+    const double ddpsi = -(2. * ell + D - 2.) * dpsi / r - (dPhi - dX / X) * (dpsi + ell * psi / r)
+                         + X * X * (dV(A) - W) * psi + LL * (X * X - 1.) * psi / (r * r);
+
+    return FieldState{dpsi, dX, dPhi, ddpsi};
+}
+
+//RK4 solve for l-boson stars (ell > 0): integrates psi = A/r^ell, then stores {A, X, phi, eta = A'/X} in state
+void BosonStar::rk4_solve_ell(const long double freq)
+{
+    blowup_point = n_gridpoints;
+    state.assign(n_gridpoints, FieldState{});
+    radius_array.assign(n_gridpoints, 0.);
+
+    const double dr = R / (n_gridpoints - 1);
+    FieldState y{A_central, 1.0, log(alpha_central), 0.0}; // {psi, X, phi, psi'}
+    FieldState s1, s2, s3, s4;
+
+    for (int j = 0; j < n_gridpoints; j++)
+    {
+        const double r = j * dr;
+        radius_array[j] = r;
+
+        //convert to the physical variables used everywhere else
+        const double rl = pow(r, ell);
+        const double dA = (ell == 1) ? (y.A + r * y.eta) : (ell * pow(r, ell - 1) * y.A + rl * y.eta);
+        state[j] = FieldState{rl * y.A, y.X, y.phi, dA / y.X};
+
+        if (!std::isfinite(state[j].A) || !std::isfinite(state[j].X) || !std::isfinite(state[j].phi) || !std::isfinite(state[j].eta))
+        {
+            blowup_point = j;
+            return;
+        }
+
+        if (j == n_gridpoints - 1)
+            break;
+
+        s1 = state_RHS_ell(r, freq, y);
+        s2 = state_RHS_ell(r + dr / 2., freq, y + 0.5 * dr * s1);
+        s3 = state_RHS_ell(r + dr / 2., freq, y + 0.5 * dr * s2);
+        s4 = state_RHS_ell(r + dr, freq, y + dr * s3);
+        y = y + (dr / 6.) * (s1 + 2 * s2 + 2 * s3 + s4);
     }
 }
 
@@ -273,6 +375,12 @@ bool BosonStar::resolve_with_rsf()
 
 void BosonStar::rk4_solve (const long double freq)
 {
+    if (ell > 0)
+    {
+        rk4_solve_ell(freq);
+        return;
+    }
+
     state = {FieldState{A_central, 1.0, log(alpha_central), 0.0 }};
     radius_array = {0.};
 
@@ -558,10 +666,19 @@ long double BosonStar::find_frequency(bool quiet)
 //returns the index of the last minimum of |A|, searching inwards from the blowup point.
 int BosonStar::find_last_minimum()
 {
+    //reference amplitude: the central value for ordinary stars; for l-boson stars A vanishes at the origin and
+    //A_central is lim A/r^ell, so use the maximum of |A| instead
+    double A_ref = A_central;
+    if (ell > 0)
+    {
+        A_ref = 0.;
+        for (int j = 0; j < blowup_point - 1 && j < n_gridpoints; j++)
+            A_ref = max(A_ref, abs(state[j].A));
+    }
 
     for (int j = blowup_point - 2; j > 1; j--)
     {
-     if (abs(state[j].A) <= abs(state[j - 1].A) && abs(state[j].A) <= abs(state[j + 1].A) && state[j].A < 0.05 * A_central  )
+     if (abs(state[j].A) <= abs(state[j - 1].A) && abs(state[j].A) <= abs(state[j + 1].A) && state[j].A < 0.05 * A_ref  )
         return j;
     }
 
@@ -1364,9 +1481,25 @@ void BosonStar::add_perturbation(double a, double k, double center)
     {
         double r = radius_array[j];
         pert_array[j] = a * exp ( -pow (r - center, 2.) / k2) - mirror_gaussian * a *  exp ( -pow (r - center - 2. * k, 2.) / k2);
-        state[j].A += pert_array[j];
-        state[j].eta += -2. * a * (r - center) * exp ( -pow (r - center, 2.) / k2) / (k2 * state[j].X)
-                        + mirror_gaussian * 2. * a * (r - center - 2. * k) * exp ( -pow (r - center - 2. * k, 2.) / k2) / (k2 * state[j].X);
+        if (ell == 0)
+        {
+            state[j].A += pert_array[j];
+            state[j].eta += -2. * a * (r - center) * exp ( -pow (r - center, 2.) / k2) / (k2 * state[j].X)
+                            + mirror_gaussian * 2. * a * (r - center - 2. * k) * exp ( -pow (r - center - 2. * k, 2.) / k2) / (k2 * state[j].X);
+        }
+        else
+        {
+            //l-boson stars: multiply by (r/k)^ell so the perturbed field stays regular (~ r^ell) at the origin
+            double d_pert = -2. * a * (r - center) * exp ( -pow (r - center, 2.) / k2) / k2
+                            + mirror_gaussian * 2. * a * (r - center - 2. * k) * exp ( -pow (r - center - 2. * k, 2.) / k2) / k2;
+            double w = pow(r / k, ell);
+            double dw = ell * pow(r / k, ell - 1) / k;
+            d_pert = w * d_pert + dw * pert_array[j];
+            pert_array[j] *= w;
+
+            state[j].A += pert_array[j];
+            state[j].eta += d_pert / state[j].X;
+        }
     }
 
     //rerun constraint solver to fill out X, alpha

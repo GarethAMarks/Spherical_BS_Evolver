@@ -34,6 +34,7 @@ class BosonStar
         double G;
         double sigma;
         int eigen; //desired eigenvalue, 0 for ground state
+        int ell = 0; //angular number of an l-boson star (2l+1 fields locked to Y_lm); 0 for ordinary BS. For ell > 0, A_central = lim A / r^ell
         double alpha_central; //central lapse
 
         double frequency_guess; //initial guess for eigenfrequency
@@ -62,6 +63,12 @@ class BosonStar
         double ddV (const double p);
 
         FieldState state_RHS(const double radius, long double frequency, FieldState  s, bool asymptotic_region, bool given_A = 0);
+
+        // l-boson stars: the ODEs are integrated for psi = A / r^ell (regular at r = 0), stored in a FieldState as
+        // {psi, X, phi, psi'}; rk4_solve_ell converts back to {A, X, phi, eta = A'/X} so the rest of the code is unchanged.
+        double ell_LL() const { return ell * (ell + D - 3.); } // eigenvalue of -Laplacian on the unit (D-2)-sphere
+        FieldState state_RHS_ell(const double radius, long double frequency, FieldState s);
+        void rk4_solve_ell(const long double freq);
         FieldState state_expansion(const double radius, long double frequency);
         void enforce_continuity(int n);
 
