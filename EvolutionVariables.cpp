@@ -600,6 +600,75 @@ double BSSNSlice::d_zz(bssn_var var, int index )
     return d_z(var, index, 2);
 }
 
+//Overwrites the current slice with isotropic, conformally flat puncture data read from fname. Columns:
+//  R  chi  phi_re  phi_im  K_phi_re  K_phi_im  alpha
+//on a (fine, increasing) table in the isotropic radius; values are linearly interpolated onto z = (j + grid_offset) dr.
+//The extrinsic curvature vanishes (time-symmetric data), h_ij = delta_ij, shift = 0. Used e.g. for black holes
+//surrounded by quasi-bound scalar clouds ("noble gravitational atoms") built outside SBSE.
+void BSSNSlice::read_puncture_data(const std::string& fname, double grid_offset, double min_chi)
+{
+    std::ifstream in(fname);
+    if (!in)
+    {
+        cerr << "ERROR: could not open puncture data file " << fname << endl;
+        exit(1);
+    }
+    std::vector<std::array<double, 7>> tab;
+    std::string line;
+    while (std::getline(in, line))
+    {
+        if (line.empty() || line[0] == '#')
+            continue;
+        std::istringstream ss(line);
+        std::array<double, 7> row;
+        for (int k = 0; k < 7; k++)
+            ss >> row[k];
+        if (ss)
+            tab.push_back(row);
+    }
+    if (tab.size() < 2)
+    {
+        cerr << "ERROR: puncture data file " << fname << " has fewer than 2 rows" << endl;
+        exit(1);
+    }
+
+    int n_gridpoints = states2.size();
+    double dr = R / ((double)n_gridpoints - 1.0);
+    size_t k = 0;
+    for (int j = 0; j < n_gridpoints; j++)
+    {
+        double z = (j + grid_offset) * dr;
+        std::array<double, 7> v;
+        if (z <= tab.front()[0])
+            v = tab.front();
+        else if (z >= tab.back()[0])
+            v = tab.back();
+        else
+        {
+            while (k + 1 < tab.size() && tab[k + 1][0] < z)
+                k++;
+            double w = (z - tab[k][0]) / (tab[k + 1][0] - tab[k][0]);
+            for (int q = 0; q < 7; q++)
+                v[q] = (1. - w) * tab[k][q] + w * tab[k + 1][q];
+        }
+        states2[j].bssn.chi = max(min_chi, v[1]);
+        states2[j].bssn.h_zz = 1.;
+        states2[j].bssn.h_ww = 1.;
+        states2[j].bssn.A_zz = 0.;
+        states2[j].bssn.A_ww = 0.;
+        states2[j].bssn.K = 0.;
+        states2[j].bssn.c_chris_Z = 0.;
+        states2[j].bssn.alpha = v[6];
+        states2[j].bssn.beta = 0.;
+        states2[j].csf.phi_re = v[2];
+        states2[j].csf.phi_im = v[3];
+        states2[j].csf.K_phi_re = v[4];
+        states2[j].csf.K_phi_im = v[5];
+        if (use_CCZ4)
+            theta[j] = 0.;
+    }
+}
+
 //converts the current slice to a tangherlini BH of mass m; must have set states vector size already. Also returns mass so it can be set in spacetime object
 double BSSNSlice::make_tangherlini (double m, double min_chi, double D)
 {
@@ -2045,6 +2114,7 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "evolve_shift = ", evolve_shift, quiet);
         fill_parameter(current_line, "adaptive_timestep = ", adaptive_timestep, quiet);
         fill_parameter(current_line, "make_tangherlini = ", make_tangherlini, quiet);
+        fill_parameter(current_line, "read_puncture_data = ", read_puncture_data, quiet);
         fill_parameter(current_line, "store_A0 = ", store_A0, quiet);
         fill_parameter(current_line, "run_quietly = ", run_quietly, quiet);
         fill_parameter(current_line, "start_time = ", start_time, quiet);
@@ -2575,6 +2645,7 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
         gamma_fac = 0.75; // 3/4 by default
         spatially_varying_BC = 1;
         one_log_fac = 2.0;
+        read_puncture_data = 0;
     }
     critical_state = 2;
 
@@ -2749,6 +2820,9 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
     if (make_tangherlini)
         M = slices[0].make_tangherlini(1., min_chi, D);
 
+    if (read_puncture_data && start_time == 0)
+        slices[0].read_puncture_data("puncture_data.dat", grid_offset, min_chi);
+
     if (make_tangherlini || slices[0].states2[0].bssn.chi < 10 * min_chi)
         slices[0].has_BH = 1;
     else slices[0].has_BH = 0;
@@ -2758,7 +2832,7 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
 
     //l-boson stars: the central energy density is zero for ell >= 2 (and small, gradient-only, for ell = 1),
     //so normalise the constraint norms by the maximum initial energy density instead
-    if (ell > 0 && !make_tangherlini)
+    if ((ell > 0 || read_puncture_data) && !make_tangherlini)
     {
         double rho_max = 0.;
         for (int j = owned_begin(); j < owned_end(); j++)

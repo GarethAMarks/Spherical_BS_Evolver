@@ -176,6 +176,7 @@ Reference: Alcubierre et al., "ℓ-Boson stars", Class. Quant. Grav. 35 (2018) 1
 | `read_thinshell` | `0` | Read initial data from the output of an external thin-shell solver instead of the built-in BS ODE solver |
 | `cutoff_frac` | `0.75` | Fraction of the grid used when reading thin-shell initial data |
 | `make_tangherlini` | `0` | Initialise a Tangherlini (higher-dimensional Schwarzschild) black hole instead of a boson star |
+| `read_puncture_data` | `0` | Overwrite the initial slice with time-symmetric, conformally flat puncture data from `puncture_data.dat` (columns `R chi phi_re phi_im K_phi_re K_phi_im alpha` in the isotropic radius, linearly interpolated onto the grid); e.g. a black hole with a scalar cloud. Use with `cell_centered = 1`, `evolve_shift = 1` and `min_chi = 1e-4` |
 | `uniform_data` | `1` | Expect thin-shell data pre-interpolated to a uniform grid via `smooth_and_interp.py` |
 
 ### Linear perturbation solver

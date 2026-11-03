@@ -71,6 +71,8 @@ class BSSNSlice
     bool use_CCZ4;
 
     double make_tangherlini(double m, double min_chi, double D);
+    // overwrite with externally constructed (e.g. black hole + scalar cloud) isotropic puncture data; see .cpp
+    void read_puncture_data(const std::string& fname, double grid_offset, double min_chi);
     double refinement_level;
 
     public:
@@ -376,6 +378,7 @@ class Spacetime
         bool run_spacetime_solver;
         bool BS_perturbed;
         bool make_tangherlini;
+        bool read_puncture_data; // initial slice from puncture_data.dat (R chi phi_re phi_im K_phi_re K_phi_im alpha)
         bool wave_mode; //testing purposes only, converts to wave eq'n solver
 
         bool adaptive_timestep; // whether to use adaptive timestep based on refinement level
