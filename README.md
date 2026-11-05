@@ -18,6 +18,8 @@ bash make_BSEvolver_gcc.sh
 
 The executable must be run in the same directory as `BSParams.par`.
 
+The serial build compiles with `-O2` (objects in `obj/Release`). Other flags can be passed through `OPTFLAGS`, e.g. `OPTFLAGS="-O0 -g" bash make_BSEvolver_gcc.sh` for debugging or `OPTFLAGS="-O3 -march=native"` for a machine-specific binary. Do not use `-ffast-math`: the solvers rely on NaN checks that it disables.
+
 ### Parallel runs with MPI
 
 The time evolution can be split across MPI ranks. Build with an MPI compiler wrapper (`mpicxx`, from Open MPI or MPICH):

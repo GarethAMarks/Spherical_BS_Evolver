@@ -1,10 +1,24 @@
-mkdir obj
-mkdir obj/Debug
-g++ -Wall -fexceptions -g -I.  -c "mathutils.cpp" -o obj/Debug/mathutils.o
-g++ -Wall -fexceptions -g -I.  -c "BosonStar.cpp" -o obj/Debug/BosonStar.o
-g++ -Wall -fexceptions -g -I.  -c "LinearPerturbation.cpp" -o obj/Debug/LinearPerturbation.o
-g++ -Wall -fexceptions -g -I.  -c "EvolutionVariables.cpp" -o obj/Debug/EvolutionVariables.o
-g++ -Wall -fexceptions -g -I.  -c "main.cpp" -o obj/Debug/main.o
-g++ -Wall -fexceptions -g -I.  -c "ComplexScalarField.cpp" -o obj/Debug/ComplexScalarField.o
-g++ -Wall -fexceptions -g -I.  -c "RealScalarField.cpp" -o obj/Debug/RealScalarField.o
-g++  -o BosonStarStability.o obj/Debug/BosonStar.o obj/Debug/LinearPerturbation.o obj/Debug/EvolutionVariables.o obj/Debug/main.o obj/Debug/mathutils.o obj/Debug/ComplexScalarField.o obj/Debug/RealScalarField.o  -lm
+# Serial build with optimisation. Produces BosonStarStability.o; run with ./BosonStarStability.o next to BSParams.par.
+# Object files go to obj/Release, so this build can coexist with the MPI build (obj/MPI).
+# Override the flags with e.g.  OPTFLAGS="-O0 -g" bash make_BSEvolver_gcc.sh  (debugging)
+#                          or  OPTFLAGS="-O3 -march=native" bash make_BSEvolver_gcc.sh  (machine-specific binary).
+# Do not add -ffast-math: the solvers rely on NaN checks (isnan) that it disables.
+set -e
+
+CXX=${CXX:-g++}
+OPTFLAGS=${OPTFLAGS:-"-O2"}
+CXXFLAGS="-Wall -fexceptions $OPTFLAGS -I."
+OBJDIR=obj/Release
+
+SOURCES="mathutils BosonStar LinearPerturbation EvolutionVariables main ComplexScalarField RealScalarField"
+
+mkdir -p "$OBJDIR"
+OBJECTS=""
+for src in $SOURCES; do
+    echo "compiling $src.cpp"
+    $CXX $CXXFLAGS -c "$src.cpp" -o "$OBJDIR/$src.o"
+    OBJECTS="$OBJECTS $OBJDIR/$src.o"
+done
+
+$CXX $OPTFLAGS -o BosonStarStability.o $OBJECTS -lm
+echo "built BosonStarStability.o ($CXX $OPTFLAGS)"
