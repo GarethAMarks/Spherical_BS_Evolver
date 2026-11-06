@@ -32,7 +32,6 @@ enum bssn_var
     v_K_psi
 };
 
-//a set of BSSN evolution variables at a point in spacetime
 struct BSSNState
 {
     double chi; //BSSN conformal factor
