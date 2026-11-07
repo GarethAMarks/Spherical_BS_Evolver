@@ -1150,27 +1150,62 @@ double Spacetime::dV(const double A)
         return mu * mu - 8. * mu * mu * pow(A / sigma, 2) + 12. * mu * mu * pow(A / sigma, 4) + 2. * A * A * lambda;
 }
 
-//asymptotic values of chi and alpha and their derivatives. TODO: generalize D > 4
+//Asymptotic (Schwarzschild-Tangherlini) values of chi and alpha and their radial derivatives, used by the Sommerfeld BCs.
+//Areal coordinates:     f = 1 - mu / r^{D-3}, gamma_rr = 1/f  =>  chi = f^{1/(D-1)},  alpha = sqrt(f)
+//Isotropic coordinates: psi = 1 + q, q = mu / (4 r^{D-3})  =>  chi = psi^{-4/(D-3)}, alpha = (1 - q) / (1 + q)
+//with mu = 16 pi M / ((D-2) Omega_{D-2}), i.e. mu = 2M in D = 4. make_tangherlini data is isotropic.
+double Spacetime::tangherlini_mu() const
+{
+    const double Omega = 2. * pow(M_PI, 0.5 * (D - 1.)) / tgamma(0.5 * (D - 1.)); // area of unit (D-2)-sphere
+    return 16. * M_PI * M / ((D - 2.) * Omega);
+}
+
 double Spacetime::chi_asymp(double r)
 {
-    return(isotropic) ? (pow(1. +  0.5 * M / r, -4.)) : pow(1 - 2. * M / r, -1./3.); //use isotropic/areal Schwarzchilld value for chi as appropriate
+    const double mu_T = tangherlini_mu();
+    if (isotropic || make_tangherlini)
+        return pow(1. + 0.25 * mu_T / pow(r, D - 3.), -4. / (D - 3.));
+
+    return pow(1. - mu_T / pow(r, D - 3.), 1. / (D - 1.));
 }
 
 double Spacetime::alpha_asymp(double r)
 {
-        return sqrt(1 - 2. * M / R);
+    const double mu_T = tangherlini_mu();
+    if (isotropic || make_tangherlini)
+    {
+        const double q = 0.25 * mu_T / pow(r, D - 3.);
+        return (1. - q) / (1. + q);
+    }
+
+    return sqrt(1. - mu_T / pow(r, D - 3.));
 }
 
 double Spacetime::d_chi_asymp(double r)
 {
-    return(isotropic) ? (2 * M * pow(1. +  0.5 * M / r, -5.) / (r * r)) : -(2./3.) * M * pow(1 - 2. * M / r, -4./3.) / (r * r);
+    const double mu_T = tangherlini_mu();
+    if (isotropic || make_tangherlini)
+    {
+        const double q = 0.25 * mu_T / pow(r, D - 3.);
+        return 4. * q * pow(1. + q, -4. / (D - 3.) - 1.) / r;
+    }
+
+    const double f = 1. - mu_T / pow(r, D - 3.);
+    return (D - 3.) * mu_T * pow(r, 2. - D) * pow(f, 1. / (D - 1.) - 1.) / (D - 1.);
 }
 
 double Spacetime::d_alpha_asymp(double r)
 {
-        return (M / (R * R)) / sqrt(1 - 2. * M / r);
-}
+    const double mu_T = tangherlini_mu();
+    if (isotropic || make_tangherlini)
+    {
+        const double q = 0.25 * mu_T / pow(r, D - 3.);
+        return 2. * (D - 3.) * q / (r * (1. + q) * (1. + q));
+    }
 
+    const double f = 1. - mu_T / pow(r, D - 3.);
+    return 0.5 * (D - 3.) * mu_T * pow(r, 2. - D) / sqrt(f);
+}
 
  // returns RHS as {chi, eta} where eta is the radial derivative of chi
  vector<double> Spacetime::ham_init_rhs(double r, double chi, double eta)
@@ -1627,12 +1662,48 @@ double Spacetime::slice_mass(BSSNSlice* slice_ptr)
     double z = (j + grid_offset) * dr;
     const double& chi = slice_ptr->states2[j].bssn.chi;
 
-        if (D == 4.)
-            mass += -0.25 * quad_weights[j] * (Ham[j]- h_ZZ[j] * chi * R_zz[j] - n * h_WW[j] * chi * R_ww[j]) * z * z * pow(chi, -1.25) ; //-1.25 is spurious! Still haven't figured out why this works...
-        else
-             mass += -0.125 * pow(M_PI, 0.5 * (D - 3.))  * quad_weights[j] * (Ham[j]- h_ZZ[j] * chi * R_zz[j] - n * h_WW[j] * chi * R_ww[j]) * pow(z, D - 2.) * pow(chi, -1.25 - 0.35 * (D - 4.)) / tgamma(0.5 * (D - 1.));
+        // M = (Omega_n / 16 pi) int psi^{(D+1)/(D-3)} R^(3) z^{D-2} dz, with psi^{(D+1)/(D-3)} = chi^{-(D+1)/4} (chi^{-5/4} in D = 4)
+        // and R^(3) replaced via the Hamiltonian constraint. Exact only for conformally flat slices (h_ij = delta_ij) that satisfy
+        // the constraints; otherwise it misses -(Omega_n / 16 pi) int psi R[h] z^{D-2} dz plus a Gamma^z surface term, and
+        // picks up constraint violation inside BHs. Prefer slice_ms_mass for BH spacetimes.
+        // Prefactor Omega_n / 16 pi = pi^{(D-3)/2} / (8 Gamma((D-1)/2)), = 1/4 in D = 4.
+        mass += -0.125 * pow(M_PI, 0.5 * (D - 3.))  * quad_weights[j] * (Ham[j]- h_ZZ[j] * chi * R_zz[j] - n * h_WW[j] * chi * R_ww[j]) * pow(z, D - 2.) * pow(chi, -0.25 * (D + 1.)) / tgamma(0.5 * (D - 1.));
     }
     return bss_mpi::sum(mass);
+}
+
+// Misner-Sharp mass at the active gridpoint nearest z = ms_radius_frac * R:
+//   m = (n Omega_n / 16 pi) R_ar^{n-1} (1 - nabla_a R_ar nabla^a R_ar),   n = D - 2,
+//   R_ar = z sqrt(h_ww / chi),
+//   nabla_a R_ar nabla^a R_ar = (chi / h_zz) (d_z R_ar)^2 - (R_ar K^theta_theta)^2,  K^theta_theta = A_ww / h_ww + K / (D - 1).
+// Equals R_ar/2 (1 - ...) in D = 4, and the ADM mass of Schwarzschild-Tangherlini in any slicing.
+// MPI: collective; only the rank owning the extraction point contributes before the sum-reduce.
+double Spacetime::slice_ms_mass(BSSNSlice* slice_ptr)
+{
+    const double n = D - 2.;
+    const double dr_local = R / ((double)n_gridpoints - 1.0);
+
+    // nearest gridpoint to the target radius, kept clear of the outer-boundary stencils, then stepped down to an active point
+    int j = (int)std::lround(ms_radius_frac * R / dr_local - grid_offset);
+    j = std::max(1, std::min(j, last_active_j - 6));
+    while (j > 1 && !active_points[j])
+        j--;
+
+    double contribution = 0.0;
+    if (j >= global_lo && j < global_hi)
+    {
+        const BSSNState& b = slice_ptr->states2[j].bssn;
+        const double z = (j + grid_offset) * dr_local;
+
+        const double R_ar = z * sqrt(b.h_ww / b.chi);
+        const double dz_R_ar = R_ar * (1. / z + 0.5 * slice_ptr->d_z(v_h_ww, j, 1) / b.h_ww - 0.5 * slice_ptr->d_z(v_chi, j, 1) / b.chi);
+        const double K_th = b.A_ww / b.h_ww + b.K / (D - 1.);
+        const double grad_R_sq = (b.chi / b.h_zz) * dz_R_ar * dz_R_ar - R_ar * R_ar * K_th * K_th;
+
+        const double Omega_n = 2. * pow(M_PI, 0.5 * (D - 1.)) / tgamma(0.5 * (D - 1.)); // area of unit n-sphere
+        contribution = n * Omega_n / (16. * M_PI) * pow(R_ar, n - 1.) * (1. - grad_R_sq);
+    }
+    return bss_mpi::sum(contribution);
 }
 
 double Spacetime::slice_charge(BSSNSlice* slice_ptr)
@@ -1794,7 +1865,10 @@ double Spacetime::get_ah_mass() const
     {
         const double chi0  = (1.0 - lam) * current_slice_ptr->states2[j0].bssn.chi  + lam * current_slice_ptr->states2[j1].bssn.chi;
         const double h_ww0 = (1.0 - lam) * current_slice_ptr->states2[j0].bssn.h_ww + lam * current_slice_ptr->states2[j1].bssn.h_ww;
-        contribution = 0.5 * std::sqrt(h_ww0 / chi0) * ah_radius;
+        // irreducible mass from the horizon area: (n Omega_n / 16 pi) R_AH^{n-1}, = R_AH / 2 in D = 4
+        const double n = D - 2.;
+        const double Omega_n = 2. * pow(M_PI, 0.5 * (D - 1.)) / tgamma(0.5 * (D - 1.));
+        contribution = n * Omega_n / (16. * M_PI) * pow(std::sqrt(h_ww0 / chi0) * ah_radius, n - 1.);
     }
     return bss_mpi::sum(contribution);
 }
@@ -2033,6 +2107,7 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "critical_study = ", critical_study, quiet);
         fill_parameter(current_line, "critical_gaussian_start = ", critical_gaussian_start, quiet);
         fill_parameter(current_line, "past_super_time = ", past_super_time, quiet);
+        fill_parameter(current_line, "ms_radius_frac = ", ms_radius_frac, quiet);
         fill_parameter(current_line, "critical_state = ", critical_state, quiet);
         fill_parameter(current_line, "critical_eps = ", critical_eps, quiet);
         fill_parameter(current_line, "lapse_thresh = ", lapse_thresh, quiet);
@@ -2758,6 +2833,7 @@ void Spacetime::evolve()
     super_ah_radius = 0.0;
     super_M = 0.0;
     super_ah_mass = 0.0;
+    super_ms_mass = 0.0;
 
     //write constraint norms at each timestep to file (rank 0 only)
     std::ofstream constraints_file;
@@ -2774,7 +2850,7 @@ void Spacetime::evolve()
                 << "   " << "Mom_L2"<<  "   " << "chi_central" << "   "
                 << "A_central" << "   "  << "AH radius" << "   " <<  "M_ADM" << "   "  << "Noether charge"
                 << "   " << "Central dK/dt" << "   " << "freq_central" << "   " << "lapse_central" <<
-                "   " << "complex field energy" << "   " << "real field energy" << "   " << "central 4D ricci scalar" << "   " << "phi_re_central" << "   " << "AH mass" << endl;
+                "   " << "complex field energy" << "   " << "real field energy" << "   " << "central 4D ricci scalar" << "   " << "phi_re_central" << "   " << "AH mass" << "   " << "MS mass" << endl;
     }
 
     // A0 is the initial central field amplitude, used later for migration
@@ -2870,13 +2946,14 @@ void Spacetime::evolve()
             compute_scalar_energies(current_slice_ptr);
             const double charge_now = slice_charge(current_slice_ptr);
             const double ah_mass_now = get_ah_mass(); // 0 on non-owners since ah_radius<0 when AH search is off
+            const double ms_mass_now = slice_ms_mass(current_slice_ptr); // collective
             if (mpi_rank == 0)
             {
                 constraints_file << std::setprecision (10) << start_time + dt * time_step << "   " << Ham_L2
                 << "   " << Mom_L2 <<  "   " << chi_central << "   "
                 << A_ctr << "   "  << ah_radius << "   " <<  M << "   "  << charge_now
                 << "   " << dtK_L2 << "   " << omega_approx << "   " << alpha_central <<
-                "   " << E_phi << "   " << E_psi << "   " << ricci_4 << "   " << phi_re_ctr << "   " << ah_mass_now << endl;
+                "   " << E_phi << "   " << E_psi << "   " << ricci_4 << "   " << phi_re_ctr << "   " << ah_mass_now << "   " << ms_mass_now << endl;
             }
         }
 
@@ -3003,6 +3080,8 @@ void Spacetime::evolve()
                     if (ah_radius > 0.) super_ah_radius = ah_radius;
                     super_ah_mass = get_ah_mass();
                     super_M = M;
+                    const double ms_now = slice_ms_mass(current_slice_ptr); // slice may already hold nans here
+                    if (std::isfinite(ms_now)) super_ms_mass = ms_now;
                 }
                 break;
             }
@@ -3026,6 +3105,7 @@ void Spacetime::evolve()
             super_detect_time = t;
             if (ah_radius > 0.) { super_ah_radius = ah_radius; super_ah_mass = get_ah_mass(); }
             super_M = M;
+            super_ms_mass = slice_ms_mass(current_slice_ptr);
         }
 
         //if past_super_time > 0, keep the last known good AH radius / mass while extending, then break when the window elapses
@@ -3033,6 +3113,7 @@ void Spacetime::evolve()
         {
             if (ah_radius > 0.) { super_ah_radius = ah_radius; super_ah_mass = get_ah_mass(); }
             super_M = M;
+            super_ms_mass = slice_ms_mass(current_slice_ptr);
             if (past_super_time <= 0.0 || t >= super_detect_time + past_super_time)
                 break;
         }
@@ -3080,7 +3161,7 @@ void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double l
     std::ofstream supercritical_file{"supercritical.dat"};
 
     subcritical_file << "#tuning_param   critical_time     ricci_4_max" << endl;
-    supercritical_file << "#tuning_param   critical_time   ah_radius_final   M_final   AH_mass_final" << endl;
+    supercritical_file << "#tuning_param   critical_time   ah_radius_final   M_final   AH_mass_final   MS_mass_final" << endl;
 
     if (bs == nullptr)
     {
@@ -3149,7 +3230,7 @@ void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double l
         exit(1);
     }
     supercritical_file << std::setprecision(16)
-                               << hi_guess<< "   " << critical_time << "   " << super_ah_radius << "   " << super_M << "   " << super_ah_mass << endl;
+                               << hi_guess<< "   " << critical_time << "   " << super_ah_radius << "   " << super_M << "   " << super_ah_mass << "   " << super_ms_mass << endl;
 
     // Verify low guess is subcritical
     int lo_state = run_with_param(lo_guess);
@@ -3175,7 +3256,7 @@ void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double l
         {
             hi = mid;   // supercritical at mid -> reduce upper bound
             supercritical_file << std::setprecision(16)
-                               << mid << "   " << critical_time << "   " << super_ah_radius << "   " << super_M << "   " << super_ah_mass << endl;
+                               << mid << "   " << critical_time << "   " << super_ah_radius << "   " << super_M << "   " << super_ah_mass << "   " << super_ms_mass << endl;
         }
         else if (state == 0)
         {

@@ -126,6 +126,10 @@ class Spacetime
         void tune_to_critical(double& tuning_param, double hi_guess, double lo_guess, BosonStar* bs);
 
         double slice_mass(BSSNSlice* slice_ptr);
+        // Misner-Sharp mass m = (n Omega_n / 16 pi) R^{n-1} (1 - nabla_a R nabla^a R), n = D - 2, R the areal radius,
+        // evaluated at the active gridpoint nearest z = ms_radius_frac * R (grid outer radius). Collective under MPI.
+        double slice_ms_mass(BSSNSlice* slice_ptr);
+        double ms_radius_frac = 0.8; // extraction radius for slice_ms_mass as a fraction of the outer radius R
         double slice_charge(BSSNSlice* slice_ptr);
 
         double ricci_4_val(int j) const; // Compute the 4D Ricci scalar at a grid point
@@ -138,6 +142,7 @@ class Spacetime
         double super_ah_radius = 0.0; // AH radius captured at end of supercritical run (past_super_time after detection)
         double super_M = 0.0; // ADM mass captured at end of supercritical run
         double super_ah_mass = 0.0; // AH mass captured at end of supercritical run
+        double super_ms_mass = 0.0; // Misner-Sharp mass captured at end of supercritical run
         int critical_state; // to be tracked by critical study handler: 0 for subcritical, 1 for supercritical
         double critical_eps; // tolerance for critical parameter
         double hi_guess;
@@ -430,6 +435,9 @@ class Spacetime
 
         double V(const double A);
         double dV(const double A);
+
+        // Tangherlini mass parameter mu (f = 1 - mu / r^{D-3}) corresponding to ADM mass M
+        double tangherlini_mu() const;
 
         double chi_asymp(double r); 
         double alpha_asymp(double r);
