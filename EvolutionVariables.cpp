@@ -2757,6 +2757,7 @@ void Spacetime::evolve()
     double super_detect_time = -1.0; //time at which supercriticality was first detected; -1 means not yet detected
     super_ah_radius = 0.0;
     super_M = 0.0;
+    super_ah_mass = 0.0;
 
     //write constraint norms at each timestep to file (rank 0 only)
     std::ofstream constraints_file;
@@ -3000,6 +3001,7 @@ void Spacetime::evolve()
                     critical_time = t;
                     super_detect_time = t;
                     if (ah_radius > 0.) super_ah_radius = ah_radius;
+                    super_ah_mass = get_ah_mass();
                     super_M = M;
                 }
                 break;
@@ -3022,14 +3024,14 @@ void Spacetime::evolve()
             critical_state = 1;
             critical_time = t;
             super_detect_time = t;
-            if (ah_radius > 0.) super_ah_radius = ah_radius;
+            if (ah_radius > 0.) { super_ah_radius = ah_radius; super_ah_mass = get_ah_mass(); }
             super_M = M;
         }
 
         //if past_super_time > 0, keep the last known good AH radius / mass while extending, then break when the window elapses
         if (critical_study && super_detect_time >= 0.0)
         {
-            if (ah_radius > 0.) super_ah_radius = ah_radius;
+            if (ah_radius > 0.) { super_ah_radius = ah_radius; super_ah_mass = get_ah_mass(); }
             super_M = M;
             if (past_super_time <= 0.0 || t >= super_detect_time + past_super_time)
                 break;
@@ -3078,7 +3080,7 @@ void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double l
     std::ofstream supercritical_file{"supercritical.dat"};
 
     subcritical_file << "#tuning_param   critical_time     ricci_4_max" << endl;
-    supercritical_file << "#tuning_param   critical_time   ah_radius_final   M_final" << endl;
+    supercritical_file << "#tuning_param   critical_time   ah_radius_final   M_final   AH_mass_final" << endl;
 
     if (bs == nullptr)
     {
@@ -3147,7 +3149,7 @@ void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double l
         exit(1);
     }
     supercritical_file << std::setprecision(16)
-                               << hi_guess<< "   " << critical_time << "   " << super_ah_radius << "   " << super_M << endl;
+                               << hi_guess<< "   " << critical_time << "   " << super_ah_radius << "   " << super_M << "   " << super_ah_mass << endl;
 
     // Verify low guess is subcritical
     int lo_state = run_with_param(lo_guess);
@@ -3173,7 +3175,7 @@ void Spacetime::tune_to_critical(double& tuning_param, double hi_guess, double l
         {
             hi = mid;   // supercritical at mid -> reduce upper bound
             supercritical_file << std::setprecision(16)
-                               << mid << "   " << critical_time << "   " << super_ah_radius << "   " << super_M << endl;
+                               << mid << "   " << critical_time << "   " << super_ah_radius << "   " << super_M << "   " << super_ah_mass << endl;
         }
         else if (state == 0)
         {
