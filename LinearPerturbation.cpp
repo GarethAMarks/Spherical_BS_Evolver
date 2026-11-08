@@ -38,7 +38,6 @@ PertState LinearPerturbation::pert_rhs(double r, PertState s, double chi_sq, lon
         double alpha0_sq = alpha0 * alpha0;
         double A0_sq = A_central * A_central;
 
-        double V = bg->V(A_central);
         double dV = bg->dV(A_central);
         double ddV = bg->ddV(A_central);
 
@@ -50,7 +49,7 @@ PertState LinearPerturbation::pert_rhs(double r, PertState s, double chi_sq, lon
         ) / (16.0 * alpha0_sq * A0_sq * M_PI * (n+1));
 
 
-        return (PertState) {0, Fpp0, 0, gamma};
+        return (PertState) {0, Fpp0, 0, static_cast<double>(gamma)};
     }
 
     int j = floor(r / dr); //smallest index below r
@@ -72,7 +71,6 @@ PertState LinearPerturbation::pert_rhs(double r, PertState s, double chi_sq, lon
     double A0_sq = A0 * A0;
     double omega_sq = omega * omega;
     double alpha0_sq = alpha0 * alpha0;
-    double sigma_sq = sigma * sigma;
 
     //now compute background derivatives using respective bg ODEs
     //double Xp0 = X0 * ( 0.5 * (1 - X0_sq) / r + 2. * M_PI * r * X0_sq * ( (Ap0 * Ap0) / (X0_sq) + pow(omega * A0 / alpha0, 2) + bg->V(A0)  ));
@@ -444,7 +442,7 @@ void LinearPerturbation::pert_cycle(double A0, double dA, int n_stars)
     bg->A_central = A0;
     ofstream data_file{"chi.dat"};
 
-    double chi_prev, gamma_prev;
+    double chi_prev = 0., gamma_prev = 0.; //set at j = 1 before first use at j = 2
 
     //use if we want to switch behaviour when chi^2 switches sign
     bool chi_sq_positive = 1;

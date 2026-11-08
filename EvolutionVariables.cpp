@@ -82,9 +82,10 @@ void Spacetime::init_domain_decomposition()
              << " points/rank, NGHOST=" << NGHOST << endl;
 }
 
+#ifdef USE_MPI
 // Compute (counts, displs) for MPI_Gatherv/Allgatherv given a per-point double
 // stride. Uses the same base/rem split as init_domain_decomposition so the
-// layout matches what each rank actually owns.
+// layout matches what each rank actually owns. (Only used by the MPI build.)
 static void compute_gather_layout(int n_gridpoints, int mpi_size, int doubles_per_point,
                                   std::vector<int>& counts, std::vector<int>& displs)
 {
@@ -100,6 +101,7 @@ static void compute_gather_layout(int n_gridpoints, int mpi_size, int doubles_pe
         displs[r] = gLo * doubles_per_point;
     }
 }
+#endif
 
 void Spacetime::gather_owned_to_root(const std::vector<double>& local_owned,
                                      std::vector<double>& full_buf,
@@ -1942,7 +1944,6 @@ double Spacetime::ricci_4_matter(int j) const
     if (current_slice_ptr == nullptr || n_gridpoints <= 0)
         return 0.0;
 
-    const BSSNSlice& s = *current_slice_ptr;
     double T = S[j] - rho[j];
 
     return cabs(-8. * M_PI * T);

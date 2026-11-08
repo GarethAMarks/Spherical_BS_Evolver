@@ -25,8 +25,9 @@ class LinearPerturbation
         BosonStar* bg; //pointer to the background boson star
 
         LinearPerturbation(BosonStar* bg, double given_chi_sq0, long double given_gamma0, double given_chi_range, double given_cutoff_radius) //constructor takes a pointer to BosonStar and autofills inherited params
-        :bg{bg}, chi_sq0{given_chi_sq0}, gamma0{given_gamma0}, n_gridpoints{bg->n_gridpoints}, R{bg->R}, sigma{bg->sigma}, chi_range{given_chi_range},
-        solitonic{bg->solitonic}, omega{bg->omega}, A_central{bg->A_central}, D{bg->D}, dr{R/(n_gridpoints - 1)}, chi_epsilon{0.00000000001}, cutoff_radius{given_cutoff_radius}
+        //initializers listed in member declaration order (dr depends on R and n_gridpoints, which are declared before it)
+        :bg{bg}, chi_sq0{given_chi_sq0}, gamma0{given_gamma0}, D{bg->D}, n_gridpoints{bg->n_gridpoints}, R{bg->R}, sigma{bg->sigma}, chi_range{given_chi_range},
+        solitonic{bg->solitonic}, omega{bg->omega}, A_central{bg->A_central}, dr{R/(n_gridpoints - 1)}, chi_epsilon{0.00000000001}, cutoff_radius{given_cutoff_radius}
         {}
 
         void rk4_solve(double chi_sq, long double gamma); //runs RK4 solver on F, L using given chi, gamma
@@ -48,7 +49,7 @@ class LinearPerturbation
         long double gamma0; //initial guess for undetermined constant affecting central initial values
 
         //inherited BS params
-        int D;
+        double D; //matches BosonStar::D; only ever used in floating-point expressions
         int n_gridpoints;
         double R;
         double sigma;
