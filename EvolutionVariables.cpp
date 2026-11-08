@@ -708,9 +708,12 @@ void Spacetime::sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slic
 
     // asymptotic states and their derivatives where relevant
     State asymp_state{}; // matter part zero by default
-    asymp_state.bssn = (BSSNState){chi_asymp(R - dr * res_fac), 1., 1., 0., 0., 0., 0., alpha_asymp(R - dr * res_fac), 0.};
+    // radii of the two outermost active points (including the cell-centring offset)
+    const double r4 = (last_active_j - res_fac + grid_offset) * dr;
+    const double r5 = (last_active_j + grid_offset) * dr;
+    asymp_state.bssn = (BSSNState){chi_asymp(r4), h_zz_asymp(r4), h_ww_asymp(r4), 0., 0., 0., chris_Z_asymp(r4), alpha_asymp(r4), 0.};
     State asymp_deriv{}; // r-derivative of asymptotic expansion (matter zero)
-    asymp_deriv.bssn = (BSSNState){d_chi_asymp(R - dr * res_fac), 0., 0., 0., 0., 0., 0., d_alpha_asymp(R - dr * res_fac), 0.};
+    asymp_deriv.bssn = (BSSNState){d_chi_asymp(r4), d_h_zz_asymp(r4), d_h_ww_asymp(r4), 0., 0., 0., d_chris_Z_asymp(r4), d_alpha_asymp(r4), 0.};
 
     //version without spatially varying asymptotics
     if (!spatially_varying_BC)
@@ -719,15 +722,17 @@ void Spacetime::sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slic
         asymp_deriv.bssn = (BSSNState){0., 0., 0., 0., 0., 0., 0., 0., 0.};
     }
 
-    //maybe adjust to account for purported 1/r^2 decay in K!
+    // Falloff powers p in d_t f = -v [d_r (f - f_inf) + p (f - f_inf) / r]: the BC is then exact for f = f_inf + c / r^p.
+    // Metric variables: static (Coulomb-like) falloff p = D - 3, so a residual c / r^{D-3} mass mismatch is tolerated.
+    // Matter fields: radiative falloff p = (D - 2) / 2. Both reduce to p = 1 in D = 4.
+    const double p_metric = D - 3.;
+    const double p_matter = 0.5 * (D - 2.);
     State N{};
-    N.bssn = (BSSNState){1., 1., 1., 1., 1., 1., 1., 1., 1.};
-    N.csf = (CSF){1., 1., 1., 1.};
+    N.bssn = (BSSNState){p_metric, p_metric, p_metric, p_metric, p_metric, p_metric, p_metric, p_metric, p_metric};
+    N.csf = (CSF){p_matter, p_matter, p_matter, p_matter};
     
     if (add_real_field)
-        N.rsf = (RSF){1., 1.};
-
-    N = pow(R, (4. - D))  * N;
+        N.rsf = (RSF){p_matter, p_matter};
 
     //outermost 5 active gridpoints
     State& s1 = slice_ptr->states2[last_active_j - 4 * res_fac];
@@ -747,15 +752,17 @@ void Spacetime::sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slic
         char_speeds.rsf = (RSF){1., 1.};
 
     rhs.states2[last_active_j - res_fac] = (-1.) * char_speeds * ( p4_stencil(dr * res_fac, s1, s2, s3, s4, s5) 
-                                         + (0.5 * D - 1.) * N * (s4 - asymp_state) /  (dr * (last_active_j - res_fac)) - asymp_deriv);
+                                         + N * (s4 - asymp_state) / r4 - asymp_deriv);
 
     //update variable asymptotic states to outermost edge
     if (spatially_varying_BC)
-    {asymp_state.bssn.chi = chi_asymp(R);  asymp_state.bssn.alpha = alpha_asymp(R);
-    asymp_deriv.bssn.chi = d_chi_asymp(R);  asymp_deriv.bssn.alpha = d_alpha_asymp(R);}
+    {
+        asymp_state.bssn = (BSSNState){chi_asymp(r5), h_zz_asymp(r5), h_ww_asymp(r5), 0., 0., 0., chris_Z_asymp(r5), alpha_asymp(r5), 0.};
+        asymp_deriv.bssn = (BSSNState){d_chi_asymp(r5), d_h_zz_asymp(r5), d_h_ww_asymp(r5), 0., 0., 0., d_chris_Z_asymp(r5), d_alpha_asymp(r5), 0.};
+    }
 
     rhs.states2[last_active_j] = (-1) * char_speeds * ( p5_stencil(dr * res_fac, s1, s2, s3, s4, s5) 
-                                 + (0.5 * D - 1.) * N * (s5 - asymp_state) / (dr * last_active_j) - asymp_deriv);
+                                 + N * (s5 - asymp_state) / r5 - asymp_deriv);
 
     if (use_CCZ4)
     {
@@ -766,10 +773,10 @@ void Spacetime::sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slic
         double& t5 = slice_ptr->theta[last_active_j];
 
         rhs.theta[last_active_j - res_fac] = -(p4_stencil(dr * res_fac, t1, t2, t3, t4, t5) 
-                                             + (0.5 * D - 1.) * t4 / (dr * (last_active_j - res_fac)));
+                                             + p_metric * t4 / r4);
 
         rhs.theta[last_active_j] = -(p5_stencil(dr * res_fac, t1, t2, t3, t4, t5) 
-                                   + (0.5 * D - 1.) * t5 / (dr * (last_active_j)));
+                                   + p_metric * t5 / r5);
     }
 }
 
@@ -1153,11 +1160,12 @@ double Spacetime::dV(const double A)
 //Asymptotic (Schwarzschild-Tangherlini) values of chi and alpha and their radial derivatives, used by the Sommerfeld BCs.
 //Areal coordinates:     f = 1 - mu / r^{D-3}, gamma_rr = 1/f  =>  chi = f^{1/(D-1)},  alpha = sqrt(f)
 //Isotropic coordinates: psi = 1 + q, q = mu / (4 r^{D-3})  =>  chi = psi^{-4/(D-3)}, alpha = (1 - q) / (1 + q)
-//with mu = 16 pi M / ((D-2) Omega_{D-2}), i.e. mu = 2M in D = 4. make_tangherlini data is isotropic.
+//with mu = 16 pi M_bc / ((D-2) Omega_{D-2}), i.e. mu = 2 M_bc in D = 4, where M_bc is the Misner-Sharp mass at the
+//extraction radius (slice_mass is wrong for non-conformally-flat slices). make_tangherlini data is isotropic.
 double Spacetime::tangherlini_mu() const
 {
     const double Omega = 2. * pow(M_PI, 0.5 * (D - 1.)) / tgamma(0.5 * (D - 1.)); // area of unit (D-2)-sphere
-    return 16. * M_PI * M / ((D - 2.) * Omega);
+    return 16. * M_PI * M_bc / ((D - 2.) * Omega);
 }
 
 double Spacetime::chi_asymp(double r)
@@ -1205,6 +1213,60 @@ double Spacetime::d_alpha_asymp(double r)
 
     const double f = 1. - mu_T / pow(r, D - 3.);
     return 0.5 * (D - 3.) * mu_T * pow(r, 2. - D) / sqrt(f);
+}
+
+//Asymptotic conformal metric: identity in isotropic coordinates; in areal coordinates gamma_zz = 1/f, gamma_ww = 1 give
+//h_zz = f^{-(D-2)/(D-1)}, h_ww = f^{1/(D-1)}. chris_Z_asymp uses the same expression as the initial-data construction.
+double Spacetime::h_zz_asymp(double r)
+{
+    if (isotropic || make_tangherlini)
+        return 1.;
+    return pow(1. - tangherlini_mu() / pow(r, D - 3.), -(D - 2.) / (D - 1.));
+}
+
+double Spacetime::h_ww_asymp(double r)
+{
+    if (isotropic || make_tangherlini)
+        return 1.;
+    return pow(1. - tangherlini_mu() / pow(r, D - 3.), 1. / (D - 1.));
+}
+
+double Spacetime::d_h_zz_asymp(double r)
+{
+    if (isotropic || make_tangherlini)
+        return 0.;
+    const double mu_T = tangherlini_mu();
+    const double f = 1. - mu_T / pow(r, D - 3.);
+    const double df = (D - 3.) * mu_T * pow(r, 2. - D);
+    return -(D - 2.) / (D - 1.) * pow(f, -(D - 2.) / (D - 1.) - 1.) * df;
+}
+
+double Spacetime::d_h_ww_asymp(double r)
+{
+    if (isotropic || make_tangherlini)
+        return 0.;
+    const double mu_T = tangherlini_mu();
+    const double f = 1. - mu_T / pow(r, D - 3.);
+    const double df = (D - 3.) * mu_T * pow(r, 2. - D);
+    return pow(f, 1. / (D - 1.) - 1.) * df / (D - 1.);
+}
+
+double Spacetime::chris_Z_asymp(double r)
+{
+    if (isotropic || make_tangherlini)
+        return 0.;
+    const double h_ZZ = 1. / h_zz_asymp(r);
+    const double h_WW = 1. / h_ww_asymp(r);
+    return 0.5 * h_ZZ * h_ZZ * d_h_zz_asymp(r) - 0.5 * (D - 2.) * h_ZZ * h_WW * d_h_ww_asymp(r)
+           + (D - 2.) * h_WW * (1. - h_ZZ * h_ww_asymp(r)) / r;
+}
+
+double Spacetime::d_chris_Z_asymp(double r)
+{
+    if (isotropic || make_tangherlini)
+        return 0.;
+    const double eps = 1e-4 * r; // smooth analytic function: centred difference is ample
+    return (chris_Z_asymp(r + eps) - chris_Z_asymp(r - eps)) / (2. * eps);
 }
 
  // returns RHS as {chi, eta} where eta is the radial derivative of chi
@@ -2624,8 +2686,6 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
         do_ah_search = 1;
     
 
-    if (D != 4.)
-        spatially_varying_BC = 0; //only try this for D = 4 for now
 
     //cout << refinement_points.size() << endl;
     if (!refinement_points.empty() && refinement_points[0] <= 0) // disable refinement if sentinel present
@@ -2795,6 +2855,7 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
     double mass0 = slice_mass(&slices[0]);
     double charge0 = slice_charge(&slices[0]);
     M = mass0;
+    M_bc = slice_ms_mass(&slices[0]); // mass used in the Sommerfeld asymptotics
 
     if (mpi_rank == 0)
     {
@@ -2908,7 +2969,11 @@ void Spacetime::evolve()
         if (omega_approx < -M_PI / dt) omega_approx += 2 * M_PI / dt; //corrects jumps due to branch cuts
 
         if (n > 0) compute_dtK(n);
-        M = slice_mass(current_slice_ptr); // maybe remove if causes bad bdry oscillations?
+        M = slice_mass(current_slice_ptr); // volume-integral mass, output as M_ADM
+        {
+            const double ms_now = slice_ms_mass(current_slice_ptr); // collective
+            if (std::isfinite(ms_now)) M_bc = ms_now;           // keep last good value if the slice has gone bad
+        }
 
         // Central-point scalars needed on every rank for control flow.
         // Layout: [0]=A_ctr, [1]=has_BH_now, [2]=chi_ctr, [3]=alpha_ctr,

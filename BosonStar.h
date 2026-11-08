@@ -142,6 +142,7 @@ class BosonStar
 
         void read_isotropic_data();
         void fill_isotropic_arrays();
+        double tangherlini_mu() const;
         void write_isotropic();
 
         bool fill_given_A( const long double freq, bool fully_fixed = 0);

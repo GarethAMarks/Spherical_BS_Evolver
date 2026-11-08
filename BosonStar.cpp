@@ -816,7 +816,8 @@ double BosonStar::r_areal(int j_iso)
         //cerr << "WARNING: extrapolating to find areal radius corresponding to isotropic index " << j_iso << endl;
         //exit(1);
 
-        return r_iso + M + M * M / (4. * r_iso); //maybe generalize to D != 4, but might not be necessary...
+        // exterior Tangherlini: r = rho (1 + mu / (4 rho^{D-3}))^{2/(D-3)}; = rho + M + M^2/(4 rho) + ... in D = 4
+        return r_iso * pow(1. + 0.25 * tangherlini_mu() / pow(r_iso, D - 3.), 2. / (D - 3.));
     }
 
     int j0 = bound(j_areal - 2, -2, n_gridpoints - 4);
@@ -839,6 +840,13 @@ double BosonStar::r_areal(int j_iso)
 
     return lagrange_interp(r_iso, r, r_areal);
 
+}
+
+//Tangherlini mass parameter mu (f = 1 - mu / r^{D-3}) for ADM mass M: mu = 16 pi M / ((D-2) Omega_{D-2}), = 2M in D = 4
+double BosonStar::tangherlini_mu() const
+{
+    const double Omega = 2. * pow(M_PI, 0.5 * (D - 1.)) / tgamma(0.5 * (D - 1.));
+    return 16. * M_PI * M / ((D - 2.) * Omega);
 }
 
 //fill out arrays for radius, field amplitude, and conformal factor in isotropic coordinates. Must have solved BS model first!
@@ -886,8 +894,11 @@ void BosonStar::fill_isotropic_arrays()
 
     }
 
-    //rescale factors to match R_iso to asymptotic Schwarzchild at boundary
-    double iso_scale_factor = (R - M - M *  M / (4. * ( R -  M))) / r_iso_array[n_gridpoints - 1];
+    //rescale factors to match R_iso to asymptotic Schwarzschild-Tangherlini at boundary: invert
+    //r = rho (1 + mu / (4 rho^{D-3}))^{2/(D-3)} via y = rho^{(D-3)/2}: y^2 - R^{(D-3)/2} y + mu/4 = 0
+    const double s_R = pow(R, 0.5 * (D - 3.));
+    const double rho_R = pow(0.5 * (s_R + sqrt(s_R * s_R - tangherlini_mu())), 2. / (D - 3.));
+    double iso_scale_factor = rho_R / r_iso_array[n_gridpoints - 1];
 
     //rescale entire isotropic radius array and f array
     for (double& r_iso: r_iso_array)
@@ -952,12 +963,12 @@ void BosonStar::fill_isotropic_arrays()
         double l_frac = 0.8;
         double u_frac = 0.9;
 
-        //should fix for D > 4... however can always just cut off at r = 0.75R or more beforehand.
+        //blend to exterior Tangherlini f = rho / r = (1 + mu / (4 rho^{D-3}))^{-2/(D-3)}
         if (j > n_gridpoints * l_frac)
         {
             double portion_crossed = min((j - n_gridpoints * l_frac) / (n_gridpoints * (u_frac - l_frac)), 1.);
 
-            f = f * (1 - portion_crossed) + (pow((1 + M / (2. * dr * j)), -2.)) * portion_crossed;
+            f = f * (1 - portion_crossed) + pow(1. + 0.25 * tangherlini_mu() / pow(dr * j, D - 3.), -2. / (D - 3.)) * portion_crossed;
         }
     //psi is simply 1 / sqrt(f)
     psi_iso_array[j] = 1. / sqrt(/*g_array[j]*/f);

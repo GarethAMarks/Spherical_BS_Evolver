@@ -352,6 +352,7 @@ class Spacetime
         double omega;
         bool isotropic; //whether we will use isotropic coordinates (otherwise polar-areal)
         double M;
+        double M_bc = 0.; // mass used by the Sommerfeld asymptotics: Misner-Sharp mass at ms_radius_frac * R
         double r_99;
 
         double sigma_BSSN; //multiplier of constraint term in the gamma evolution equation
@@ -444,6 +445,14 @@ class Spacetime
 
         double d_chi_asymp(double r);
         double d_alpha_asymp(double r);
+
+        // asymptotic conformal metric and contracted conformal Christoffel (nontrivial only for areal coordinates)
+        double h_zz_asymp(double r);
+        double h_ww_asymp(double r);
+        double chris_Z_asymp(double r);
+        double d_h_zz_asymp(double r);
+        double d_h_ww_asymp(double r);
+        double d_chris_Z_asymp(double r);
 
         double d_z(bssn_var var, int index, int order); //just syntactic sugar to call d_z, d_zz on current slice
         double d_zz(bssn_var var, int index);
