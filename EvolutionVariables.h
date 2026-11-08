@@ -180,6 +180,8 @@ class Spacetime
         bool use_CCZ4; //0 for BSSN, 1 for CCZ4
         double c1; //CCZ4 damping params
         double c2;
+        double c3 = 0.5;          // CCZ4 kappa3 (1 = fully covariant shift terms); was implicitly 1 + 1.5 sigma_BSSN before
+        bool covariant_Z4 = 1;    // if true, kappa1 damping terms are not multiplied by the lapse (needed for punctures)
         bool theta_off; //disable theta evolution, essentially reducing to re-formulated BSSN-- deprecated now
 
         double one_log_fac;//factor in in 1+log slicing condition, f = one_log_fac / alpha

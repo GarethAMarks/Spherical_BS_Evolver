@@ -1704,17 +1704,23 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
             const double theta = slice_ptr->theta[j];
             rhs.theta.resize(n_gridpoints);
 
+            // kappa1 damping: covariant_Z4 drops the lapse factor (kappa1 alpha -> kappa1) so the damping does not
+            // switch off near punctures where alpha -> 0
+            const double k1 = covariant_Z4 ? c1 : c1 * alpha;
+
             rhs.states2[j].bssn.K = beta * d_z_K - chi * inv_hzz * D_zz_alpha[j]  - n * inv_hww * chi * D_ww_alpha[j]
                             + alpha * (chi * inv_hzz * R_zz[j] + n * chi * inv_hww * R_ww[j] + K * (K - 2. * theta)
-                            - (D - 1.) * c1 * (1. + c2) * theta + 8. * M_PI * (S[j] - (D - 1.) * rho[j]) / (D - 2.));
+                            + 8. * M_PI * (S[j] - (D - 1.) * rho[j]) / (D - 2.)) - (D - 1.) * k1 * (1. + c2) * theta;
 
             rhs.states2[j].bssn.A_zz += -2. * alpha * theta * A_zz;
             rhs.states2[j].bssn.A_ww += -2. * alpha * theta * A_ww;
 
             //note this is now \hat{\Gamma}^z, not \tilde{\Gamma}^z. So we first remove BSSN specific damping then add new terms.
+            //The BSSN shift terms above use \hat{\Gamma}^z = \tilde{\Gamma}^z(h) + 2 Z^z / chi, which already contains the kappa3 = 1
+            //term 2 [(2/(D-1)) Z^z d_k beta^k - Z^k d_k beta^z] / chi; the last line here corrects it to kappa3 = c3.
             rhs.states2[j].bssn.c_chris_Z +=   sigma_BSSN * aux_constraint[j] - 2. * d_z_alpha * theta * inv_hzz + 2. * alpha * inv_hzz * d_z(v_theta, j)
-                                        - 2. * c1 * alpha * theta_Z[j] / chi - 4. * alpha * K * theta_Z[j] * invDm1 / chi
-                                        + sigma_BSSN * theta_Z[j]  * ((3. - D) * d_z_beta + 2. * n * beta_z) / chi;
+                                        - 2. * k1 * theta_Z[j] / chi - 4. * alpha * K * theta_Z[j] * invDm1 / chi
+                                        + 2. * (c3 - 1.) * invDm1 * theta_Z[j] * ((3. - D) * d_z_beta + 2. * n * beta_z) / chi;
 
             rhs.states2[j].bssn.alpha +=  2. * alpha * alpha * f * theta; //4. * alpha * theta; //corrects for K -> K - 2 * theta in 1+log slicing
             //rhs.states2[j].bssn.beta +=  (evolve_shift)? ( -2. * gamma_fac * theta_Z[j] / chi): 0.; //replace theta hat -> theta tilde in CCZ4 moving puncture gauge; seems to produce instability...
@@ -1722,7 +1728,7 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
             if (!theta_off)
                 rhs.theta[j] = beta * d_z(v_theta, j) + 0.5 * alpha * (chi * inv_hzz * R_zz[j] - inv_hzz * inv_hzz * A_zz * A_zz + n * K * K * invDm1
                             + n * (chi * inv_hww * R_ww[j] - A_ww * A_ww / (h_ww * h_ww))  - 2. * K * theta - 2. * theta_Z[j] * d_z_alpha / alpha
-                            - c1 * (D + c2 * n) * theta  - 16. * M_PI * rho[j]);
+                            - 16. * M_PI * rho[j]) - 0.5 * k1 * (D + c2 * n) * theta;
             else
                 rhs.theta[j] = 0.;
         }
@@ -2193,6 +2199,8 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "use_CCZ4 = ", use_CCZ4, quiet);
         fill_parameter(current_line, "c1 = ", c1, quiet);
         fill_parameter(current_line, "c2 = ", c2, quiet);
+        fill_parameter(current_line, "c3 = ", c3, quiet);
+        fill_parameter(current_line, "covariant_Z4 = ", covariant_Z4, quiet);
         fill_parameter(current_line, "theta_off = ", theta_off, quiet);
         fill_parameter(current_line, "shock_gauge = ", shock_gauge, quiet);
         fill_parameter(current_line, "shock_fac = ", shock_fac, quiet);
