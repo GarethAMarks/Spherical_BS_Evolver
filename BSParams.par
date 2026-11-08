@@ -58,11 +58,13 @@ min_z = 0.00001
 max_stored_slices = 5
 stop_on_migrate = 0 #if true, exit with message when central amplitude migrates by >10%
 
-sigma_BSSN = 0.333333 #BSSN damping; in CCZ4, doubles as c3 / 3
+sigma_BSSN = 0.333333 #BSSN Gamma-constraint damping (not used in CCZ4)
 
 damping_factor = 0.0
 only_BS_violation = 1
 spatially_varying_BC = 1
+gamma_constraint_BC = 1 #outer BC on Gamma^z preserves the Gamma constraint (ignored if constraint_preserving_BCs = 1)
+constraint_preserving_BCs = 1 #Alcubierre-Torres CPBCs (arXiv:1407.8529); BSSN with D = 4 only, else falls back to Sommerfeld
 
 shock_gauge = 0 #if true enables shock-avoiding gauge evolution, Bona-Masso with f(alpha) = 1 + shock_fac / alpha^2
 shock_fac = 2.0 
@@ -73,6 +75,8 @@ evolve_shift = 0
 use_CCZ4 = 0 #0 for BSSN, 1 for CCZ4
 c1 = 0.02
 c2 = 0.0
+c3 = 0.5 #CCZ4 kappa3; 1 is fully covariant (0.5 tested stable for single punctures)
+covariant_Z4 = 1 #if 1, CCZ4 kappa1 damping is not multiplied by the lapse
 theta_off = 0 #disables CCZ4 theta evolution; probably keep this off now
 
 #output/checkpointing parameters

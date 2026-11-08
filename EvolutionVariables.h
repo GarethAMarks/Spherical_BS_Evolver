@@ -59,6 +59,7 @@ class BSSNSlice
 {
     public:
         static int origin_mirror_shift; // ghost index -k maps to k - origin_mirror_shift across z = 0 (1 for cell-centred grids)
+        static bool one_sided_outer;    // if true, d_z uses one-sided 5-point stencils at the two outermost points (CPBCs)
 
     //public vars are BSSN evolution/gauge variables; privates are auxiliary quantities used in evolution/diagnostic equations
     private:
@@ -135,6 +136,8 @@ class Spacetime
         double ms_bc_radius_frac = 0.8; // extraction radius of the MS mass M_bc used in the Sommerfeld asymptotics
         bool output_ms_profile = 0;     // if true, write the MS mass profile as an extra (last) column of Diagnostics.dat
         bool gamma_constraint_BC = 1;   // if true, outer BC on Gamma^z preserves G^z = Gamma^z - Gamma^z(h) instead of Sommerfeld
+        bool constraint_preserving_BCs = 1; // Alcubierre & Torres (arXiv:1407.8529) CPBCs; BSSN, D = 4 only (else falls back)
+        void constraint_preserving_BC(BSSNSlice& rhs, int res_fac, BSSNSlice* slice_ptr, const BSSNState interior_rhs[2]);
         double slice_charge(BSSNSlice* slice_ptr);
 
         double ricci_4_val(int j) const; // Compute the 4D Ricci scalar at a grid point

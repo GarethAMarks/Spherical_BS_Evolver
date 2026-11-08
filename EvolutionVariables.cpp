@@ -18,6 +18,7 @@
 
 // reflection offset across z = 0: 0 for vertex-centred grids, 1 for cell-centred (set in Spacetime::initialize)
 int BSSNSlice::origin_mirror_shift = 0;
+bool BSSNSlice::one_sided_outer = false;
 
 using std::cout;
 using std::cin;
@@ -509,11 +510,22 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
         if (J[k] < 0) J[k] = -J[k] - origin_mirror_shift;
 
 
-    //At outer edge just use central value for rightmost two; this is cut off in initialize()/ overwritten with BCs anyway
+    //At outer edge just use central value for rightmost two; this is cut off in initialize()/ overwritten with BCs anyway.
+    //With one_sided_outer (constraint-preserving BCs), use one-sided 5-point stencils on the outermost 5 points instead.
+    int outer_pos = 0; // 0: centred stencil; 4 / 5: index is the 2nd-outermost / outermost point of the one-sided stencil
+    if (one_sided_outer && index > n_gridpoints - 1 - 2 * res_fac)
+    {
+        outer_pos = (index == n_gridpoints - 1) ? 5 : 4;
+        for (int k = 0; k < 5; k++)
+            J[k] = n_gridpoints - 1 - (4 - k) * res_fac;
+    }
+    else
+    {
     if (index >= n_gridpoints - res_fac)
         J[3] = J[2];
     if (index >= n_gridpoints - 2 * res_fac)
         J[4] = J[3];
+    }
 
     //set of values used to compute derivative
     vector<double> F{0., 0., 0., 0., 0.};
@@ -587,6 +599,17 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
                 F[0] = -F[0];
             if (index == 0 && parity_is_odd)
                 F[1] = -F[1];
+    }
+    if (outer_pos != 0)
+    {
+        const double h = res_fac * dr;
+        if (order == 1)
+            return (outer_pos == 5) ? p5_stencil(h, F[0], F[1], F[2], F[3], F[4]) : p4_stencil(h, F[0], F[1], F[2], F[3], F[4]);
+        if (order == 2) // one-sided 5-point second derivatives
+            return (outer_pos == 5) ? (11. * F[0] - 56. * F[1] + 114. * F[2] - 104. * F[3] + 35. * F[4]) / (12. * h * h)
+                                    : (-F[0] + 4. * F[1] + 6. * F[2] - 20. * F[3] + 11. * F[4]) / (12. * h * h);
+        cerr << "ERROR: one-sided outer stencil only implemented for first and second derivatives" << endl;
+        exit(1);
     }
     return fivePointDeriv(res_fac * dr, order, F[0],F[1],F[2],F[3],F[4]);
 }
@@ -708,6 +731,14 @@ void Spacetime::sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slic
 
     int res_fac = res_fac_outer; //number of points skipped per slot in stencil
 
+    // constraint-preserving BCs: keep the interior (one-sided) RHS of the BSSN variables computed by slice_rhs
+    BSSNState cpbc_interior_rhs[2];
+    if (constraint_preserving_BCs)
+    {
+        cpbc_interior_rhs[0] = rhs.states2[last_active_j - res_fac].bssn;
+        cpbc_interior_rhs[1] = rhs.states2[last_active_j].bssn;
+    }
+
     // asymptotic states and their derivatives where relevant
     State asymp_state{}; // matter part zero by default
     // radii of the two outermost active points (including the cell-centring offset)
@@ -772,7 +803,9 @@ void Spacetime::sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slic
     // built from the (interior + Sommerfeld) RHS of h_zz, h_ww with one-sided z-derivatives. This keeps
     // G^z = Gamma^z - Gamma^z(h) fixed at the boundary instead of driving Gamma^z independently of h, which otherwise
     // reflects outgoing gauge pulses as inward-propagating G^z violations.
-    if (gamma_constraint_BC)
+    if (constraint_preserving_BCs)
+        constraint_preserving_BC(rhs, res_fac, slice_ptr, cpbc_interior_rhs);
+    else if (gamma_constraint_BC)
     {
         const double n = D - 2.;
         const double h = dr * res_fac;
@@ -1189,6 +1222,75 @@ double Spacetime::dV(const double A)
         return mu * mu - 8. * mu * mu * pow(A / sigma, 2) + 12. * mu * mu * pow(A / sigma, 4) + 2. * A * A * lambda;
 }
 
+// Constraint-preserving outer boundary conditions for BSSN in spherical symmetry, following Alcubierre & Torres,
+// arXiv:1407.8529, translated to SBSE variables (D = 4 only): a = h_zz, b = h_ww, e^{4 phi} = 1/chi, A_a = A_zz / h_zz,
+// Delta^r = Gamma^z. All BSSN variables are evolved to the outer boundary with their own equations using one-sided
+// stencils (slice_rhs + BSSNSlice::one_sided_outer); at the outermost point the two incoming modes are then replaced:
+//  * gauge mode  w^alpha_- = W K - d_z ln(alpha), W = sqrt(h_zz f / chi): Sommerfeld-type condition
+//    w^alpha_- = (alpha - 1) / (alpha z), imposed through its time derivative, which fixes d_t K;
+//  * light-speed mode w^l_- = sqrt(h_zz / chi) (A_a - 2K/3) - (2/3)(...): the incoming constraint mode
+//    Omega_- = h_zz H / (6 chi) + d_z C_Delta / 2 + sqrt(h_zz / chi) M  (Omega_- ~ d_z w^l_-) is set to zero via the
+//    paper's time-derivative method, d_t w^l_- = (d_t w^l_-)_interior - v_l Omega_-, v_l = alpha sqrt(chi / h_zz),
+//    which fixes d_t A_a (A_ww follows from tracelessness, A_b = -A_a / 2).
+// Here H is the BSSN Hamiltonian constraint, M = d_z A_a - (2/3) d_z K - (3/2) A_a d_z chi / chi + (3/2) A_a (2/z + d_z h_ww / h_ww)
+// - 8 pi j_z the radial momentum constraint, and C_Delta = h_zz (Gamma^z - Gamma^z(h)). Matter fields keep Sommerfeld BCs.
+// The derivation assumes negligible shift at the boundary.
+void Spacetime::constraint_preserving_BC(BSSNSlice& rhs, int res_fac, BSSNSlice* slice_ptr, const BSSNState interior_rhs[2])
+{
+    const double n = D - 2.;
+    const int jN = last_active_j;
+    const double h = dr * res_fac;
+    const int jj[5] = {jN - 4 * res_fac, jN - 3 * res_fac, jN - 2 * res_fac, jN - res_fac, jN};
+
+    // all BSSN variables at both outer points: interior equations with one-sided stencils
+    rhs.states2[jN - res_fac].bssn = interior_rhs[0];
+    rhs.states2[jN].bssn = interior_rhs[1];
+
+    const BSSNState& s = slice_ptr->states2[jN].bssn;
+    BSSNState& r = rhs.states2[jN].bssn;
+    const double z = (jN + grid_offset) * dr;
+    const double chi = std::max(min_chi, s.chi);
+    const double a = s.h_zz, b = s.h_ww, alpha = s.alpha, K = s.K;
+    const double A_a = s.A_zz / a;
+
+    // ---- gauge mode: d_t K from d_t [W K - d_z ln alpha] = d_t [(alpha - 1) / (alpha z)]
+    const double f  = shock_gauge ? (1. + shock_fac / (alpha * alpha)) : (one_log_fac / alpha);
+    const double fp = shock_gauge ? (-2. * shock_fac / (alpha * alpha * alpha)) : (-one_log_fac / (alpha * alpha));
+    const double W = sqrt(a * f / chi);
+    double lt[5]; // d_t ln(alpha) on the outer stencil
+    for (int k = 0; k < 5; k++)
+        lt[k] = rhs.states2[jj[k]].bssn.alpha / slice_ptr->states2[jj[k]].bssn.alpha;
+    const double d_t_q = p5_stencil(h, lt[0], lt[1], lt[2], lt[3], lt[4]); // d_t d_z ln(alpha)
+    const double Wt_over_W = 0.5 * (r.h_zz / a + fp * r.alpha / f - r.chi / chi);
+    const double K_t_new = (r.alpha / (alpha * alpha * z) + d_t_q - K * W * Wt_over_W) / W;
+    const double dK_t = K_t_new - r.K;
+    r.K = K_t_new;
+
+    // ---- light-speed constraint mode Omega_- = 0
+    double Aa[5], Kv[5], chiv[5], hwwv[5], CD[5];
+    for (int k = 0; k < 5; k++)
+    {
+        const BSSNState& sk = slice_ptr->states2[jj[k]].bssn;
+        const double zk = (jj[k] + grid_offset) * dr;
+        Aa[k] = sk.A_zz / sk.h_zz; Kv[k] = sk.K; chiv[k] = sk.chi; hwwv[k] = sk.h_ww;
+        const double dhzz = slice_ptr->d_z(v_h_zz, jj[k], 1), dhww = slice_ptr->d_z(v_h_ww, jj[k], 1);
+        const double Gam_h = 0.5 * dhzz / (sk.h_zz * sk.h_zz) - 0.5 * n * dhww / (sk.h_zz * sk.h_ww)
+                           + n * (1. / sk.h_ww - 1. / sk.h_zz) / zk;
+        CD[k] = sk.h_zz * (sk.c_chris_Z - Gam_h);
+    }
+    auto d5 = [&](const double* v) { return p5_stencil(h, v[0], v[1], v[2], v[3], v[4]); };
+
+    const double Ham_N = chi * h_ZZ[jN] * R_zz[jN] + n * chi * h_WW[jN] * R_ww[jN]
+                       - (A_a * A_a + n * pow(s.A_ww / b, 2)) + n * K * K / (D - 1.) - 16. * M_PI * rho[jN];
+    const double Mom_N = d5(Aa) - (2. / 3.) * d5(Kv) - 1.5 * A_a * d5(chiv) / chi + 1.5 * A_a * (2. / z + d5(hwwv) / b)
+                       - 8. * M_PI * j_z[jN];
+    const double Omega_m = a * Ham_N / (6. * chi) + 0.5 * d5(CD) + sqrt(a / chi) * Mom_N;
+
+    const double dA_a_t = (2. / 3.) * dK_t - alpha * chi / a * Omega_m;
+    r.A_zz += a * dA_a_t;
+    r.A_ww += -0.5 * b * dA_a_t;
+}
+
 //Asymptotic (Schwarzschild-Tangherlini) values of chi and alpha and their radial derivatives, used by the Sommerfeld BCs.
 //Areal coordinates:     f = 1 - mu / r^{D-3}, gamma_rr = 1/f  =>  chi = f^{1/(D-1)},  alpha = sqrt(f)
 //Isotropic coordinates: psi = 1 + q, q = mu / (4 r^{D-3})  =>  chi = psi^{-4/(D-3)}, alpha = (1 - q) / (1 + q)
@@ -1577,7 +1679,9 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
     // because the last two active gridpoints are set by sommerfeld_BC on the
     // rank that owns the outer edge.
     const int j_lo = std::max(owned_begin(), 0);
-    const int j_hi = std::min(owned_end(), n_gridpoints - 2);
+    // With constraint-preserving BCs the interior equations are also evaluated (with one-sided stencils) at the two
+    // outermost points; constraint_preserving_BC then modifies only the incoming modes there.
+    const int j_hi = std::min(owned_end(), constraint_preserving_BCs ? n_gridpoints : n_gridpoints - 2);
     for (int j = j_lo; j < j_hi; j++)
     {
         if (!active_points[j] || refinement_levels[j] > max_ref - skipped_levels)//perform no calculations and skip on inactive points
@@ -2220,6 +2324,7 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "ms_bc_radius_frac = ", ms_bc_radius_frac, quiet);
         fill_parameter(current_line, "output_ms_profile = ", output_ms_profile, quiet);
         fill_parameter(current_line, "gamma_constraint_BC = ", gamma_constraint_BC, quiet);
+        fill_parameter(current_line, "constraint_preserving_BCs = ", constraint_preserving_BCs, quiet);
         fill_parameter(current_line, "critical_state = ", critical_state, quiet);
         fill_parameter(current_line, "critical_eps = ", critical_eps, quiet);
         fill_parameter(current_line, "lapse_thresh = ", lapse_thresh, quiet);
@@ -2843,6 +2948,16 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
 
     grid_offset = 0.5 * (double)cell_centered;
     BSSNSlice::origin_mirror_shift = cell_centered ? 1 : 0;
+
+    if (constraint_preserving_BCs && (D != 4. || use_CCZ4))
+    {
+        static bool cpbc_warned = false; // initialize() is called repeatedly in critical studies: warn once
+        if (mpi_rank == 0 && !cpbc_warned)
+            cerr << "WARNING: constraint_preserving_BCs currently only implemented for BSSN in D = 4; falling back to Sommerfeld BCs" << endl;
+        cpbc_warned = true;
+        constraint_preserving_BCs = 0;
+    }
+    BSSNSlice::one_sided_outer = constraint_preserving_BCs;
 
     if (!run_quietly)
         cout << "Read BS data" << endl;
