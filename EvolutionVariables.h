@@ -126,10 +126,15 @@ class Spacetime
         void tune_to_critical(double& tuning_param, double hi_guess, double lo_guess, BosonStar* bs);
 
         double slice_mass(BSSNSlice* slice_ptr);
-        // Misner-Sharp mass m = (n Omega_n / 16 pi) R^{n-1} (1 - nabla_a R nabla^a R), n = D - 2, R the areal radius,
-        // evaluated at the active gridpoint nearest z = ms_radius_frac * R (grid outer radius). Collective under MPI.
-        double slice_ms_mass(BSSNSlice* slice_ptr);
-        double ms_radius_frac = 0.8; // extraction radius for slice_ms_mass as a fraction of the outer radius R
+        // Misner-Sharp mass m = (n Omega_n / 16 pi) R^{n-1} (1 - nabla_a R nabla^a R), n = D - 2, R the areal radius.
+        // ms_mass_at_point is local (no MPI); slice_ms_mass evaluates it at the active gridpoint nearest z = r_frac * R
+        // (R = evolution-domain outer radius) and is collective under MPI.
+        double ms_mass_at_point(BSSNSlice* slice_ptr, int j);
+        double slice_ms_mass(BSSNSlice* slice_ptr, double r_frac);
+        double ms_radius_frac = 0.25;   // extraction radius of the reported MS mass (constraint_norms.dat, supercritical.dat)
+        double ms_bc_radius_frac = 0.8; // extraction radius of the MS mass M_bc used in the Sommerfeld asymptotics
+        bool output_ms_profile = 0;     // if true, write the MS mass profile as an extra (last) column of Diagnostics.dat
+        bool gamma_constraint_BC = 1;   // if true, outer BC on Gamma^z preserves G^z = Gamma^z - Gamma^z(h) instead of Sommerfeld
         double slice_charge(BSSNSlice* slice_ptr);
 
         double ricci_4_val(int j) const; // Compute the 4D Ricci scalar at a grid point
