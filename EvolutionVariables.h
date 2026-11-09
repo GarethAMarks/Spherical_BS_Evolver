@@ -136,8 +136,17 @@ class Spacetime
         double ms_bc_radius_frac = 0.8; // extraction radius of the MS mass M_bc used in the Sommerfeld asymptotics
         bool output_ms_profile = 0;     // if true, write the MS mass profile as an extra (last) column of Diagnostics.dat
         bool gamma_constraint_BC = 1;   // if true, outer BC on Gamma^z preserves G^z = Gamma^z - Gamma^z(h) instead of Sommerfeld
-        bool constraint_preserving_BCs = 1; // Alcubierre & Torres (arXiv:1407.8529) CPBCs; BSSN, D = 4 only (else falls back)
-        void constraint_preserving_BC(BSSNSlice& rhs, int res_fac, BSSNSlice* slice_ptr, const BSSNState interior_rhs[2]);
+        int KO_outer_cutoff = 10;           // no KO dissipation at the outermost KO_outer_cutoff points (in units of the local
+                                            // resolution); 3 reproduces the old behaviour, which destabilises CCZ4 (slow global Theta/K mode)
+        double KO_chi_outer_frac = 0.5;     // CCZ4 only: KO dissipation on chi tapered to zero beyond this fraction of the outer
+                                            // radius (chi is a zero-speed field; dissipating it in the outer region drives a slow
+                                            // global Theta / K mode at weak damping). <= 0: no taper
+        double shift_taper_frac = 0.8;      // with CPBCs and an evolving shift: the Gamma-driver coupling gamma_fac is tapered to zero
+                                            // beyond this fraction of the outer radius, so the shift decays there (the CPBC analysis
+                                            // assumes zero shift at the boundary). <= 0: no taper
+        bool constraint_preserving_BCs = 1; // Alcubierre & Torres (arXiv:1407.8529) CPBCs, extended to CCZ4 and general D
+        void constraint_preserving_BC(BSSNSlice& rhs, int res_fac, BSSNSlice* slice_ptr, const BSSNState interior_rhs[2],
+                                      const double interior_theta_rhs[2]);
         double slice_charge(BSSNSlice* slice_ptr);
 
         double ricci_4_val(int j) const; // Compute the 4D Ricci scalar at a grid point

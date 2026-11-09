@@ -703,6 +703,14 @@ void Spacetime::apply_damping_at_point(int j,
         damping_corr.bssn.beta      = odd_corr([](const State& st) { return st.bssn.beta; });
     }
 
+    // CCZ4: taper the dissipation of chi (a zero-speed field) to zero in the outer region
+    if (use_CCZ4 && KO_chi_outer_frac > 0.)
+    {
+        const double z_out = (n_gridpoints - 1 + grid_offset) * dr;
+        const double zj = (j + grid_offset) * dr;
+        damping_corr.bssn.chi *= 0.5 * (1. - tanh((zj - KO_chi_outer_frac * z_out) / (0.05 * z_out)));
+    }
+
     rhs_states2[j] = rhs_states2[j] + damping_corr;
 
     if (use_CCZ4 && rhs_theta.size() == static_cast<size_t>(n_gridpoints))
@@ -733,10 +741,16 @@ void Spacetime::sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slic
 
     // constraint-preserving BCs: keep the interior (one-sided) RHS of the BSSN variables computed by slice_rhs
     BSSNState cpbc_interior_rhs[2];
+    double cpbc_interior_theta_rhs[2] = {0., 0.};
     if (constraint_preserving_BCs)
     {
         cpbc_interior_rhs[0] = rhs.states2[last_active_j - res_fac].bssn;
         cpbc_interior_rhs[1] = rhs.states2[last_active_j].bssn;
+        if (use_CCZ4)
+        {
+            cpbc_interior_theta_rhs[0] = rhs.theta[last_active_j - res_fac];
+            cpbc_interior_theta_rhs[1] = rhs.theta[last_active_j];
+        }
     }
 
     // asymptotic states and their derivatives where relevant
@@ -803,9 +817,7 @@ void Spacetime::sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slic
     // built from the (interior + Sommerfeld) RHS of h_zz, h_ww with one-sided z-derivatives. This keeps
     // G^z = Gamma^z - Gamma^z(h) fixed at the boundary instead of driving Gamma^z independently of h, which otherwise
     // reflects outgoing gauge pulses as inward-propagating G^z violations.
-    if (constraint_preserving_BCs)
-        constraint_preserving_BC(rhs, res_fac, slice_ptr, cpbc_interior_rhs);
-    else if (gamma_constraint_BC)
+    if (!constraint_preserving_BCs && gamma_constraint_BC)
     {
         const double n = D - 2.;
         const double h = dr * res_fac;
@@ -843,6 +855,10 @@ void Spacetime::sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slic
         rhs.theta[last_active_j] = -(p5_stencil(dr * res_fac, t1, t2, t3, t4, t5) 
                                    + p_metric * t5 / r5);
     }
+
+    // constraint-preserving BCs overwrite all BSSN / CCZ4 variables at the outer points (matter keeps Sommerfeld)
+    if (constraint_preserving_BCs)
+        constraint_preserving_BC(rhs, res_fac, slice_ptr, cpbc_interior_rhs, cpbc_interior_theta_rhs);
 }
 
 //enforce tracelessness of A
@@ -1223,7 +1239,7 @@ double Spacetime::dV(const double A)
 }
 
 // Constraint-preserving outer boundary conditions for BSSN in spherical symmetry, following Alcubierre & Torres,
-// arXiv:1407.8529, translated to SBSE variables (D = 4 only): a = h_zz, b = h_ww, e^{4 phi} = 1/chi, A_a = A_zz / h_zz,
+// arXiv:1407.8529, translated to SBSE variables and generalised to D dimensions (originally D = 4): a = h_zz, b = h_ww, e^{4 phi} = 1/chi, A_a = A_zz / h_zz,
 // Delta^r = Gamma^z. All BSSN variables are evolved to the outer boundary with their own equations using one-sided
 // stencils (slice_rhs + BSSNSlice::one_sided_outer); at the outermost point the two incoming modes are then replaced:
 //  * gauge mode  w^alpha_- = W K - d_z ln(alpha), W = sqrt(h_zz f / chi): Sommerfeld-type condition
@@ -1235,16 +1251,28 @@ double Spacetime::dV(const double A)
 // Here H is the BSSN Hamiltonian constraint, M = d_z A_a - (2/3) d_z K - (3/2) A_a d_z chi / chi + (3/2) A_a (2/z + d_z h_ww / h_ww)
 // - 8 pi j_z the radial momentum constraint, and C_Delta = h_zz (Gamma^z - Gamma^z(h)). Matter fields keep Sommerfeld BCs.
 // The derivation assumes negligible shift at the boundary.
-void Spacetime::constraint_preserving_BC(BSSNSlice& rhs, int res_fac, BSSNSlice* slice_ptr, const BSSNState interior_rhs[2])
+// CCZ4 extension (D = 4, zero shift, principal part; c^2 = chi / h_zz, Sigma = h_zz Gamma^z - d_a - 2 d_b - 8 d_z phi):
+//   d_t Theta ~ (alpha c^2 / 2) d_z Sigma,  d_t Sigma ~ 2 alpha d_z Theta  =>  Theta -/+ (c/2) Sigma are light-speed
+//   outgoing / incoming fields; the gauge and A_a light-speed fields are the BSSN ones with K -> Khat = K - 2 Theta and
+//   Delta -> Gamma-hat. Three incoming fields are fixed: Theta by the Sommerfeld condition d_t Theta = -v_l (d_z Theta + Theta/z);
+//   the gauge field as above with Khat; and w^l_- through Omega_- + (4/3) sqrt(h_zz / chi) d_z Theta = 0, with H built from
+//   the Z-corrected Ricci tensor (which d_z w^l_- matches at principal order).
+void Spacetime::constraint_preserving_BC(BSSNSlice& rhs, int res_fac, BSSNSlice* slice_ptr, const BSSNState interior_rhs[2],
+                                         const double interior_theta_rhs[2])
 {
     const double n = D - 2.;
     const int jN = last_active_j;
     const double h = dr * res_fac;
     const int jj[5] = {jN - 4 * res_fac, jN - 3 * res_fac, jN - 2 * res_fac, jN - res_fac, jN};
 
-    // all BSSN variables at both outer points: interior equations with one-sided stencils
+    // all BSSN (and CCZ4 Theta) variables at both outer points: interior equations with one-sided stencils
     rhs.states2[jN - res_fac].bssn = interior_rhs[0];
     rhs.states2[jN].bssn = interior_rhs[1];
+    if (use_CCZ4)
+    {
+        rhs.theta[jN - res_fac] = interior_theta_rhs[0];
+        rhs.theta[jN] = interior_theta_rhs[1];
+    }
 
     const BSSNState& s = slice_ptr->states2[jN].bssn;
     BSSNState& r = rhs.states2[jN].bssn;
@@ -1253,7 +1281,28 @@ void Spacetime::constraint_preserving_BC(BSSNSlice& rhs, int res_fac, BSSNSlice*
     const double a = s.h_zz, b = s.h_ww, alpha = s.alpha, K = s.K;
     const double A_a = s.A_zz / a;
 
-    // ---- gauge mode: d_t K from d_t [W K - d_z ln alpha] = d_t [(alpha - 1) / (alpha z)]
+    // ---- CCZ4 Theta mode (light speed): Sommerfeld condition d_t Theta = -v_l (d_z Theta + Theta / z)
+    const double v_l = alpha * sqrt(chi / a);
+    const double Theta = use_CCZ4 ? slice_ptr->theta[jN] : 0.;
+    double dz_Theta = 0., dTheta_t = 0.;
+    if (use_CCZ4)
+    {
+        double th[5];
+        for (int k = 0; k < 5; k++)
+            th[k] = slice_ptr->theta[jj[k]];
+        dz_Theta = p5_stencil(h, th[0], th[1], th[2], th[3], th[4]);
+        // keep Theta's (lower-order) kappa1 damping in the boundary condition: without it, the condition is inconsistent with
+        // the interior equation at the boundary and slowly drives a global Theta / K mode, faster for larger kappa1
+        const double k1_b = covariant_Z4 ? c1 : c1 * alpha;
+        const double p_Theta = 0.5 * (D - 2.); // radiative falloff for the Theta (constraint) mode; = 1 in D = 4
+        const double Theta_t_new = theta_off ? 0. : -v_l * (dz_Theta + p_Theta * Theta / z) - 0.5 * k1_b * (D + c2 * (D - 2.)) * Theta;
+        dTheta_t = Theta_t_new - rhs.theta[jN];
+        rhs.theta[jN] = Theta_t_new;
+    }
+
+    // ---- gauge mode: d_t Khat from d_t [W Khat - d_z ln alpha] = d_t [(alpha - 1) / (alpha z)], Khat = K - 2 Theta
+    // (in BSSN Theta = 0 and Khat = K)
+    const double Khat = K - 2. * Theta;
     const double f  = shock_gauge ? (1. + shock_fac / (alpha * alpha)) : (one_log_fac / alpha);
     const double fp = shock_gauge ? (-2. * shock_fac / (alpha * alpha * alpha)) : (-one_log_fac / (alpha * alpha));
     const double W = sqrt(a * f / chi);
@@ -1262,8 +1311,11 @@ void Spacetime::constraint_preserving_BC(BSSNSlice& rhs, int res_fac, BSSNSlice*
         lt[k] = rhs.states2[jj[k]].bssn.alpha / slice_ptr->states2[jj[k]].bssn.alpha;
     const double d_t_q = p5_stencil(h, lt[0], lt[1], lt[2], lt[3], lt[4]); // d_t d_z ln(alpha)
     const double Wt_over_W = 0.5 * (r.h_zz / a + fp * r.alpha / f - r.chi / chi);
-    const double K_t_new = (r.alpha / (alpha * alpha * z) + d_t_q - K * W * Wt_over_W) / W;
+    const double p_alpha = D - 3.; // static falloff alpha - 1 ~ 1/z^{D-3} in the Sommerfeld-type gauge condition
+    const double Khat_t_new = (p_alpha * r.alpha / (alpha * alpha * z) + d_t_q - Khat * W * Wt_over_W) / W;
+    const double K_t_new = Khat_t_new + 2. * (use_CCZ4 ? rhs.theta[jN] : 0.);
     const double dK_t = K_t_new - r.K;
+    const double dKhat_t = dK_t - 2. * dTheta_t;
     r.K = K_t_new;
 
     // ---- light-speed constraint mode Omega_- = 0
@@ -1282,13 +1334,21 @@ void Spacetime::constraint_preserving_BC(BSSNSlice& rhs, int res_fac, BSSNSlice*
 
     const double Ham_N = chi * h_ZZ[jN] * R_zz[jN] + n * chi * h_WW[jN] * R_ww[jN]
                        - (A_a * A_a + n * pow(s.A_ww / b, 2)) + n * K * K / (D - 1.) - 16. * M_PI * rho[jN];
-    const double Mom_N = d5(Aa) - (2. / 3.) * d5(Kv) - 1.5 * A_a * d5(chiv) / chi + 1.5 * A_a * (2. / z + d5(hwwv) / b)
+    // radial momentum constraint in D dimensions: d_z A_a - (n/d) d_z K + (n+1) A_a (1/z + d_z ln h_ww / 2 - d_z ln chi / 2)
+    const double dsp = D - 1.; // number of spatial dimensions
+    const double Mom_N = d5(Aa) - (n / dsp) * d5(Kv) + (n + 1.) * A_a * (1. / z + 0.5 * d5(hwwv) / b - 0.5 * d5(chiv) / chi)
                        - 8. * M_PI * j_z[jN];
-    const double Omega_m = a * Ham_N / (6. * chi) + 0.5 * d5(CD) + sqrt(a / chi) * Mom_N;
+    // in CCZ4: R_zz, R_ww include the Z terms (Ham_N is the hatted Hamiltonian), Gamma^z is Gamma-hat, and the
+    // light-speed field is w^l_- = sqrt(h_zz / chi) (A_a - 2 Khat / 3) - (2/3)(...), whose radial derivative matches
+    // Omega_- + (4/3) sqrt(h_zz / chi) d_z Theta at principal order
+    // Omega_- = (n-1) h_zz H / (2 d chi) + d_z C_Delta / 2 + sqrt(h_zz/chi) (M + (2n/d) d_z Theta), whose principal part is
+    // d_z of the incoming light-speed field w^l_- = sqrt(h_zz/chi) (A_a - (n/d) Khat) + ... (characteristic analysis in D dims;
+    // reduces to h_zz H / (6 chi) + ... + (4/3) d_z Theta in D = 4)
+    const double Omega_m = (n - 1.) * a * Ham_N / (2. * dsp * chi) + 0.5 * d5(CD) + sqrt(a / chi) * (Mom_N + (2. * n / dsp) * dz_Theta);
 
-    const double dA_a_t = (2. / 3.) * dK_t - alpha * chi / a * Omega_m;
+    const double dA_a_t = (n / dsp) * dKhat_t - alpha * chi / a * Omega_m;
     r.A_zz += a * dA_a_t;
-    r.A_ww += -0.5 * b * dA_a_t;
+    r.A_ww += -(b / n) * dA_a_t; // tracelessness: A_b = -A_a / n
 }
 
 //Asymptotic (Schwarzschild-Tangherlini) values of chi and alpha and their radial derivatives, used by the Sommerfeld BCs.
@@ -1759,7 +1819,13 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
         //Gauge variable update using moving puncture evolution, unless evolve_shift is off in which case do not update beta
         double f = (shock_gauge) ? (1. + shock_fac / (alpha * alpha) ): (one_log_fac/ alpha); //bona-masso f
         rhs.states2[j].bssn.alpha = beta * d_z_alpha - f * (alpha * alpha) * K;
-        rhs.states2[j].bssn.beta =  (evolve_shift)? (beta * d_z_beta + gamma_fac * c_chris_Z - eta * beta): 0.;
+        double gamma_eff = gamma_fac;
+        if (constraint_preserving_BCs && shift_taper_frac > 0.)
+        {
+            const double z_out = (n_gridpoints - 1 + grid_offset) * dr;
+            gamma_eff *= 0.5 * (1. - tanh((z - shift_taper_frac * z_out) / (0.04 * z_out)));
+        }
+        rhs.states2[j].bssn.beta =  (evolve_shift)? (beta * d_z_beta + gamma_eff * c_chris_Z - eta * beta): 0.;
        
         // ComplexScalarField RHS for matter variables (uses internal origin regularization and geometric couplings)
         CSF d_z_csf{d_z_phi_re, d_z_phi_im, d_z(v_K_phi_re, j), d_z(v_K_phi_im, j)};
@@ -1839,8 +1905,10 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
                 rhs.theta[j] = 0.;
         }
 
-        // add damping away from edges
-        if (damping_factor != 0. && j < n_gridpoints - 3 * res_fac_outer)
+        // add damping away from the outer edge. The centred 7-point KO stencil must not reach the outermost points, which are
+        // set by the boundary conditions and not themselves dissipated: with the cut-off at 3 points (stencil touching the
+        // last point) the truncated operator is not dissipative and drives a slow global Theta / K mode in CCZ4.
+        if (damping_factor != 0. && j < n_gridpoints - std::max(3, KO_outer_cutoff) * res_fac_outer)
             apply_damping_at_point(j, slice_ptr, rhs.states2, rhs.theta);
     }
 
@@ -2325,6 +2393,9 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "output_ms_profile = ", output_ms_profile, quiet);
         fill_parameter(current_line, "gamma_constraint_BC = ", gamma_constraint_BC, quiet);
         fill_parameter(current_line, "constraint_preserving_BCs = ", constraint_preserving_BCs, quiet);
+        fill_parameter(current_line, "KO_outer_cutoff = ", KO_outer_cutoff, quiet);
+        fill_parameter(current_line, "KO_chi_outer_frac = ", KO_chi_outer_frac, quiet);
+        fill_parameter(current_line, "shift_taper_frac = ", shift_taper_frac, quiet);
         fill_parameter(current_line, "critical_state = ", critical_state, quiet);
         fill_parameter(current_line, "critical_eps = ", critical_eps, quiet);
         fill_parameter(current_line, "lapse_thresh = ", lapse_thresh, quiet);
@@ -2949,14 +3020,6 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
     grid_offset = 0.5 * (double)cell_centered;
     BSSNSlice::origin_mirror_shift = cell_centered ? 1 : 0;
 
-    if (constraint_preserving_BCs && (D != 4. || use_CCZ4))
-    {
-        static bool cpbc_warned = false; // initialize() is called repeatedly in critical studies: warn once
-        if (mpi_rank == 0 && !cpbc_warned)
-            cerr << "WARNING: constraint_preserving_BCs currently only implemented for BSSN in D = 4; falling back to Sommerfeld BCs" << endl;
-        cpbc_warned = true;
-        constraint_preserving_BCs = 0;
-    }
     BSSNSlice::one_sided_outer = constraint_preserving_BCs;
 
     if (!run_quietly)
@@ -3534,9 +3597,11 @@ double Spacetime::ah_indicator_at(const BSSNSlice* slice_ptr, int j)
     if (z == 0.0)
         z = 1e-12; // avoid division by zero at origin
 
+    // outgoing null expansion / (D-2): sqrt(chi/h_zz) d_z ln R_areal - K^theta_theta, with
+    // d_z ln R_areal = 1/z + d_z h_ww / (2 h_ww) - d_z chi / (2 chi) (the D = 4 form had the prefactor 2 hard-coded)
     double ah_indicator = sqrt(s.chi / s.h_zz) *
-                          (2. / z + (d_z(v_h_ww, j) - s.h_ww * d_z(v_chi, j) / s.chi) / s.h_ww)
-                          - (D - 2.) * (s.A_ww + s.K * s.h_ww / (D - 1.)) / s.h_ww;
+                          (1. / z + 0.5 * (d_z(v_h_ww, j) - s.h_ww * d_z(v_chi, j) / s.chi) / s.h_ww)
+                          - (s.A_ww + s.K * s.h_ww / (D - 1.)) / s.h_ww;
 
     return ah_indicator;
 }
