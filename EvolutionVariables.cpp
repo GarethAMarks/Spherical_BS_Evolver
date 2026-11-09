@@ -19,6 +19,7 @@
 // reflection offset across z = 0: 0 for vertex-centred grids, 1 for cell-centred (set in Spacetime::initialize)
 int BSSNSlice::origin_mirror_shift = 0;
 bool BSSNSlice::one_sided_outer = false;
+int BSSNSlice::outer_last_j = -1;
 
 using std::cout;
 using std::cin;
@@ -513,11 +514,12 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
     //At outer edge just use central value for rightmost two; this is cut off in initialize()/ overwritten with BCs anyway.
     //With one_sided_outer (constraint-preserving BCs), use one-sided 5-point stencils on the outermost 5 points instead.
     int outer_pos = 0; // 0: centred stencil; 4 / 5: index is the 2nd-outermost / outermost point of the one-sided stencil
-    if (one_sided_outer && index > n_gridpoints - 1 - 2 * res_fac)
+    const int jN = (outer_last_j >= 0) ? outer_last_j : n_gridpoints - 1; // outermost active point (differs from n_gridpoints - 1 with refinement)
+    if (one_sided_outer && index > jN - 2 * res_fac)
     {
-        outer_pos = (index == n_gridpoints - 1) ? 5 : 4;
+        outer_pos = (index == jN) ? 5 : 4;
         for (int k = 0; k < 5; k++)
-            J[k] = n_gridpoints - 1 - (4 - k) * res_fac;
+            J[k] = jN - (4 - k) * res_fac;
     }
     else
     {
@@ -1903,6 +1905,13 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
             // kappa1 damping: covariant_Z4 drops the lapse factor (kappa1 alpha -> kappa1) so the damping does not
             // switch off near punctures where alpha -> 0
             const double k1 = covariant_Z4 ? c1 : c1 * alpha;
+            // optionally scale the kappa1 damping of the Theta equation inside an apparent horizon: the energy non-conservation
+            // of that term acting on the puncture's (truncation-error) Theta is the main driver of the horizon-mass drift in
+            // under-resolved puncture evolutions; switching it off inside ~0.6 R_AH reduces the drift by ~30% (lower-order
+            // change only, so hyperbolicity is untouched). Scaling the K- or Gamma-equation damping instead does not help.
+            double k1_T = k1;
+            if (k1_theta_inner_factor != 1. && ah_radius > 0.)
+                k1_T *= 1. - (1. - k1_theta_inner_factor) * 0.5 * (1. - tanh((z - inner_damp_frac * ah_radius) / (0.1 * ah_radius)));
 
             rhs.states2[j].bssn.K = beta * d_z_K - chi * inv_hzz * D_zz_alpha[j]  - n * inv_hww * chi * D_ww_alpha[j]
                             + alpha * (chi * inv_hzz * R_zz[j] + n * chi * inv_hww * R_ww[j] + K * (K - 2. * theta)
@@ -1924,7 +1933,7 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
             if (!theta_off)
                 rhs.theta[j] = beta * d_z(v_theta, j) + 0.5 * alpha * (chi * inv_hzz * R_zz[j] - inv_hzz * inv_hzz * A_zz * A_zz + n * K * K * invDm1
                             + n * (chi * inv_hww * R_ww[j] - A_ww * A_ww / (h_ww * h_ww))  - 2. * K * theta - 2. * theta_Z[j] * d_z_alpha / alpha
-                            - 16. * M_PI * rho[j]) - 0.5 * k1 * (D + c2 * n) * theta;
+                            - 16. * M_PI * rho[j]) - 0.5 * k1_T * (D + c2 * n) * theta;
             else
                 rhs.theta[j] = 0.;
         }
@@ -1932,7 +1941,7 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
         // add damping away from the outer edge. The centred 7-point KO stencil must not reach the outermost points, which are
         // set by the boundary conditions and not themselves dissipated: with the cut-off at 3 points (stencil touching the
         // last point) the truncated operator is not dissipative and drives a slow global Theta / K mode in CCZ4.
-        if (damping_factor != 0. && j < n_gridpoints - std::max(3, KO_outer_cutoff) * res_fac_outer)
+        if (damping_factor != 0. && j <= last_active_j - std::max(3, KO_outer_cutoff) * res_fac_outer)
             apply_damping_at_point(j, slice_ptr, rhs.states2, rhs.theta);
     }
 
@@ -2423,6 +2432,8 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "KO_outer_cutoff = ", KO_outer_cutoff, quiet);
         fill_parameter(current_line, "KO_chi_outer_frac = ", KO_chi_outer_frac, quiet);
         fill_parameter(current_line, "constraints_from_metric = ", constraints_from_metric, quiet);
+        fill_parameter(current_line, "k1_theta_inner_factor = ", k1_theta_inner_factor, quiet);
+        fill_parameter(current_line, "inner_damp_frac = ", inner_damp_frac, quiet);
         fill_parameter(current_line, "shift_taper_frac = ", shift_taper_frac, quiet);
         fill_parameter(current_line, "critical_state = ", critical_state, quiet);
         fill_parameter(current_line, "critical_eps = ", critical_eps, quiet);
@@ -2672,6 +2683,7 @@ void Spacetime::resize_temp_arrays()
     last_active_j = n_gridpoints - 1; //find last active gridpoint
     while (!active_points[last_active_j])
         last_active_j--;
+    BSSNSlice::outer_last_j = last_active_j; // used by the one-sided outer stencils of the constraint-preserving BCs
 
     fill_quad_weights();
     build_inactive_stencils();

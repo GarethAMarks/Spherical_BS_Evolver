@@ -60,6 +60,7 @@ class BSSNSlice
     public:
         static int origin_mirror_shift; // ghost index -k maps to k - origin_mirror_shift across z = 0 (1 for cell-centred grids)
         static bool one_sided_outer;    // if true, d_z uses one-sided 5-point stencils at the two outermost points (CPBCs)
+        static int outer_last_j; //index of the outermost active point (set in initialize(); -1 = n_gridpoints - 1)
 
     //public vars are BSSN evolution/gauge variables; privates are auxiliary quantities used in evolution/diagnostic equations
     private:
@@ -138,6 +139,9 @@ class Spacetime
         bool gamma_constraint_BC = 1;   // if true, outer BC on Gamma^z preserves G^z = Gamma^z - Gamma^z(h) instead of Sommerfeld
         int KO_outer_cutoff = 10;           // no KO dissipation at the outermost KO_outer_cutoff points (in units of the local
                                             // resolution); 3 reproduces the old behaviour, which destabilises CCZ4 (slow global Theta/K mode)
+        double k1_theta_inner_factor = 1.; // CCZ4: factor on the kappa1 damping of the Theta equation inside inner_damp_frac * R_AH
+                                           // (0 reduces the puncture-driven horizon-mass drift by ~30%); 1 = unchanged
+        double inner_damp_frac = 0.6;      // switch radius for that scaling as a fraction of the apparent-horizon radius
         bool constraints_from_metric = 1;   // report the Hamiltonian constraint with the Ricci scalar built from the metric alone
                                             // (Gamma(h) in place of the evolved Gamma-tilde / Gamma-hat, no Z terms)
         double KO_chi_outer_frac = 0.5;     // CCZ4 only: KO dissipation on chi tapered to zero beyond this fraction of the outer
