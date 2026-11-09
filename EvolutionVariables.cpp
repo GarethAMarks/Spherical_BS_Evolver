@@ -1633,8 +1633,9 @@ void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
     double R_zz_c_t1 = (z <= min_z) ? (-0.5 * dzz_h_ww) : ((h_zz - h_ww) / (z * z) - 0.5 * d_z_h_zz / z);
     double h_zw_diff = (z <= min_z) ? (0.5 * (dzz_h_zz - dzz_h_ww)) : ((h_zz - h_ww) / (z * z));
 
+    const double dz_Gamma = d_z(v_c_chris_Z, j); // derivative of the evolved (BSSN Gamma-tilde or CCZ4 Gamma-hat) variable
     double R_zz_c = n * inv_hww * (R_zz_c_t1 + chris_Wwz * chris_wwz + 2. * chris_Wwz * chris_zww)
-                    - 0.5 * inv_hzz * dzz_h_zz + h_zz * d_z(v_c_chris_Z, j)
+                    - 0.5 * inv_hzz * dzz_h_zz + h_zz * dz_Gamma
                     + c_chris_Z * chris_zzz + 3. * inv_hzz * chris_zzz * cZzz;
 
     double R_ww_c = -0.5 * inv_hzz * dzz_h_ww + 3. * inv_hzz * chris_Wwz * chris_wwz - 0.5 * n * inv_hww * d_h_ww_z
@@ -1644,12 +1645,35 @@ void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
     R_zz[j] = R_zz_c + R_zz_chi;
     R_ww[j] = R_ww_c + R_ww_chi;
 
+    // Difference between the Ricci terms built from the evolved Gamma variable (used in the evolution equations and in
+    // Ham[j]) and those built from the metric alone, Gamma^z(h) = h^zz Gamma^z_zz + n h^ww Gamma^z_ww. Used to report the
+    // pure ADM Hamiltonian constraint (constraints_from_metric): in BSSN the evolved Gamma-tilde differs from Gamma(h) by
+    // the Gamma constraint, in CCZ4 by 2 Z^z / chi, and both leak into Ham[j] otherwise (in CCZ4, Ham[j] is then the
+    // "hatted" Hamiltonian H + 2 div Z that the Theta equation damps, which overstates the constraint improvement).
+    {
+        const double Gamma_h = inv_hzz * cZzz + n * inv_hww * cZww;
+        const double G_diff = c_chris_Z - Gamma_h; // = 2 Z^z / chi in CCZ4
+        // d_z Gamma^z(h) analytically: Gamma(h) = (u + n v / h_ww) / h_zz, u = d h_zz / (2 h_zz), v = chris_zww
+        const double du = 0.5 * dzz_h_zz * inv_hzz - 0.5 * d_z_h_zz * d_z_h_zz * inv_hzz * inv_hzz;
+        const double dv = (z <= min_z) ? (-0.5 * dzz_h_ww + 0.5 * (dzz_h_zz - dzz_h_ww))
+                                       : (-0.5 * dzz_h_ww + (d_z_h_zz - d_z_h_ww) / z - (h_zz - h_ww) / (z * z));
+        const double dGamma_h = -d_z_h_zz * inv_hzz * Gamma_h + (du + n * (dv * inv_hww - chris_zww * d_z_h_ww * inv_hww * inv_hww)) * inv_hzz;
+        const double dG = dz_Gamma - dGamma_h;
+        const double G_overz = (z <= min_z) ? dG : (G_diff / z);
+        const double dR_zz = h_zz * dG + G_diff * chris_zzz;
+        const double dR_ww = h_ww * G_overz + G_diff * chris_wwz;
+        ham_corr[j] = chi * inv_hzz * dR_zz + n * chi * inv_hww * dR_ww;
+    }
+
     if (use_CCZ4) //if CCZ4 is used, add supplementary terms to the (extended) Ricci tensor and fill out theta_Z
     {
         double theta = 0.5 * chi * (c_chris_Z - inv_hzz * cZzz - n * inv_hww * cZww);
         theta_Z[j] = theta;
-        R_zz[j] += theta * (chi * d_z_h_zz + h_zz * d_z_chi) * (inv_chi * inv_chi) - 2. * theta * chris_zzz * inv_chi;
-        R_ww[j] += theta * (chi * d_z_h_ww - h_ww * d_z_chi) * (inv_chi * inv_chi) - 2. * theta * chris_wwz * inv_chi;
+        const double dR_zz_Z = theta * (chi * d_z_h_zz + h_zz * d_z_chi) * (inv_chi * inv_chi) - 2. * theta * chris_zzz * inv_chi;
+        const double dR_ww_Z = theta * (chi * d_z_h_ww - h_ww * d_z_chi) * (inv_chi * inv_chi) - 2. * theta * chris_wwz * inv_chi;
+        R_zz[j] += dR_zz_Z;
+        R_ww[j] += dR_ww_Z;
+        ham_corr[j] += chi * inv_hzz * dR_zz_Z + n * chi * inv_hww * dR_ww_Z; // explicit 2 D_(i Z_j) terms
     }
 
     // traceless part of Ricci components
@@ -2182,6 +2206,9 @@ void Spacetime::compute_diagnostics (BSSNSlice* slice_ptr)
 
         Ham[j] = chi * h_ZZ[j] * R_zz[j] - h_ZZ[j] * h_ZZ[j] * A_zz * A_zz + n * K * K / (D - 1.)
                  + n * (chi * h_WW[j] * R_ww[j] - A_ww * A_ww / (h_ww * h_ww)) - 16. * M_PI * rho[j];
+        // pure ADM Hamiltonian constraint (Ricci scalar from the metric only); Ham[j] itself keeps the evolved Gamma
+        // variable since slice_mass and the constraint-preserving BCs rely on that form
+        Ham_adm[j] = constraints_from_metric ? Ham[j] - ham_corr[j] : Ham[j];
 
 
         double A_zzww_diff = (z <= min_z) ? 0. : ((A_zz - A_ww) / z) ; //difference between A_zz and A_ww, vanishing when z = 0 as required
@@ -2198,7 +2225,7 @@ void Spacetime::compute_diagnostics (BSSNSlice* slice_ptr)
         //violation being dominated by non-propagating boundary noise/ BH center spike.
        if (z > start_val && z < end_val)
         {
-            Ham_L2 += quad_weights[j] * Ham[j] * Ham[j] * pow(z, D - 2.) * pow(chi, (1. - D) / 2.);
+            Ham_L2 += quad_weights[j] * Ham_adm[j] * Ham_adm[j] * pow(z, D - 2.) * pow(chi, (1. - D) / 2.);
             Mom_L2 += quad_weights[j] * Mom_Z[j] * Mom_Z[j] * pow(z, D - 2.) * pow(chi, (1. - D) / 2.);
         }
     }
@@ -2296,7 +2323,7 @@ void Spacetime:: write_diagnostics(std::string file_name)
         if (r4m > local_r4max) local_r4max = r4m;
 
         double* p = &local[(j - owned_begin()) * NCOL];
-        p[0] = Ham[j];
+        p[0] = Ham_adm[j];
         p[1] = Mom_Z[j];
         p[2] = det_h[j];
         p[3] = aux_test[j];
@@ -2395,6 +2422,7 @@ void Spacetime::read_parameters(bool quiet)
         fill_parameter(current_line, "constraint_preserving_BCs = ", constraint_preserving_BCs, quiet);
         fill_parameter(current_line, "KO_outer_cutoff = ", KO_outer_cutoff, quiet);
         fill_parameter(current_line, "KO_chi_outer_frac = ", KO_chi_outer_frac, quiet);
+        fill_parameter(current_line, "constraints_from_metric = ", constraints_from_metric, quiet);
         fill_parameter(current_line, "shift_taper_frac = ", shift_taper_frac, quiet);
         fill_parameter(current_line, "critical_state = ", critical_state, quiet);
         fill_parameter(current_line, "critical_eps = ", critical_eps, quiet);
@@ -2629,6 +2657,8 @@ void Spacetime::resize_temp_arrays()
     S_ww_TF.resize(n_gridpoints);
 
     Ham.resize(n_gridpoints);
+    Ham_adm.resize(n_gridpoints);
+    ham_corr.resize(n_gridpoints);
     Mom_Z.resize(n_gridpoints);
     det_h.resize(n_gridpoints);
 

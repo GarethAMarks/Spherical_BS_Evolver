@@ -138,6 +138,8 @@ class Spacetime
         bool gamma_constraint_BC = 1;   // if true, outer BC on Gamma^z preserves G^z = Gamma^z - Gamma^z(h) instead of Sommerfeld
         int KO_outer_cutoff = 10;           // no KO dissipation at the outermost KO_outer_cutoff points (in units of the local
                                             // resolution); 3 reproduces the old behaviour, which destabilises CCZ4 (slow global Theta/K mode)
+        bool constraints_from_metric = 1;   // report the Hamiltonian constraint with the Ricci scalar built from the metric alone
+                                            // (Gamma(h) in place of the evolved Gamma-tilde / Gamma-hat, no Z terms)
         double KO_chi_outer_frac = 0.5;     // CCZ4 only: KO dissipation on chi tapered to zero beyond this fraction of the outer
                                             // radius (chi is a zero-speed field; dissipating it in the outer region drives a slow
                                             // global Theta / K mode at weak damping). <= 0: no taper
@@ -240,7 +242,9 @@ class Spacetime
         std::vector<double>  theta_Z; //CCZ4 spatial vector z-component
 
         //Hamiltionian and Momentum constraints, and determinant of h
-        std::vector<double>  Ham;
+        std::vector<double>  Ham;      // Hamiltonian constraint with the Ricci terms built from the evolved Gamma variable
+        std::vector<double>  Ham_adm;  // reported Hamiltonian constraint (metric-only Ricci if constraints_from_metric)
+        std::vector<double>  ham_corr; // Ham - Ham_adm: contamination from (Gamma_evolved - Gamma(h)) and the CCZ4 Z terms
         std::vector<double>  Mom_Z;
         std::vector<double>  det_h;
 

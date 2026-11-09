@@ -67,6 +67,7 @@ gamma_constraint_BC = 1 #outer BC on Gamma^z preserves the Gamma constraint (ign
 constraint_preserving_BCs = 1 #Alcubierre-Torres CPBCs (arXiv:1407.8529), extended to CCZ4 and D > 4
 KO_outer_cutoff = 10 #no KO dissipation within this many points of the outer edge (3 = old behaviour; destabilises CCZ4)
 KO_chi_outer_frac = 0.5 #CCZ4 only: KO on chi tapered off beyond this fraction of the outer radius (<= 0: no taper)
+constraints_from_metric = 1 #report the Hamiltonian constraint from the metric alone (Gamma(h), no Z terms) rather than with the evolved Gamma variable
 shift_taper_frac = 0.8 #with CPBCs + evolve_shift: Gamma-driver coupling tapered to zero beyond this fraction of the outer radius (<= 0: off)
 
 shock_gauge = 0 #if true enables shock-avoiding gauge evolution, Bona-Masso with f(alpha) = 1 + shock_fac / alpha^2
