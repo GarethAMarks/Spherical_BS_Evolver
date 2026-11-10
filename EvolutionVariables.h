@@ -61,6 +61,12 @@ class BSSNSlice
         static int origin_mirror_shift; // ghost index -k maps to k - origin_mirror_shift across z = 0 (1 for cell-centred grids)
         static bool one_sided_outer;    // if true, d_z uses one-sided 5-point stencils at the two outermost points (CPBCs)
         static int outer_last_j; //index of the outermost active point (set in initialize(); -1 = n_gridpoints - 1)
+        //Berger-Oliger subcycling: while a coarse level is stepped, its buffer points inside the finer region must use the
+        //coarse stencil spacing; d_z then uses forced_res_fac for indices <= forced_below_j (0 = no override)
+        static int forced_res_fac;
+        static int forced_below_j;
+        //precomputed refinement level per index (Spacetime::refinement_levels), used by d_z when its size matches the slice
+        static const std::vector<int>* level_table;
 
     //public vars are BSSN evolution/gauge variables; privates are auxiliary quantities used in evolution/diagnostic equations
     private:
@@ -91,6 +97,11 @@ class BSSNSlice
         //BSSNState end_state2;
 
         double R;
+        //finite-difference stencil at one index: the five indices (origin mirrors and outer one-sided / clamped stencils
+        //applied), the spacing, and which values must be sign-flipped for odd-parity variables
+        struct DerivStencil { int J[5]; double h, h2; int outer_pos; bool flip0, flip1; }; //h2 = pow(h, 2), as used by fivePointDeriv
+        void build_stencil(int index, DerivStencil& st) const;
+        double d_z_with(bssn_var var, const DerivStencil& st, int order) const; //derivative from a prebuilt stencil
         double d_z(bssn_var var, int index, int order); //takes z derivative of a BSSN variable on the current slice centred on given index
         double d_zz(bssn_var var, int index);  //second z-derivative, basically syntactic sugar for d_z(var, index, 2)
 
@@ -270,6 +281,28 @@ class Spacetime
         void fill_inactive_points(BSSNSlice& slice);
         void finalize_refinement(); //drop refinement points that do not fit the final (trimmed) grid and rebuild level arrays
 
+        //Berger-Oliger subcycling (adaptive_timestep = 1): level L (1 = finest, at the origin) is advanced with
+        //dt_L = 2^(L-1) dt_fine. Coarse levels step first over owned + buffer points (buffer: coarse-lattice points inside
+        //the finer region, so the coarse step is self-contained); finer levels then take two half-steps, reading the coarse
+        //neighbours ("zone") from a cubic Hermite interpolant in time; the buffer is finally overwritten by the fine solution.
+        struct BOLevel
+        {
+            int level = 1, res_fac = 1, region_lo = 0, region_hi = 0; //active points with region_lo <= j <= region_hi are owned
+            std::vector<int> owned, buffer, comp, zone;               //comp = owned + buffer (points stepped with this level)
+            std::vector<int> bdry_stencils;                           //indices into inactive_stencils of the inactive points this level's stencils read
+            //Hermite data at the zone points (filled when this level steps; read by the next finer level)
+            double t_old = 0., dt = 0.;
+            std::vector<State> y_old, f_old, y_new, f_new;
+            std::vector<double> th_old, fth_old, th_new, fth_new;
+            BSSNSlice k1, k2, k3, k4, fN; //preallocated RHS storage for this level's RK stages / interpolant
+        };
+        std::vector<BOLevel> bo_levels; //index L - 1
+        double dt_fine = 0.;            //finest-level time step when adaptive_timestep is on (dt is then the coarsest step)
+        void bo_setup();
+        void bo_fill_zone(int L, double tau, BSSNSlice& W);              //W(zone of level L) <- Hermite interpolant at time tau
+        void bo_fill_bdry(const BOLevel& lev, BSSNSlice& W);             //spatially interpolate the level's refinement boundary points
+        void bo_advance_level(int L, double t_L, double dt_L, BSSNSlice& W);
+
         std::vector<int> refinement_levels; //lists the refinement levels of each point.
 
         int last_active_j;//outermost active gridpoint, for bdry purposes
@@ -412,7 +445,13 @@ class Spacetime
 
         void auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j);
         void compute_auxiliary_quantities(BSSNSlice* slice_ptr, bool derivatives_computed = 0);
-        BSSNSlice slice_rhs(BSSNSlice* slice_ptr, int skipped_levels = 0);
+        //point_list: evaluate only at these indices (Berger-Oliger level steps); do_outer_BC: apply the outer boundary condition
+        BSSNSlice slice_rhs(BSSNSlice* slice_ptr, int skipped_levels = 0, const std::vector<int>* point_list = nullptr, bool do_outer_BC = true);
+        //same, writing into preallocated storage (entries outside point_list are left untouched)
+        void slice_rhs_into(BSSNSlice* slice_ptr, BSSNSlice& rhs, int skipped_levels, const std::vector<int>* point_list, bool do_outer_BC);
+        //per-point weights of the shift taper and of the CCZ4 outer chi-dissipation taper (fixed in time; filled in evolve())
+        std::vector<double> shift_taper_w, chi_ko_w;
+        void fill_taper_weights();
         void make_A_traceless(BSSNSlice* slice_ptr);
         void compute_diagnostics(BSSNSlice* slice_ptr);
         void update_outer_boundary(double time_step);
@@ -483,6 +522,13 @@ class Spacetime
 
         double d_z(bssn_var var, int index, int order); //just syntactic sugar to call d_z, d_zz on current slice
         double d_zz(bssn_var var, int index);
+        //one-entry cache of the stencil at the last (slice, index) used by d_z / d_zz: the RHS evaluates ~24 derivatives
+        //per point, so the index set is built once per point instead of once per call
+        BSSNSlice::DerivStencil deriv_cache;
+        double deriv_vals[16][5];                 //stencil values of every variable at the cached point (parity applied)
+        const BSSNSlice* deriv_cache_slice = nullptr;
+        int deriv_cache_index = -1, deriv_cache_n = -1, deriv_cache_frf = 0, deriv_cache_fbj = -1;
+        double deriv_cache_R = -1.;
 
         double test_ctr;
 };

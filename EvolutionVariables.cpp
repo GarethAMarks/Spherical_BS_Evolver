@@ -20,6 +20,9 @@
 int BSSNSlice::origin_mirror_shift = 0;
 bool BSSNSlice::one_sided_outer = false;
 int BSSNSlice::outer_last_j = -1;
+int BSSNSlice::forced_res_fac = 0;
+int BSSNSlice::forced_below_j = -1;
+const std::vector<int>* BSSNSlice::level_table = nullptr;
 
 using std::cout;
 using std::cin;
@@ -483,17 +486,22 @@ BSSNSlice operator*(double c, const BSSNSlice& slice)
 
 //radial partial derivative of a given bssn var at index. Order is an optional argument that allows higher z-derivatives to be taken, default is 1.
 //should add checks on refinement levels
-double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
+//Builds the 5-point stencil (indices, spacing, parity flips, outer one-sided position) at the given index
+void BSSNSlice::build_stencil(int index, DerivStencil& st) const
 {
     // Use composite state vector size for grid length to ensure compatibility with RK temp slices
     int n_gridpoints = states2.size();
     // Use cell-centred grid spacing to match read_BS_data (innermost point at z = 0.5*dr)
     double dr = R / ((double)n_gridpoints - 1.0);
 
-    int ref_level = get_refinement_level(index, refinement_points); //refinement level; starts at 1 for no refinement and halves every time.
+    //refinement level; starts at 1 for no refinement and halves every time (table lookup when available)
+    const int ref_level = (level_table && (int)level_table->size() == n_gridpoints && index >= 0 && index < n_gridpoints)
+                          ? (*level_table)[index] : const_cast<BSSNSlice*>(this)->get_refinement_level(index, const_cast<std::vector<int>&>(refinement_points));
 
     // Use bit-shift instead of pow for 2^(ref_level-1)
     int res_fac = 1 << (ref_level - 1);
+    if (forced_res_fac > 0 && index <= forced_below_j) //Berger-Oliger buffer points: coarse spacing inside the finer region
+        res_fac = forced_res_fac;
 
     //check index is valid and error out if not
    if (index < 0 || index >= n_gridpoints )
@@ -503,21 +511,21 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
     }
 
     //set of indices using which derivative will be evaluated
-    vector<int> J{index - 2 * res_fac, index - res_fac, index, index + res_fac, index + 2 * res_fac};
+    int* J = st.J;
+    J[0] = index - 2 * res_fac; J[1] = index - res_fac; J[2] = index; J[3] = index + res_fac; J[4] = index + 2 * res_fac;
 
     //enforce BC at z = 0 by using symmetry: the ghost at index -k mirrors index k (vertex-centred, z_j = j dr)
     //or index k - 1 (cell-centred, z_j = (j + 1/2) dr)
     for (int k = 0; k < 2; k++)
         if (J[k] < 0) J[k] = -J[k] - origin_mirror_shift;
 
-
     //At outer edge just use central value for rightmost two; this is cut off in initialize()/ overwritten with BCs anyway.
     //With one_sided_outer (constraint-preserving BCs), use one-sided 5-point stencils on the outermost 5 points instead.
-    int outer_pos = 0; // 0: centred stencil; 4 / 5: index is the 2nd-outermost / outermost point of the one-sided stencil
+    st.outer_pos = 0; // 0: centred stencil; 4 / 5: index is the 2nd-outermost / outermost point of the one-sided stencil
     const int jN = (outer_last_j >= 0) ? outer_last_j : n_gridpoints - 1; // outermost active point (differs from n_gridpoints - 1 with refinement)
     if (one_sided_outer && index > jN - 2 * res_fac)
     {
-        outer_pos = (index == jN) ? 5 : 4;
+        st.outer_pos = (index == jN) ? 5 : 4;
         for (int k = 0; k < 5; k++)
             J[k] = jN - (4 - k) * res_fac;
     }
@@ -529,91 +537,70 @@ double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
         J[4] = J[3];
     }
 
-    //set of values used to compute derivative
-    vector<double> F{0., 0., 0., 0., 0.};
+    //odd-parity variables (contracted Christoffel, beta) change sign across z = 0 at the mirrored indices
+    st.flip0 = (index <= 1);
+    st.flip1 = (index == 0);
+    st.h = res_fac * dr;
+    st.h2 = pow(st.h, 2);
+}
+
+//Derivative of a variable from a prebuilt stencil (same arithmetic as the original d_z)
+double BSSNSlice::d_z_with(bssn_var var, const DerivStencil& st, int order) const
+{
+    const int* J = st.J;
+    double F[5];
 
     //Fill out five values; note that at outer boundary this gives unreliable results
-    if (index < n_gridpoints)
+    switch (var)
     {
-        for (int j  = 0; j < 5; j++)
-        {
-            switch (var)
-            {
-                case v_chi:
-                    F[j] = states2[J[j]].bssn.chi;
-                    break;
-                case v_h_zz:
-                    F[j] = states2[J[j]].bssn.h_zz;
-                    break;
-                case v_h_ww:
-                    F[j] = states2[J[j]].bssn.h_ww;
-                    break;
-                case v_A_zz:
-                    F[j] = states2[J[j]].bssn.A_zz;
-                    break;
-                case v_A_ww:
-                    F[j] = states2[J[j]].bssn.A_ww;
-                    break;
-                case v_K:
-                    F[j] = states2[J[j]].bssn.K;
-                    break;
-                case v_c_chris_Z:
-                    F[j] = states2[J[j]].bssn.c_chris_Z;
-                    break;
-                case v_phi_re:
-                    F[j] = states2[J[j]].csf.phi_re;
-                    break;
-                case v_phi_im:
-                    F[j] = states2[J[j]].csf.phi_im;
-                    break;
-                case v_K_phi_re:
-                    F[j] = states2[J[j]].csf.K_phi_re;
-                    break;
-                case v_K_phi_im:
-                    F[j] = states2[J[j]].csf.K_phi_im;
-                    break;
-                case v_alpha:
-                    F[j] = states2[J[j]].bssn.alpha;
-                    break;
-                case v_beta:
-                    F[j] = states2[J[j]].bssn.beta;
-                    break;
-                case v_theta:
-                    F[j] = theta[J[j]];
-                    break;
-                case v_psi:
-                    F[j] = states2[J[j]].rsf.psi;
-                    break;
-                case v_K_psi:
-                    F[j] = states2[J[j]].rsf.K_psi;
-                    break;
-                default:
-                    cerr << "ERROR: invalid variable requested for differentiation" << endl;
-                    exit(0);
-            }
-        }
-
-        bool parity_is_odd = ((var == v_c_chris_Z || var == v_beta)/*|| (has_BH && (var == v_chi || var == v_alpha))*/);
-       //if (var == v_alpha) cout << parity_is_odd<< endl;
-
-        //account for odd parity of contracted christoffel symbols and beta across z = 0
-            if (index <= 1 && parity_is_odd )
-                F[0] = -F[0];
-            if (index == 0 && parity_is_odd)
-                F[1] = -F[1];
+        case v_chi:      for (int j = 0; j < 5; j++) F[j] = states2[J[j]].bssn.chi;      break;
+        case v_h_zz:     for (int j = 0; j < 5; j++) F[j] = states2[J[j]].bssn.h_zz;     break;
+        case v_h_ww:     for (int j = 0; j < 5; j++) F[j] = states2[J[j]].bssn.h_ww;     break;
+        case v_A_zz:     for (int j = 0; j < 5; j++) F[j] = states2[J[j]].bssn.A_zz;     break;
+        case v_A_ww:     for (int j = 0; j < 5; j++) F[j] = states2[J[j]].bssn.A_ww;     break;
+        case v_K:        for (int j = 0; j < 5; j++) F[j] = states2[J[j]].bssn.K;        break;
+        case v_c_chris_Z:for (int j = 0; j < 5; j++) F[j] = states2[J[j]].bssn.c_chris_Z;break;
+        case v_phi_re:   for (int j = 0; j < 5; j++) F[j] = states2[J[j]].csf.phi_re;    break;
+        case v_phi_im:   for (int j = 0; j < 5; j++) F[j] = states2[J[j]].csf.phi_im;    break;
+        case v_K_phi_re: for (int j = 0; j < 5; j++) F[j] = states2[J[j]].csf.K_phi_re;  break;
+        case v_K_phi_im: for (int j = 0; j < 5; j++) F[j] = states2[J[j]].csf.K_phi_im;  break;
+        case v_alpha:    for (int j = 0; j < 5; j++) F[j] = states2[J[j]].bssn.alpha;    break;
+        case v_beta:     for (int j = 0; j < 5; j++) F[j] = states2[J[j]].bssn.beta;     break;
+        case v_theta:    for (int j = 0; j < 5; j++) F[j] = theta[J[j]];                 break;
+        case v_psi:      for (int j = 0; j < 5; j++) F[j] = states2[J[j]].rsf.psi;       break;
+        case v_K_psi:    for (int j = 0; j < 5; j++) F[j] = states2[J[j]].rsf.K_psi;     break;
+        default:
+            cerr << "ERROR: invalid variable requested for differentiation" << endl;
+            exit(0);
     }
-    if (outer_pos != 0)
+
+    const bool parity_is_odd = ((var == v_c_chris_Z || var == v_beta)/*|| (has_BH && (var == v_chi || var == v_alpha))*/);
+
+    //account for odd parity of contracted christoffel symbols and beta across z = 0
+    if (st.flip0 && parity_is_odd)
+        F[0] = -F[0];
+    if (st.flip1 && parity_is_odd)
+        F[1] = -F[1];
+
+    if (st.outer_pos != 0)
     {
-        const double h = res_fac * dr;
+        const double h = st.h;
         if (order == 1)
-            return (outer_pos == 5) ? p5_stencil(h, F[0], F[1], F[2], F[3], F[4]) : p4_stencil(h, F[0], F[1], F[2], F[3], F[4]);
+            return (st.outer_pos == 5) ? p5_stencil(h, F[0], F[1], F[2], F[3], F[4]) : p4_stencil(h, F[0], F[1], F[2], F[3], F[4]);
         if (order == 2) // one-sided 5-point second derivatives
-            return (outer_pos == 5) ? (11. * F[0] - 56. * F[1] + 114. * F[2] - 104. * F[3] + 35. * F[4]) / (12. * h * h)
-                                    : (-F[0] + 4. * F[1] + 6. * F[2] - 20. * F[3] + 11. * F[4]) / (12. * h * h);
+            return (st.outer_pos == 5) ? (11. * F[0] - 56. * F[1] + 114. * F[2] - 104. * F[3] + 35. * F[4]) / (12. * h * h)
+                                       : (-F[0] + 4. * F[1] + 6. * F[2] - 20. * F[3] + 11. * F[4]) / (12. * h * h);
         cerr << "ERROR: one-sided outer stencil only implemented for first and second derivatives" << endl;
         exit(1);
     }
-    return fivePointDeriv(res_fac * dr, order, F[0],F[1],F[2],F[3],F[4]);
+    return fivePointDeriv(st.h, order, F[0],F[1],F[2],F[3],F[4]);
+}
+
+double BSSNSlice::d_z(bssn_var var, int index, int order = 1 )
+{
+    DerivStencil st;
+    build_stencil(index, st);
+    return d_z_with(var, st, order);
 }
 
 //second z-derivative, basically syntactic sugar for d_z(var, index, 2)
@@ -667,7 +654,9 @@ void Spacetime::apply_damping_at_point(int j,
                                        std::vector<double>& rhs_theta)
 {
     // refinement factor local to j
-    int res_fac = 1 << (slice_ptr->get_refinement_level(j, refinement_points) - 1);
+    int res_fac = 1 << (refinement_levels[j] - 1);
+    if (BSSNSlice::forced_res_fac > 0 && j <= BSSNSlice::forced_below_j) //Berger-Oliger buffer points
+        res_fac = BSSNSlice::forced_res_fac;
 
     // indices for 7-point centered stencil with symmetry fix near the origin
     std::array<int, 7> J = {j - 3 * res_fac, j - 2 * res_fac, j - 1 * res_fac, j, j + 1 * res_fac, j + 2 * res_fac, j + 3 * res_fac};
@@ -707,11 +696,7 @@ void Spacetime::apply_damping_at_point(int j,
 
     // CCZ4: taper the dissipation of chi (a zero-speed field) to zero in the outer region
     if (use_CCZ4 && KO_chi_outer_frac > 0.)
-    {
-        const double z_out = (n_gridpoints - 1 + grid_offset) * dr;
-        const double zj = (j + grid_offset) * dr;
-        damping_corr.bssn.chi *= 0.5 * (1. - tanh((zj - KO_chi_outer_frac * z_out) / (0.05 * z_out)));
-    }
+        damping_corr.bssn.chi *= chi_ko_w[j];
 
     rhs_states2[j] = rhs_states2[j] + damping_corr;
 
@@ -1166,7 +1151,7 @@ int BSSNSlice::get_refinement_level(int j, std::vector<int>& refinement_points)
     int level = 1;
     int k = 0;
 
-    while ( k < n_refinements && j >= refinement_points[k] - pow(2, k))//check this difference -- meant to ensure we can use a stencil at points spaced by 2^(k + 1) safely at j
+    while ( k < n_refinements && j >= refinement_points[k] - (1 << k))//check this difference -- meant to ensure we can use a stencil at points spaced by 2^(k + 1) safely at j
     {
         level++;
         k++;
@@ -1214,12 +1199,60 @@ void slice_convergence_test (BSSNSlice& sl, BSSNSlice& sm, BSSNSlice& sh)
 //must remember to update current_slice_ptr appropriately!!!
 double Spacetime::d_z(bssn_var var, int index, int order = 1)
 {
-    return current_slice_ptr->d_z(var, index, order);
+    const BSSNSlice* sl = current_slice_ptr;
+    const int n = (int)sl->states2.size();
+    if (sl != deriv_cache_slice || index != deriv_cache_index || n != deriv_cache_n || sl->R != deriv_cache_R
+        || BSSNSlice::forced_res_fac != deriv_cache_frf || BSSNSlice::forced_below_j != deriv_cache_fbj)
+    {
+        //new point: build the stencil once and gather the five values of every variable (the RHS takes ~24 derivatives
+        //per point, so each call below is then a short dot product with no indirection)
+        sl->build_stencil(index, deriv_cache);
+        deriv_cache_slice = sl; deriv_cache_index = index; deriv_cache_n = n; deriv_cache_R = sl->R;
+        deriv_cache_frf = BSSNSlice::forced_res_fac; deriv_cache_fbj = BSSNSlice::forced_below_j;
+
+        const bool has_theta = (sl->theta.size() == sl->states2.size());
+        for (int k = 0; k < 5; k++)
+        {
+            const State& st = sl->states2[deriv_cache.J[k]];
+            deriv_vals[v_chi][k] = st.bssn.chi;           deriv_vals[v_h_zz][k] = st.bssn.h_zz;
+            deriv_vals[v_h_ww][k] = st.bssn.h_ww;         deriv_vals[v_A_zz][k] = st.bssn.A_zz;
+            deriv_vals[v_A_ww][k] = st.bssn.A_ww;         deriv_vals[v_K][k] = st.bssn.K;
+            deriv_vals[v_c_chris_Z][k] = st.bssn.c_chris_Z;
+            deriv_vals[v_phi_re][k] = st.csf.phi_re;      deriv_vals[v_phi_im][k] = st.csf.phi_im;
+            deriv_vals[v_K_phi_re][k] = st.csf.K_phi_re;  deriv_vals[v_K_phi_im][k] = st.csf.K_phi_im;
+            deriv_vals[v_alpha][k] = st.bssn.alpha;       deriv_vals[v_beta][k] = st.bssn.beta;
+            deriv_vals[v_theta][k] = has_theta ? sl->theta[deriv_cache.J[k]] : 0.;
+            deriv_vals[v_psi][k] = st.rsf.psi;            deriv_vals[v_K_psi][k] = st.rsf.K_psi;
+        }
+        //odd parity of the contracted Christoffel symbol and the shift across z = 0
+        if (deriv_cache.flip0) { deriv_vals[v_c_chris_Z][0] = -deriv_vals[v_c_chris_Z][0]; deriv_vals[v_beta][0] = -deriv_vals[v_beta][0]; }
+        if (deriv_cache.flip1) { deriv_vals[v_c_chris_Z][1] = -deriv_vals[v_c_chris_Z][1]; deriv_vals[v_beta][1] = -deriv_vals[v_beta][1]; }
+    }
+
+    const double* F = deriv_vals[var];
+    const BSSNSlice::DerivStencil& st = deriv_cache;
+    if (st.outer_pos != 0)
+    {
+        const double h = st.h;
+        if (order == 1)
+            return (st.outer_pos == 5) ? p5_stencil(h, F[0], F[1], F[2], F[3], F[4]) : p4_stencil(h, F[0], F[1], F[2], F[3], F[4]);
+        if (order == 2) // one-sided 5-point second derivatives
+            return (st.outer_pos == 5) ? (11. * F[0] - 56. * F[1] + 114. * F[2] - 104. * F[3] + 35. * F[4]) / (12. * h * h)
+                                       : (-F[0] + 4. * F[1] + 6. * F[2] - 20. * F[3] + 11. * F[4]) / (12. * h * h);
+        cerr << "ERROR: one-sided outer stencil only implemented for first and second derivatives" << endl;
+        exit(1);
+    }
+    //same expressions as fivePointDeriv (h2 = pow(h, 2) precomputed per point)
+    if (order == 1)
+        return ((1.0 / 12.0) * F[0] - (2.0 / 3.0) * F[1] + (2.0 / 3.0) * F[3] - (1.0 / 12.0) * F[4]) / st.h;
+    if (order == 2)
+        return ( (-1.0 / 12.0) * F[0] + (4.0 / 3.0) * F[1] - (5.0 / 2.0) * F[2] + (4.0 / 3.0) * F[3] - (1.0 / 12.0) * F[4]) / st.h2;
+    return fivePointDeriv(st.h, order, F[0], F[1], F[2], F[3], F[4]);
 }
 
 double Spacetime::d_zz(bssn_var var, int index)
 {
-    return current_slice_ptr->d_zz(var, index);
+    return d_z(var, index, 2);
 }
 
 double Spacetime::V(const double A)
@@ -1742,18 +1775,24 @@ void Spacetime::compute_auxiliary_quantities(BSSNSlice* slice_ptr, bool derivati
 }
 
 //returns a slice corresponding to the RHS of the BSSN evolution equations. Also computes needed auxiliary quantities first
-BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
+BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels, const std::vector<int>* point_list, bool do_outer_BC)
+{
+    BSSNSlice rhs;
+    slice_rhs_into(slice_ptr, rhs, skipped_levels, point_list, do_outer_BC);
+    return rhs;
+}
+
+void Spacetime::slice_rhs_into(BSSNSlice* slice_ptr, BSSNSlice& rhs, int skipped_levels, const std::vector<int>* point_list, bool do_outer_BC)
 {
     double n = D - 2.;
 
     //define return slice and size its states array appropriately
-    BSSNSlice rhs;
     rhs.R = R;
     rhs.has_BH = slice_ptr->has_BH;
     rhs.refinement_points = slice_ptr->refinement_points;
 
     rhs.use_CCZ4 = use_CCZ4;
-    rhs.states2.resize(n_gridpoints); // composite State vector (initialized to zeros)
+    if ((int)rhs.states2.size() != n_gridpoints) rhs.states2.resize(n_gridpoints); // composite State vector (zero-initialised when first allocated)
 
     int max_ref = (refinement_levels.size() == 0 ) ? 1 : refinement_levels[refinement_levels.size() - 1]; //refinement level at outermost bdry
     const int res_fac_outer = (max_ref > 0) ? (1 << (max_ref - 1)) : 1;
@@ -1768,9 +1807,11 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
     // With constraint-preserving BCs the interior equations are also evaluated (with one-sided stencils) at the two
     // outermost points; constraint_preserving_BC then modifies only the incoming modes there.
     const int j_hi = std::min(owned_end(), constraint_preserving_BCs ? n_gridpoints : n_gridpoints - 2);
-    for (int j = j_lo; j < j_hi; j++)
+    const int n_eval = point_list ? (int)point_list->size() : (j_hi - j_lo);
+    for (int jj = 0; jj < n_eval; jj++)
     {
-        if (!active_points[j] || refinement_levels[j] > max_ref - skipped_levels)//perform no calculations and skip on inactive points
+        const int j = point_list ? (*point_list)[jj] : (j_lo + jj);
+        if (!point_list && (!active_points[j] || refinement_levels[j] > max_ref - skipped_levels))//perform no calculations and skip on inactive points
             continue;
 
         double z = (j + grid_offset) * dr;
@@ -1847,10 +1888,7 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
         rhs.states2[j].bssn.alpha = beta * d_z_alpha - f * (alpha * alpha) * K;
         double gamma_eff = gamma_fac;
         if (constraint_preserving_BCs && shift_taper_frac > 0.)
-        {
-            const double z_out = (n_gridpoints - 1 + grid_offset) * dr;
-            gamma_eff *= 0.5 * (1. - tanh((z - shift_taper_frac * z_out) / (0.04 * z_out)));
-        }
+            gamma_eff *= shift_taper_w[j];
         rhs.states2[j].bssn.beta =  (evolve_shift)? (beta * d_z_beta + gamma_eff * c_chris_Z - eta * beta): 0.;
        
         // ComplexScalarField RHS for matter variables (uses internal origin regularization and geometric couplings)
@@ -1900,7 +1938,7 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
         if (use_CCZ4)
         {
             const double theta = slice_ptr->theta[j];
-            rhs.theta.resize(n_gridpoints);
+            if ((int)rhs.theta.size() != n_gridpoints) rhs.theta.resize(n_gridpoints);
 
             // kappa1 damping: covariant_Z4 drops the lapse factor (kappa1 alpha -> kappa1) so the damping does not
             // switch off near punctures where alpha -> 0
@@ -1946,9 +1984,8 @@ BSSNSlice Spacetime::slice_rhs(BSSNSlice* slice_ptr, int skipped_levels)
     }
 
     //apply Sommerfeld boundary conditions at outer boundary
-    sommerfeld_BC(rhs, res_fac_outer, slice_ptr);
-
-    return rhs;
+    if (do_outer_BC)
+        sommerfeld_BC(rhs, res_fac_outer, slice_ptr);
 }
 
 //TODO: make these work with MR
@@ -2684,6 +2721,8 @@ void Spacetime::resize_temp_arrays()
     while (!active_points[last_active_j])
         last_active_j--;
     BSSNSlice::outer_last_j = last_active_j; // used by the one-sided outer stencils of the constraint-preserving BCs
+    BSSNSlice::level_table = &refinement_levels; // per-index refinement level for d_z (avoids recomputing it per call)
+    deriv_cache_slice = nullptr; // stencil geometry changed: drop the cached derivative stencil
 
     fill_quad_weights();
     build_inactive_stencils();
@@ -2835,6 +2874,250 @@ void Spacetime::fill_inactive_points(BSSNSlice& slice)
         if (use_CCZ4 && slice.theta.size() == slice.states2.size())
             slice.theta[st.j] = st.w[0] * slice.theta[st.idx[0]] + st.w[1] * slice.theta[st.idx[1]]
                               + st.w[2] * slice.theta[st.idx[2]] + st.w[3] * slice.theta[st.idx[3]];
+    }
+}
+
+
+//---------------------------------------------------------------------------------------------------------------------
+// Berger-Oliger subcycling for the coarsening-outward refinement (adaptive_timestep = 1)
+//---------------------------------------------------------------------------------------------------------------------
+//Builds the per-level point sets. Level L owns the active points of its region (rp_{L-1}, rp_L]; its buffer is the
+//BO_BUFFER coarse-lattice points just inside the finer region (stepped provisionally with the coarse level so that the
+//owned points near the interface see a complete, self-consistent coarse stencil; overwritten by the fine solution at
+//the end of the coarse step); its zone is the first few owned points, which the finer level reads through the Hermite
+//interpolant. Contamination from the buffer's inner edge travels 3 lattice points per RHS evaluation (KO stencil), i.e.
+//15 points for the 4 RK stages plus the extra RHS for the interpolant, so BO_BUFFER = 16 keeps the owned points exact.
+void Spacetime::bo_setup()
+{
+    const int BO_BUFFER = 16, BO_ZONE = 5;
+    bo_levels.clear();
+    const int n_lev = (int)refinement_points.size() + 1;
+    for (int L = 1; L <= n_lev; L++)
+    {
+        BOLevel lev;
+        lev.level = L;
+        lev.res_fac = 1 << (L - 1);
+        lev.region_lo = (L == 1) ? 0 : refinement_points[L - 2] + 1;
+        lev.region_hi = (L == n_lev) ? last_active_j : refinement_points[L - 1];
+        for (int j = lev.region_lo; j <= lev.region_hi; j++)
+            if (active_points[j]) lev.owned.push_back(j);
+        if (lev.owned.empty())
+        {
+            if (mpi_rank == 0) cout << "ERROR: refinement level " << L << " owns no active points" << endl;
+            bss_mpi::abort_all(1);
+        }
+        if (L > 1)
+        {
+            const int j0 = lev.owned.front();
+            for (int m = 1; m <= BO_BUFFER; m++)
+            {
+                const int j = j0 - m * lev.res_fac;
+                //the innermost buffer point still needs 3 lattice points (KO stencil) below it that are not mirrored
+                if (j - 3 * lev.res_fac < 0 || j < bo_levels[L - 2].region_lo || !active_points[j])
+                {
+                    if (mpi_rank == 0)
+                        cout << "ERROR: adaptive_timestep needs refinement region " << L - 1 << " to hold at least "
+                             << (BO_BUFFER + 3) * lev.res_fac << " points for the level-" << L << " buffer" << endl;
+                    bss_mpi::abort_all(1);
+                }
+                lev.buffer.push_back(j);
+            }
+            for (int m = 0; m < BO_ZONE && m < (int)lev.owned.size(); m++)
+                lev.zone.push_back(lev.owned[m]);
+            const size_t nz = lev.zone.size();
+            lev.y_old.resize(nz); lev.f_old.resize(nz); lev.y_new.resize(nz); lev.f_new.resize(nz);
+            lev.th_old.assign(nz, 0.); lev.fth_old.assign(nz, 0.); lev.th_new.assign(nz, 0.); lev.fth_new.assign(nz, 0.);
+        }
+        lev.comp = lev.buffer;
+        lev.comp.insert(lev.comp.end(), lev.owned.begin(), lev.owned.end());
+        //inactive points that the derivative (+-2) and KO (+-3) stencils of this level's points can read: these must be
+        //re-interpolated at every stage (the uniform-step scheme refreshes all inactive points; here only the ones needed)
+        std::vector<bool> needed(n_gridpoints, false);
+        for (size_t m = 0; m < lev.comp.size(); m++)
+        {
+            const int j = lev.comp[m];
+            const int rf = (m < lev.buffer.size()) ? lev.res_fac : (1 << (refinement_levels[j] - 1));
+            for (int d = -3; d <= 3; d++)
+            {
+                int i = j + d * rf;
+                if (i < 0) i = -i - BSSNSlice::origin_mirror_shift;
+                if (i >= 0 && i <= last_active_j && !active_points[i]) needed[i] = true;
+            }
+        }
+        for (size_t k = 0; k < inactive_stencils.size(); k++)
+            if (needed[inactive_stencils[k].j]) lev.bdry_stencils.push_back((int)k);
+        bo_levels.push_back(lev);
+    }
+    if (!run_quietly && mpi_rank == 0)
+    {
+        cout << "Berger-Oliger subcycling over " << n_lev << " levels: dt_fine = " << dt_fine << ", dt_coarse = " << dt << endl;
+        for (const BOLevel& lev : bo_levels)
+            cout << "  level " << lev.level << ": spacing " << lev.res_fac << " dr, points [" << lev.region_lo << ", " << lev.region_hi
+                 << "], " << lev.owned.size() << " owned, " << lev.buffer.size() << " buffer, " << lev.zone.size() << " zone, "
+                 << lev.bdry_stencils.size() << " interpolated point(s)" << endl;
+    }
+}
+
+//Per-point weights that are fixed in time: the Gamma-driver shift taper (constraint-preserving BCs) and the CCZ4 outer
+//taper of the chi dissipation. Same expressions as were previously evaluated at every RHS call.
+void Spacetime::fill_taper_weights()
+{
+    shift_taper_w.assign(n_gridpoints, 1.);
+    chi_ko_w.assign(n_gridpoints, 1.);
+    const double z_out = (n_gridpoints - 1 + grid_offset) * dr;
+    for (int j = 0; j < n_gridpoints; j++)
+    {
+        const double zj = (j + grid_offset) * dr;
+        shift_taper_w[j] = 0.5 * (1. - tanh((zj - shift_taper_frac * z_out) / (0.04 * z_out)));
+        chi_ko_w[j] = 0.5 * (1. - tanh((zj - KO_chi_outer_frac * z_out) / (0.05 * z_out)));
+    }
+}
+
+//Fills W at the zone points of (coarse) level L with the cubic Hermite interpolant of that level's step in time
+void Spacetime::bo_fill_zone(int L, double tau, BSSNSlice& W)
+{
+    const BOLevel& lev = bo_levels[L - 1];
+    double th = (tau - lev.t_old) / lev.dt;
+    th = std::max(0., std::min(1., th));
+    const double h00 = 2. * th * th * th - 3. * th * th + 1., h10 = th * th * th - 2. * th * th + th;
+    const double h01 = -2. * th * th * th + 3. * th * th,     h11 = th * th * th - th * th;
+    for (size_t m = 0; m < lev.zone.size(); m++)
+    {
+        const int j = lev.zone[m];
+        W.states2[j] = h00 * lev.y_old[m] + (h10 * lev.dt) * lev.f_old[m] + h01 * lev.y_new[m] + (h11 * lev.dt) * lev.f_new[m];
+        if (use_CCZ4)
+            W.theta[j] = h00 * lev.th_old[m] + h10 * lev.dt * lev.fth_old[m] + h01 * lev.th_new[m] + h11 * lev.dt * lev.fth_new[m];
+    }
+}
+
+void Spacetime::bo_fill_bdry(const BOLevel& lev, BSSNSlice& W)
+{
+    for (int k : lev.bdry_stencils)
+    {
+        const InactiveStencil& st = inactive_stencils[k];
+        W.states2[st.j] = st.w[0] * W.states2[st.idx[0]] + st.w[1] * W.states2[st.idx[1]]
+                        + st.w[2] * W.states2[st.idx[2]] + st.w[3] * W.states2[st.idx[3]];
+        if (use_CCZ4)
+            W.theta[st.j] = st.w[0] * W.theta[st.idx[0]] + st.w[1] * W.theta[st.idx[1]]
+                          + st.w[2] * W.theta[st.idx[2]] + st.w[3] * W.theta[st.idx[3]];
+    }
+}
+
+//Advances level L (and, recursively, all finer levels) from t_L to t_L + dt_L in place on W. On entry W holds the
+//level's points at t_L and the finer levels at t_L; coarser levels are already at later times with their Hermite data set.
+void Spacetime::bo_advance_level(int L, double t_L, double dt_L, BSSNSlice& W)
+{
+    BOLevel& lev = bo_levels[L - 1];
+    const int n_lev = (int)bo_levels.size();
+    const bool coarsest = (L == n_lev);
+    const std::vector<int>& P = lev.comp;
+    const size_t nP = P.size();
+    const double n = D - 2.;
+    current_slice_ptr = &W; //Spacetime::d_z / d_zz (used by slice_rhs) differentiate the slice current_slice_ptr points to
+
+    //fine values at the buffer points (restored before the finer level steps from them)
+    std::vector<State> saved_buf(lev.buffer.size());
+    std::vector<double> saved_buf_th(lev.buffer.size(), 0.);
+    for (size_t m = 0; m < lev.buffer.size(); m++)
+    {
+        saved_buf[m] = W.states2[lev.buffer[m]];
+        if (use_CCZ4) saved_buf_th[m] = W.theta[lev.buffer[m]];
+    }
+
+    std::vector<State> y0(nP);
+    std::vector<double> th0(nP, 0.);
+    for (size_t m = 0; m < nP; m++)
+    {
+        y0[m] = W.states2[P[m]];
+        if (use_CCZ4) th0[m] = W.theta[P[m]];
+    }
+
+    //buffer points use the coarse stencil spacing
+    if (L > 1)
+    {
+        BSSNSlice::forced_res_fac = lev.res_fac;
+        BSSNSlice::forced_below_j = lev.region_lo - 1;
+    }
+
+    auto set_stage = [&](const BSSNSlice& k, double c, double tau)
+    {
+        for (size_t m = 0; m < nP; m++)
+        {
+            W.states2[P[m]] = y0[m] + c * k.states2[P[m]];
+            if (use_CCZ4) W.theta[P[m]] = th0[m] + c * k.theta[P[m]];
+        }
+        if (!coarsest) bo_fill_zone(L + 1, tau, W);
+        bo_fill_bdry(lev, W);
+    };
+
+    if (!coarsest) bo_fill_zone(L + 1, t_L, W);
+    bo_fill_bdry(lev, W);
+    BSSNSlice &k1 = lev.k1, &k2 = lev.k2, &k3 = lev.k3, &k4 = lev.k4; //preallocated; only the level's points are (re)written
+    slice_rhs_into(&W, k1, 0, &P, coarsest);
+    set_stage(k1, 0.5 * dt_L, t_L + 0.5 * dt_L);
+    slice_rhs_into(&W, k2, 0, &P, coarsest);
+    set_stage(k2, 0.5 * dt_L, t_L + 0.5 * dt_L);
+    slice_rhs_into(&W, k3, 0, &P, coarsest);
+    set_stage(k3, dt_L, t_L + dt_L);
+    slice_rhs_into(&W, k4, 0, &P, coarsest);
+
+    //RK4 update, traceless A and chi floor on the level's points
+    for (size_t m = 0; m < nP; m++)
+    {
+        const int j = P[m];
+        W.states2[j] = y0[m] + (dt_L / 6.) * (k1.states2[j] + 2.0 * k2.states2[j] + 2.0 * k3.states2[j] + k4.states2[j]);
+        if (use_CCZ4) W.theta[j] = th0[m] + (dt_L / 6.) * (k1.theta[j] + 2.0 * k2.theta[j] + 2.0 * k3.theta[j] + k4.theta[j]);
+        State& st = W.states2[j];
+        const double A = st.bssn.A_zz / st.bssn.h_zz + n * st.bssn.A_ww / st.bssn.h_ww;
+        st.bssn.A_zz -= st.bssn.h_zz * A / (D - 1.);
+        st.bssn.A_ww -= st.bssn.h_ww * A / (D - 1.);
+        if (st.bssn.chi < min_chi) st.bssn.chi = min_chi;
+    }
+    bo_fill_bdry(lev, W);
+
+    if (L > 1)
+    {
+        //Hermite data for the finer level: one extra RHS evaluation at the new time, only at the zone points
+        BSSNSlice& fN = lev.fN;
+        slice_rhs_into(&W, fN, 0, &lev.zone, false);
+        lev.t_old = t_L;
+        lev.dt = dt_L;
+        for (size_t m = 0; m < lev.zone.size(); m++)
+        {
+            const int j = lev.zone[m];
+            lev.y_new[m] = W.states2[j];
+            lev.f_new[m] = fN.states2[j];
+            lev.f_old[m] = k1.states2[j];
+            if (use_CCZ4) { lev.th_new[m] = W.theta[j]; lev.fth_new[m] = fN.theta[j]; lev.fth_old[m] = k1.theta[j]; }
+        }
+        for (size_t m = 0; m < nP; m++) //y_old at the zone points
+        {
+            auto it = std::find(lev.zone.begin(), lev.zone.end(), P[m]);
+            if (it != lev.zone.end())
+            {
+                const size_t mz = it - lev.zone.begin();
+                lev.y_old[mz] = y0[m];
+                if (use_CCZ4) lev.th_old[mz] = th0[m];
+            }
+        }
+        BSSNSlice::forced_res_fac = 0;
+        BSSNSlice::forced_below_j = -1;
+
+        //restore the fine solution at the buffer and advance the finer level by two half-steps
+        for (size_t m = 0; m < lev.buffer.size(); m++)
+        {
+            W.states2[lev.buffer[m]] = saved_buf[m];
+            if (use_CCZ4) W.theta[lev.buffer[m]] = saved_buf_th[m];
+        }
+        bo_advance_level(L - 1, t_L, 0.5 * dt_L, W);
+        bo_advance_level(L - 1, t_L + 0.5 * dt_L, 0.5 * dt_L, W);
+
+        //the finer level has left the zone at the interpolant's end value (= y_new); restore exactly
+        for (size_t m = 0; m < lev.zone.size(); m++)
+        {
+            W.states2[lev.zone[m]] = lev.y_new[m];
+            if (use_CCZ4) W.theta[lev.zone[m]] = lev.th_new[m];
+        }
     }
 }
 
@@ -3063,6 +3346,7 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
     BSSNSlice::origin_mirror_shift = cell_centered ? 1 : 0;
 
     BSSNSlice::one_sided_outer = constraint_preserving_BCs;
+    deriv_cache_slice = nullptr;
 
     if (!run_quietly)
         cout << "Read BS data" << endl;
@@ -3145,6 +3429,18 @@ void Spacetime::evolve()
     dt = courant_factor * dr;
     if (critical_study) ricci_4_ctr_max = 0.0;
 
+    //Berger-Oliger subcycling: the loop below then advances by the coarsest level's step and every level L takes
+    //2^(n_levels - L) sub-steps of 2^(L-1) dt_fine inside bo_advance_level
+    fill_taper_weights();
+
+    const bool use_bo = adaptive_timestep && !refinement_points.empty();
+    if (use_bo)
+    {
+        dt_fine = dt;
+        dt *= (1 << refinement_points.size());
+        bo_setup();
+    }
+
     if (!run_quietly && mpi_rank == 0)
         cout << "dr = " << dr << ", dt = " << dt <<  "   " << endl;
 
@@ -3210,20 +3506,7 @@ void Spacetime::evolve()
         ++steps_executed;
         double t = start_time + time_step * dt;
 
-        int skipped_levels = 0;
-
-        //work out how many outer refinement levels to skip updating based on current time step
-        if (adaptive_timestep && !refinement_points.empty() && time_step > 0)
-        {
-            int skipped_levels = refinement_levels.back() - 1;
-            int skip = time_step;
-            while (skip % 2 == 0 && skipped_levels > 0)
-            {
-                skip /= 2;
-                skipped_levels--;
-            }
-            //cout << "Skipping " << skipped_levels << " refinement levels at time step " << time_step << endl;
-        }
+        const int skipped_levels = 0; //(the former frozen-RHS level skipping is superseded by the Berger-Oliger path below)
 
         //fill out array until we've reached maximum number of stored slices, then update last element + rotate at end.
         int n = (time_step > max_stored_slices - 2) ? (max_stored_slices - 2) : time_step;
@@ -3308,6 +3591,21 @@ void Spacetime::evolve()
         //from neighbors before the next RHS reads them across stencils.
         current_slice_ptr = &slices[n];
 
+        if (use_bo)
+        {
+            //diagnostics on the synchronised slice, then advance all levels in place on a copy
+            if (time_step % write_CN_interval == 0)
+            {
+                compute_auxiliary_quantities(current_slice_ptr, 0);
+                compute_diagnostics(current_slice_ptr);
+            }
+            slices[n + 1].states2 = slices[n].states2;
+            if (use_CCZ4) slices[n + 1].theta = slices[n].theta;
+            bo_advance_level((int)bo_levels.size(), t, dt, slices[n + 1]); //sets current_slice_ptr = &slices[n + 1]
+            current_slice_ptr = &slices[n + 1];
+        }
+        else
+        {
         s1 = slice_rhs(current_slice_ptr, skipped_levels);
         slice_axpy(t1, slices[n], 0.5 * dt, s1);
         fill_inactive_points(t1);
@@ -3344,6 +3642,7 @@ void Spacetime::evolve()
         {
             State& st = slices[n + 1].states2[j];
             if (st.bssn.chi < min_chi) st.bssn.chi = min_chi;
+        }
         }
 
         //refresh inactive (refinement) points from the updated active points
