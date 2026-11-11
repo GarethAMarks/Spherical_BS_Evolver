@@ -1042,9 +1042,11 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
     }
 
     //separate loop to fill in values for the contracted Christoffel symbols as they require derivatives of h (hence info off j value)
+    //(the origin mirror used by d_z must match the grid: set it here since initialize() only sets it after reading the data)
+    origin_mirror_shift = cell_centered ? 1 : 0;
     for (int j = 0; j < n_gridpoints; j++)
     {
-        double z = (j) * dr;
+        double z = (j + 0.5 * (double)cell_centered) * dr; // cell- or vertex-centred coordinate, as in the loop above
 
         // inverse metric components, for convenience
         double h_ZZ = 1 / states2[j].bssn.h_zz;
