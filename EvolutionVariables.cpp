@@ -1503,14 +1503,17 @@ double Spacetime::d_chris_Z_asymp(double r)
  // returns RHS as {chi, eta} where eta is the radial derivative of chi
  vector<double> Spacetime::ham_init_rhs(double r, double chi, double eta)
  {
-    int k = floor(r / dr) - 1;
-    while (k * dr < r)
+    //grid point j sits at (j + grid_offset) dr; the interpolation below works with the node-relative coordinate
+    const double rr = r - grid_offset * dr;
+    int k = floor(rr / dr) - 1;
+    while (k * dr < rr)
         k++;
 
     const BSSNSlice& s = slices[0]; //initial slice
     current_slice_ptr = &slices[0];
 
     int j0 = bound(k - 1, 0, n_gridpoints - 4);
+    r = rr; //cubic_interp expects nodes at (j0 + i) dr in this coordinate
 
     //cubic interpolation to get state values off gridpoints (for midstep solving)
     double phi_re = cubic_interp(r, s.states2[j0].csf.phi_re, s.states2[j0 + 1].csf.phi_re, s.states2[j0 + 2].csf.phi_re, s.states2[j0 + 3].csf.phi_re, j0, dr);
@@ -1538,6 +1541,7 @@ double Spacetime::d_chris_Z_asymp(double r)
     double chi_rhs = eta;
     double eta_rhs = 5. * eta * eta / (4. * chi) + 8. * M_PI * rho0;
 
+    r = rr + grid_offset * dr; //back to the physical radius for the regular 1/r term
     if (r > 0.) eta_rhs -= 2 * eta / r;
     else eta_rhs /= 3.; // in the limit r -> 0, eta / r is replaced by d_r(eta), so net effect is to divide the usual RHS by 3!
 
@@ -1561,26 +1565,43 @@ double Spacetime::d_chris_Z_asymp(double r)
     if (!quiet)
         cout << "\n Starting initial Spacetime Hamiltonian constraint solver..." << endl;
 
+    //one RK4 step of the {chi, eta} system of length h starting at radius r
+    auto rk4_step = [&](double r, double h, double& chi_v)
+    {
+        c1 = ham_init_rhs(r, chi_v, eta)[0];
+        e1 = ham_init_rhs(r, chi_v, eta)[1];
+
+        c2 = ham_init_rhs(r + h / 2., chi_v + 0.5 * h * c1, eta + 0.5 * h * e1)[0];
+        e2 = ham_init_rhs(r + h / 2., chi_v + 0.5 * h * c1, eta + 0.5 * h * e1)[1];
+
+        c3 = ham_init_rhs(r + h / 2., chi_v + 0.5 * h * c2, eta + 0.5 * h * e2)[0];
+        e3 = ham_init_rhs(r + h / 2., chi_v + 0.5 * h * c2, eta + 0.5 * h * e2)[1];
+
+        c4 = ham_init_rhs(r + h, chi_v + h * c3, eta + h * e3)[0];
+        e4 = ham_init_rhs(r + h, chi_v + h * c3, eta + h * e3)[1];
+
+        chi_v = chi_v + (h / 6.) * (c1 + 2 * c2 + 2 * c3 + c4);
+        eta = eta + (h / 6.) * (e1 + 2 * e2 + 2 * e3 + e4);
+    };
+
+    //On a cell-centred grid point j is at (j + 1/2) dr: start from the regular centre r = 0 (chi even, so chi(0) from a
+    //quadratic even fit through the first two points) and take a half step to the first point; then full steps as before.
+    if (cell_centered)
+    {
+        double chi_c = (9. * s.states2[0].bssn.chi - s.states2[1].bssn.chi) / 8.;
+        rk4_step(0., 0.5 * dr, chi_c);
+        s.states2[0].bssn.chi = chi_c;
+    }
+
    for (int j = 0; j < n_gridpoints - 1; j++) //for (int j = n_gridpoints - 1; j > 0; j--)
     {
-        double r = j * dr;
+        double r = (j + grid_offset) * dr;
 
         //RK4 solver for Ham. constraint
         //pretty inefficient but OK for now
-        c1 = ham_init_rhs(r, s.states2[j].bssn.chi, eta)[0];
-        e1 = ham_init_rhs(r, s.states2[j].bssn.chi, eta)[1];
-
-        c2 = ham_init_rhs(r + dr / 2., s.states2[j].bssn.chi + 0.5 * dr * c1, eta + 0.5 * dr * e1)[0];
-        e2 = ham_init_rhs(r + dr / 2., s.states2[j].bssn.chi + 0.5 * dr * c1, eta + 0.5 * dr * e1)[1];
-
-        c3 = ham_init_rhs(r + dr / 2., s.states2[j].bssn.chi + 0.5 * dr * c2, eta + 0.5 * dr * e2)[0];
-        e3 = ham_init_rhs(r + dr / 2., s.states2[j].bssn.chi + 0.5 * dr * c2, eta + 0.5 * dr * e2)[1];
-
-        c4 = ham_init_rhs(r + dr, s.states2[j].bssn.chi + dr * c3, eta + dr * e3)[0];
-        e4 = ham_init_rhs(r + dr, s.states2[j].bssn.chi + dr * c3, eta + dr * e3)[1];
-
-        s.states2[j + 1].bssn.chi = s.states2[j].bssn.chi + (dr / 6.) * (c1 + 2 * c2 + 2 * c3 + c4);
-        eta = eta + (dr / 6.) * (e1 + 2 * e2 + 2 * e3 + e4);
+        double chi_next = s.states2[j].bssn.chi;
+        rk4_step(r, dr, chi_next);
+        s.states2[j + 1].bssn.chi = chi_next;
 
         if (isnan(s.states2[j + 1].bssn.chi))
         {
