@@ -1525,7 +1525,7 @@ double Spacetime::d_chris_Z_asymp(double r)
     double dz_phi_re = cubic_interp(r, d_z(v_phi_re, j0), d_z(v_phi_re, j0 + 1), d_z(v_phi_re, j0 + 2), d_z(v_phi_re, j0 + 3),j0,  dr);
     double dz_phi_im = cubic_interp(r, d_z(v_phi_im, j0), d_z(v_phi_im, j0 + 1), d_z(v_phi_im, j0 + 2), d_z(v_phi_im, j0 + 3),j0,  dr);
 
-    double mod_phi = sqrt(phi_re * phi_re + phi_im + phi_im);
+    double mod_phi = sqrt(phi_re * phi_re + phi_im * phi_im);
     double rho0 = 2. * (K_phi_im * K_phi_im + K_phi_re * K_phi_re) +  0.5 * chi * (pow(dz_phi_re,2) + pow(dz_phi_im,2)) + 0.5 * V(mod_phi);
     
     //account for real scalar field if needed
@@ -1539,11 +1539,13 @@ double Spacetime::d_chris_Z_asymp(double r)
     }
 
     double chi_rhs = eta;
-    double eta_rhs = 5. * eta * eta / (4. * chi) + 8. * M_PI * rho0;
+    //Hamiltonian constraint for the conformally flat, K_ij = 0 slice gamma = delta / chi in D - 1 spatial dimensions:
+    //R = (D - 2) [lap(chi) - (D + 1) chi'^2 / (4 chi)] = 16 pi rho, with lap(chi) = chi'' + (D - 2) chi' / r
+    double eta_rhs = (D + 1.) * eta * eta / (4. * chi) + 16. * M_PI * rho0 / (D - 2.);
 
     r = rr + grid_offset * dr; //back to the physical radius for the regular 1/r term
-    if (r > 0.) eta_rhs -= 2 * eta / r;
-    else eta_rhs /= 3.; // in the limit r -> 0, eta / r is replaced by d_r(eta), so net effect is to divide the usual RHS by 3!
+    if (r > 0.) eta_rhs -= (D - 2.) * eta / r;
+    else eta_rhs /= (D - 1.); // in the limit r -> 0, eta / r is replaced by d_r(eta), so net effect is to divide the usual RHS by D - 1
 
     vector<double> rhs = {chi_rhs, eta_rhs};
     return rhs;
@@ -1612,7 +1614,7 @@ double Spacetime::d_chris_Z_asymp(double r)
 
     //initializes alpha = sqrt(chi)-- mostly for formation runs where static lapse solver may have failed.
     for (int j = 0; j < n_gridpoints; j++)
-        s.states2[j].bssn.alpha = sqrt(s.states2[j].bssn.chi);
+        s.states2[j].bssn.alpha = (D == 4.) ? sqrt(s.states2[j].bssn.chi) : pow(s.states2[j].bssn.chi, 0.5 * (D - 3.)); //weak-field isotropic relation alpha = chi^((D-3)/2)
 
 
     if (!quiet)
