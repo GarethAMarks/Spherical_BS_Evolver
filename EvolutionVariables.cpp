@@ -41,6 +41,8 @@ Spacetime::Spacetime() : csf_model(this), rsf_model(this) {
     // Initialize scalar-field energies
     E_phi = 0.0;
     E_psi = 0.0;
+    M_ms_phi = 0.0;
+    M_ms_psi = 0.0;
 
     // Cache rank/size up front so early error paths on any rank can print
     // consistently. local_N / global_lo / global_hi are populated later in
@@ -2105,6 +2107,41 @@ double Spacetime::slice_charge(BSSNSlice* slice_ptr)
     return bss_mpi::sum(charge);
 }
 
+// Integrands of the Misner-Sharp mass split, dM_X/dz = Omega_n R^n (rho_X R' - j_z,X R K^theta_theta), for the complex
+// (f_phi) and real (f_psi) fields at gridpoint j. Along a slice the MS mass gradient depends only on rho and j_z (the
+// stress contributions cancel in the unified first law), and the integrand is linear in T_ab, so the field parts add up to
+// M_MS(z) - M_MS(0) exactly up to constraint violation; M_MS(0) = 0 for a regular centre (the puncture's mass otherwise).
+void Spacetime::ms_split_integrand(BSSNSlice* slice_ptr, int j, double& f_phi, double& f_psi)
+{
+    f_phi = 0.;
+    f_psi = 0.;
+    const double n = D - 2.;
+    const double z = (j + grid_offset) * (slice_ptr->R / ((double)slice_ptr->states2.size() - 1.0));
+    if (z <= 0.)
+        return; // R^n = 0 at a vertex-centred origin
+
+    const BSSNState& b = slice_ptr->states2[j].bssn;
+    const double chi = std::max(min_chi, b.chi);
+    const double R_ar = z * sqrt(b.h_ww / chi);
+    const double dz_R_ar = R_ar * (1. / z + 0.5 * slice_ptr->d_z(v_h_ww, j, 1) / b.h_ww - 0.5 * slice_ptr->d_z(v_chi, j, 1) / chi);
+    const double K_th = b.A_ww / b.h_ww + b.K / (D - 1.);
+    const double Omega_n = 2. * pow(M_PI, 0.5 * (D - 1.)) / tgamma(0.5 * (D - 1.));
+    const double pref = Omega_n * pow(R_ar, n);
+
+    const CSF& csf = slice_ptr->states2[j].csf;
+    const CSF d_z_csf{slice_ptr->d_z(v_phi_re, j, 1), slice_ptr->d_z(v_phi_im, j, 1), 0.0, 0.0};
+    const CSF d_zz_csf{0.0, 0.0, 0.0, 0.0};
+    f_phi = pref * (csf_model.rho(csf, b, d_z_csf, d_zz_csf) * dz_R_ar - csf_model.j_z(csf, b, d_z_csf, d_zz_csf) * R_ar * K_th);
+
+    if (add_real_field)
+    {
+        const RSF& rsf = slice_ptr->states2[j].rsf;
+        const RSF d_z_rsf{slice_ptr->d_z(v_psi, j, 1), slice_ptr->d_z(v_K_psi, j, 1)};
+        const RSF d_zz_rsf{0.0, 0.0};
+        f_psi = pref * (rsf_model.rho(rsf, b, d_z_rsf, d_zz_rsf) * dz_R_ar - rsf_model.j_z(rsf, b, d_z_rsf, d_zz_rsf) * R_ar * K_th);
+    }
+}
+
 // Compute energies E_phi (complex scalar) and E_psi (real scalar) by integrating
 // the corresponding rho contributions over the slice using the spherical volume measure.
 void Spacetime::compute_scalar_energies(BSSNSlice* slice_ptr)
@@ -2113,6 +2150,8 @@ void Spacetime::compute_scalar_energies(BSSNSlice* slice_ptr)
     {
         E_phi = 0.0;
         E_psi = 0.0;
+        M_ms_phi = 0.0;
+        M_ms_psi = 0.0;
         return;
     }
 
@@ -2128,6 +2167,8 @@ void Spacetime::compute_scalar_energies(BSSNSlice* slice_ptr)
 
     double e_phi = 0.0;
     double e_psi = 0.0;
+    double m_phi = 0.0; // Misner-Sharp mass split (see ms_split_integrand)
+    double m_psi = 0.0;
 
     // Integrate over inner 95% of the grid (to mirror other diagnostics that avoid boundary artifacts).
     // MPI: partial sum over owned range, then bss_mpi::sum below.
@@ -2161,10 +2202,17 @@ void Spacetime::compute_scalar_energies(BSSNSlice* slice_ptr)
             const double rho_psi = rsf_model.rho(rsf, bssn, d_z_rsf, d_zz_rsf);
             e_psi += quad_weights[j] * sphere_area * rho_psi * std::pow(z, D - 2.) * std::pow(chi, 0.5 * (1.0 - D));
         }
+
+        double f_phi, f_psi;
+        ms_split_integrand(slice_ptr, j, f_phi, f_psi);
+        m_phi += quad_weights[j] * f_phi;
+        m_psi += quad_weights[j] * f_psi;
     }
 
     E_phi = bss_mpi::sum(e_phi);
     E_psi = add_real_field ? bss_mpi::sum(e_psi) : 0.0;
+    M_ms_phi = bss_mpi::sum(m_phi);
+    M_ms_psi = add_real_field ? bss_mpi::sum(m_psi) : 0.0;
 }
 
 //compute the 4D Ricci scalar at a grid point on the current slice
@@ -2375,9 +2423,10 @@ void Spacetime:: write_diagnostics(std::string file_name)
 
     const double dr_local = R / ((double)length - 1.0);
 
-    // 8 doubles per row (skip the `r` column — reconstructed from j on rank 0):
-    //   Ham, Mom_Z, det_h, aux_test, A, ricci_4_val, r4m, MS mass (last column written only if output_ms_profile)
-    constexpr int NCOL = 8;
+    // 10 doubles per row (skip the `r` column — reconstructed from j on rank 0):
+    //   Ham, Mom_Z, det_h, aux_test, A, ricci_4_val, r4m, MS mass, dM_phi/dz, dM_psi/dz
+    //   (the last three only if output_ms_profile; the field parts are integrated cumulatively on rank 0)
+    constexpr int NCOL = 10;
     std::vector<double> local(local_N * NCOL, 0.0);
     double local_r4max = 0.0;
 
@@ -2402,6 +2451,8 @@ void Spacetime:: write_diagnostics(std::string file_name)
         p[5] = ricci_4_val(j);
         p[6] = r4m;
         p[7] = output_ms_profile ? ms_mass_at_point(current_slice_ptr, j) : 0.;
+        if (output_ms_profile)
+            ms_split_integrand(current_slice_ptr, j, p[8], p[9]);
     }
     ricci_4_grid_max = bss_mpi::max(local_r4max);
 
@@ -2417,15 +2468,28 @@ void Spacetime:: write_diagnostics(std::string file_name)
         bss_mpi::abort_all(1);
     }
 
+    data_file << "#z   Ham   Mom_z   det_h   rho   |phi|   ricci_4   ricci_4_matter";
+    if (output_ms_profile) data_file << "   MS_mass   MS_mass_complex_field   MS_mass_real_field";
+    data_file << endl;
+
+    // cumulative (trapezoidal) integrals of the MS mass split from the centre, over active points
+    double z_prev = 0., f_phi_prev = 0., f_psi_prev = 0., M_phi_cum = 0., M_psi_cum = 0.;
     for (int j = 0; j < length - 2; ++j)
     {
         if (!active_points[j]) continue;
         const double* p = &full[j * NCOL];
-        data_file << std::setprecision(10) << (j + grid_offset) * dr_local
+        const double z = (j + grid_offset) * dr_local;
+        data_file << std::setprecision(10) << z
                   << "   " << p[0] << "    " << p[1] << "    " << p[2]
                   << "    " << p[3] << "    " << p[4] << "    " << p[5]
                   << "    " << p[6];
-        if (output_ms_profile) data_file << "    " << p[7];
+        if (output_ms_profile)
+        {
+            M_phi_cum += 0.5 * (f_phi_prev + p[8]) * (z - z_prev);
+            M_psi_cum += 0.5 * (f_psi_prev + p[9]) * (z - z_prev);
+            z_prev = z; f_phi_prev = p[8]; f_psi_prev = p[9];
+            data_file << "    " << p[7] << "    " << M_phi_cum << "    " << M_psi_cum;
+        }
         data_file << endl;
     }
 }
@@ -3502,7 +3566,7 @@ void Spacetime::evolve()
                 << "   " << "Mom_L2"<<  "   " << "chi_central" << "   "
                 << "A_central" << "   "  << "AH radius" << "   " <<  "M_ADM" << "   "  << "Noether charge"
                 << "   " << "Central dK/dt" << "   " << "freq_central" << "   " << "lapse_central" <<
-                "   " << "complex field energy" << "   " << "real field energy" << "   " << "central 4D ricci scalar" << "   " << "phi_re_central" << "   " << "AH mass" << "   " << "MS mass" << endl;
+                "   " << "complex field energy" << "   " << "real field energy" << "   " << "central 4D ricci scalar" << "   " << "phi_re_central" << "   " << "AH mass" << "   " << "MS mass" << "   " << "MS mass complex field" << "   " << "MS mass real field" << endl;
     }
 
     // A0 is the initial central field amplitude, used later for migration
@@ -3596,7 +3660,7 @@ void Spacetime::evolve()
                 << "   " << Mom_L2 <<  "   " << chi_central << "   "
                 << A_ctr << "   "  << ah_radius << "   " <<  M << "   "  << charge_now
                 << "   " << dtK_L2 << "   " << omega_approx << "   " << alpha_central <<
-                "   " << E_phi << "   " << E_psi << "   " << ricci_4 << "   " << phi_re_ctr << "   " << ah_mass_now << "   " << ms_mass_now << endl;
+                "   " << E_phi << "   " << E_psi << "   " << ricci_4 << "   " << phi_re_ctr << "   " << ah_mass_now << "   " << ms_mass_now << "   " << M_ms_phi << "   " << M_ms_psi << endl;
             }
         }
 

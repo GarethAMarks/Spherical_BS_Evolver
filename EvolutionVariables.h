@@ -146,7 +146,8 @@ class Spacetime
         double slice_ms_mass(BSSNSlice* slice_ptr, double r_frac);
         double ms_radius_frac = 0.25;   // extraction radius of the reported MS mass (constraint_norms.dat, supercritical.dat)
         double ms_bc_radius_frac = 0.8; // extraction radius of the MS mass M_bc used in the Sommerfeld asymptotics
-        bool output_ms_profile = 0;     // if true, write the MS mass profile as an extra (last) column of Diagnostics.dat
+        bool output_ms_profile = 0;     // if true, write the MS mass profile and its complex/real-field parts (cumulative from the
+                                        // centre) as the last three columns of Diagnostics.dat
         bool gamma_constraint_BC = 1;   // if true, outer BC on Gamma^z preserves G^z = Gamma^z - Gamma^z(h) instead of Sommerfeld
         int KO_outer_cutoff = 10;           // no KO dissipation at the outermost KO_outer_cutoff points (in units of the local
                                             // resolution); 3 reproduces the old behaviour, which destabilises CCZ4 (slow global Theta/K mode)
@@ -191,6 +192,9 @@ class Spacetime
 
         double E_phi; // complex scalar field energy
         double E_psi; // real scalar field energy
+        double M_ms_phi; // complex-field part of the Misner-Sharp mass, Omega_n int R^n (rho R' - j_z R K^theta_theta) dz
+        double M_ms_psi; // real-field part of the Misner-Sharp mass (same integral with the real field's rho, j_z)
+        void ms_split_integrand(BSSNSlice* slice_ptr, int j, double& f_phi, double& f_psi); // integrands of the two parts at j
         
         void compute_scalar_energies(BSSNSlice* slice_ptr); // Compute scalar-field energies on a given slice and store in E_phi/E_psi
 
