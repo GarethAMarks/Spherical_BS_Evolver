@@ -67,7 +67,18 @@ FiniteTempEoS::Thermo FiniteTempEoS::thermal(double T, double mu, double sigma_s
     if (c2 < 1e-12) { c2 = 1e-12; dc2_dXi = 0.; dc2_ds2 = 0.; }
     const double c = std::sqrt(c2);
 
-    double B = 1. + (1. - c2) * mu * mu / Xs;
+    const double B0 = 1. + (1. - c2) * mu * mu / Xs;
+    const double B_mu = 2. * (1. - c2) * mu / Xs, B_c2 = -mu * mu / Xs, B_Xs = -(1. - c2) * mu * mu / (Xs * Xs);
+    // optional convex floor on B (B_floor = beta > 0): B_eff = B for B >= B1 = beta c^2, B_eff = B1^2/(2 B1 - B) below.
+    // Equilibrium has B = c^2, so the background is untouched for beta < 1; the floor removes the pole of P_ph at B = 0
+    // (and the non-convex B < 0 branch). B_eff is C^1, monotone and keeps P_ph convex in mu.
+    double B = B0, Be_B = 1., Be_c2 = 0.;
+    const double B1 = B_floor * c2;
+    if (B_floor > 0. && B0 < B1)
+    {
+        const double d = 2. * B1 - B0; // > B1 > 0
+        B = B1 * B1 / d; Be_B = B * B / (B1 * B1); Be_c2 = B_floor * 2. * B1 * (B1 - B0) / (d * d);
+    }
     if (std::abs(B) < 1e-12) B = (B >= 0.) ? 1e-12 : -1e-12;
 
     const double kph = M_PI * M_PI / 90.;
@@ -75,9 +86,9 @@ FiniteTempEoS::Thermo FiniteTempEoS::thermal(double T, double mu, double sigma_s
     const double Pph = kph * c * T4 / (B * B);
     // partial derivatives of P_ph
     const double Pph_T = 4. * Pph / T;
-    const double Pph_mu = -2. * Pph / B * (2. * (1. - c2) * mu / Xs);
-    const double Pph_c2 = Pph * (0.5 / c2 + 2. * mu * mu / (B * Xs));
-    const double Pph_Xi = 2. * Pph * (1. - c2) * mu * mu / (B * Xs * Xs) + Pph_c2 * dc2_dXi;
+    const double Pph_mu = -2. * Pph / B * Be_B * B_mu;
+    const double Pph_c2 = Pph * (0.5 / c2 - 2. / B * (Be_B * B_c2 + Be_c2));
+    const double Pph_Xi = -2. * Pph / B * Be_B * B_Xs + Pph_c2 * dc2_dXi;
     const double Pph_s2 = Pph_c2 * dc2_ds2;
 
     // free Boltzmann gas
@@ -297,7 +308,7 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
     const int N = (int)slice->states2.size();
     pts.resize(N);
     f_sigma.resize(N); f_T.resize(N); f_mu.resize(N);
-    coef_S.resize(N); flux_S.resize(N); atm.assign(N, 0); flux_N.resize(N); flux_Sig.resize(N); flux_P.resize(N);
+    coef_S.resize(N); flux_S.resize(N); atm.assign(N, 0); bath.assign(N, 0); flux_N.resize(N); flux_Sig.resize(N); flux_P.resize(N);
     if ((int)guess.size() != N) guess.assign(N, Point{});
 
     for (int j = 0; j < N; j++)
@@ -307,10 +318,12 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
     }
 
     c2p_failures = 0;
+    theta_capped = 0;
     max_c2p_res = 0.;
     fluid_atm.assign(N, 0);
     double max_NN = 0.;
-    for (int j = 0; j < N; j++) max_NN = max(max_NN, slice->states2[j].ftm.N_N);
+    for (int j = 0; j < N; j++)
+        if (!(f_sigma[j] < fluid_sigma_min)) max_NN = max(max_NN, slice->states2[j].ftm.N_N); // evolved fluid only
     const double floor = max(n_floor, fluid_atm_frac * max_NN);
     for (int j = 0; j < N; j++)
     {
@@ -354,9 +367,33 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
 
         Point p = guess[j];
         double res = 0.;
-        fluid_atm[j] = !(s.ftm.N_N > floor) || !(s.ftm.Sigma > floor);
+        bath[j] = (sig < fluid_sigma_min) && j < (int)T_alpha0.size() && T_alpha0[j] > 0.;
+        fluid_atm[j] = !(s.ftm.N_N > floor) || !(s.ftm.Sigma > floor) || bath[j];
         if (fluid_atm[j]) s.ftm.P_z = 0.;
-        if (!recover(s.ftm, floor, b, sig, dz_sigma, dz_psi, s.ftm.K_sigma, p, res))
+        if (bath[j])
+        {
+            // 1D Newton for Pi at T = T_bath, mu = mu_bath, v = 0: -Upsilon(T, mu, Xi(Pi)) Pi = N_S
+            const double Tb = T_alpha0[j] / b.alpha, mub = mu_alpha0[j] / b.alpha;
+            const double gp2 = g_ZZ * dz_psi * dz_psi;
+            auto fres = [&](double Pi) { return -(s2 + eos.thermal(Tb, mub, s2, -Pi * Pi + gp2).dUps) * Pi - s.ftm.N_S; };
+            double Pi = (p.Pi < 0.) ? p.Pi : ((s2 > 1e-300) ? -s.ftm.N_S / s2 : -1.);
+            bool ok = false;
+            for (int it = 0; it < 40; it++)
+            {
+                const double f0 = fres(Pi);
+                if (std::abs(f0) <= 1e-13 * max(1e-300, std::abs(s.ftm.N_S))) { ok = true; break; }
+                const double h = 1e-7 * max(1., std::abs(Pi));
+                const double df = (fres(Pi + h) - fres(Pi - h)) / (2. * h);
+                if (!(std::abs(df) > 0.)) break;
+                double step = -f0 / df;
+                if (std::abs(step) > 0.2 * std::abs(Pi)) step = std::copysign(0.2 * std::abs(Pi), step);
+                Pi += step;
+            }
+            if (!ok) c2p_failures++;
+            p.T = Tb; p.mu = mub; p.Pi = Pi; p.v = 0.;
+            res = 0.;
+        }
+        else if (!recover(s.ftm, floor, b, sig, dz_sigma, dz_psi, s.ftm.K_sigma, p, res))
             c2p_failures++;
         if (std::isfinite(res)) max_c2p_res = max(max_c2p_res, res);
         guess[j] = p;
@@ -369,6 +406,17 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
         p.P_th = th.P_th; p.s = th.s; p.n = th.n; p.dF = th.dF; p.dUps = th.dUps;
         p.w = p.T * p.s + p.mu * p.n;
         p.Ups = s2 + th.dUps;
+        if (bath[j]) { s.ftm.N_N = p.n; s.ftm.Sigma = p.s; }
+        if (theta1 > 0. && !fluid_atm[j] && p.T > 0.)
+        {
+            p.J = p.W * (p.Pi + p.v * dz_psi) + p.mu;
+            const double hmu = 1e-6 * max(1e-3, std::abs(p.mu));
+            const double n_mu = (eos.thermal(p.T, p.mu + hmu, s2, p.Xi).n - eos.thermal(p.T, p.mu - hmu, s2, p.Xi).n) / (2. * hmu);
+            const double rate = b.alpha * (1. / max(1e-300, p.W * n_mu) + 1. / max(1e-300, p.Ups));
+            p.theta = theta1;
+            if (dt > 0. && theta1 * rate * dt > theta_cfl) { p.theta = theta_cfl / (rate * dt); theta_capped++; }
+            if (!(n_mu > 0.) || !(p.Ups > 0.)) p.theta = 0.;
+        }
         pts[j] = p;
 
         // derived SBSE momenta: K_phi = (phi / sigma) K_sigma - (i / 2) phi Pi_psi
@@ -377,8 +425,9 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
         s.csf.K_phi_im = s.csf.phi_im * ks - 0.5 * s.csf.phi_re * p.Pi;
 
         const double ar = (j > 0) ? slice->states2[j - 1].bssn.alpha / alpha : 1.;
-        f_T[j] = (fluid_atm[j] && j > 0) ? f_T[j - 1] * ar : p.T;
-        f_mu[j] = (fluid_atm[j] && j > 0) ? f_mu[j - 1] * ar : p.mu;
+        const bool cont = fluid_atm[j] && !bath[j] && j > 0 && !(p.T > 0.);
+        f_T[j] = cont ? f_T[j - 1] * ar : p.T;
+        f_mu[j] = cont ? f_mu[j - 1] * ar : p.mu;
         // alpha Upsilon gamma^zz d_z psi, with Upsilon d_z psi = (Upsilon / sigma^2) (sigma^2 d_z psi)
         coef_S[j] = (s2 > 1e-300) ? alpha * g_ZZ * (p.Ups / s2) : alpha * g_ZZ;
         flux_S[j] = coef_S[j] * cross;
@@ -392,6 +441,8 @@ void FiniteTempMatter::initialize_static(BSSNSlice& slice, const std::vector<Fin
 {
     const int N = (int)slice.states2.size();
     guess.assign(N, Point{});
+    T_alpha0.assign(N, 0.);
+    mu_alpha0.assign(N, 0.);
     for (int j = 0; j < N; j++)
     {
         State& s = slice.states2[j];
@@ -405,6 +456,8 @@ void FiniteTempMatter::initialize_static(BSSNSlice& slice, const std::vector<Fin
         s.ftm.Sigma = th.s;
         s.ftm.P_z = 0.;
         guess[j].T = T; guess[j].mu = mu; guess[j].v = 0.; guess[j].Pi = -mu;
+        T_alpha0[j] = T * s.bssn.alpha;
+        mu_alpha0[j] = mu * s.bssn.alpha;
     }
 }
 
@@ -472,6 +525,15 @@ FTM FiniteTempMatter::rhs(BSSNSlice* slice, int j, double z, double d_z_alpha, d
     const double wW2 = p.w * p.W * p.W;
     r.P_z = beta * slice->d_z(v_P_z, j, 1) + alpha * K * s.ftm.P_z - div_even(flux_P) + s.ftm.P_z * d_z_beta
             + 0.5 * alpha * wW2 * p.v * p.v * dz_gzz - wW2 * d_z_alpha - alpha * (p.s * Tz + p.n * muz);
+    if (p.theta > 0.)
+    {
+        // conversion (draft theta_1 terms); N_S + N_N is conserved, entropy is produced
+        const double c = alpha * p.theta * p.J;
+        r.N_S += c;
+        r.N_N -= c;
+        r.Sigma += c * p.J / p.T;
+        r.P_z -= c * p.dz_psi;
+    }
     if (fluid_atm[j]) { r.N_N = 0.; r.Sigma = 0.; r.P_z = 0.; }
     return r;
 }

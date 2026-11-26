@@ -46,6 +46,7 @@ struct FiniteTempEoS
     bool solitonic = false;
     double sigma_scale = 1.;
     double cph_epsilon = 1e-8;
+    double B_floor = 0.;   // >0: convex floor on the phonon B factor at B_floor*c^2 (evolution only)
     double q = 1.;          // pressure_interp_power
     int crossover_mode = 0; // 0: q-norm (draft eq. 31); 1: convex sigma blend (see FiniteTempRelaxer.h)
     double sigma_phonon = 0.023, sigma_gas = 0.017, crossover_exponent = 20.;
@@ -76,7 +77,21 @@ public:
     FiniteTempEoS eos;
     double n_floor = 1e-40;   // below this N_N (and Sigma) the normal component is treated as absent (T = 0, v = 0)
     double fluid_atm_frac = 1e-6; // fluid atmosphere: N_N < fluid_atm_frac * max N_N -> normal fluid frozen, v = 0
+    // heat bath: where sigma < fluid_sigma_min (outer gas region of the convex crossover) the normal component is not evolved;
+    // it is held at the Tolman/Klein values T = (T alpha)_initial / alpha, mu = (mu alpha)_initial / alpha, v = 0, and
+    // N_N, Sigma are slaved to it
+    double fluid_sigma_min = 0.;
+    std::vector<double> T_alpha0, mu_alpha0;
+    std::vector<char> bath;
     std::vector<char> fluid_atm;
+    // conversion between superfluid and normal charge (draft theta_1 term; theta_2 = 0): sources
+    // +-alpha theta_1 J in N_S / N_N, alpha theta_1 J^2 / T in Sigma, -alpha theta_1 J d_z psi in P_z, J = W (Pi + v d_z psi) + mu.
+    // The relaxation rate of J is ~ alpha theta_1 (1 / (W dn/dmu) + 1 / Upsilon); theta_1 is capped locally at
+    // theta_cfl / (dt * rate) so that the explicit RK4 step stays stable (dt = time step of the evolution).
+    double theta1 = 0.;
+    double theta_cfl = 0.5;
+    double dt = 0.;
+    int theta_capped = 0;     // points where theta_1 was capped in the last prepare()
     // atmosphere: where sigma < sigma_atm the polar split phi = sigma e^{i psi} is ill-conditioned (Pi = -N_S / sigma^2), so
     // there the CSF evolves (phi, K_phi) itself, K_sigma and N_S are slaved to it, and the normal fluid is frozen and ignored
     double sigma_atm = 1e-5;
@@ -91,7 +106,8 @@ public:
         double sigma = 0., dz_sigma = 0., dz_psi = 0.;
         double W = 1., w = 0., P_th = 0., s = 0., n = 0., dF = 0., dUps = 0., Ups = 0.;
         double Xi = 0.;
-        double cross = 0.;   // sigma^2 d_z psi = phi_re d_z phi_im - phi_im d_z phi_re
+        double cross = 0.;
+        double J = 0., theta = 0.; // deviation from Josephson and the (capped) theta_1 used here   // sigma^2 d_z psi = phi_re d_z phi_im - phi_im d_z phi_re
     };
     std::vector<Point> pts;
     std::vector<double> f_sigma, f_T, f_mu, coef_S, flux_S, flux_N, flux_Sig, flux_P; // arrays that get differentiated

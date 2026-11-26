@@ -3573,6 +3573,7 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
         ft_model.eos.solitonic = solitonic;
         ft_model.eos.sigma_scale = sigma;
         ft_model.eos.cph_epsilon = boson_star.ft_cph_epsilon;
+        ft_model.eos.B_floor = boson_star.ft_B_floor;
         ft_model.eos.q = boson_star.ft_q;
         ft_model.eos.crossover_mode = boson_star.ft_crossover_mode;
         ft_model.eos.sigma_phonon = boson_star.ft_sigma_phonon;
@@ -3581,6 +3582,10 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
         ft_evolve = boson_star.ft_evolve;
         ft_model.sigma_atm = boson_star.ft_sigma_atm;
         ft_model.fluid_atm_frac = boson_star.ft_fluid_atm_frac;
+        ft_model.theta1 = boson_star.ft_theta1;
+        ft_model.fluid_sigma_min = boson_star.ft_fluid_sigma_min;
+        ft_model.theta_cfl = boson_star.ft_theta_cfl;
+        ft_model.dt = courant_factor * dr; // finest-level step (no subcycling for FT runs)
         if (start_time == 0)
             ft_model.initialize_static(slices[0], ft_background);
         else if (mpi_rank == 0)
@@ -4237,7 +4242,7 @@ void Spacetime::write_ft_diagnostics(BSSNSlice* slice_ptr, double t, bool first)
     ft_model.prepare(slice_ptr);
     deriv_cache_slice = nullptr;
     const double n = D - 2.;
-    double N_S_tot = 0., N_N_tot = 0., S_tot = 0., vmax = 0., Tmax = 0.;
+    double N_S_tot = 0., N_N_tot = 0., S_tot = 0., vmax = 0., Tmax = 0., Jmax = 0.;
     const int j_hi = std::min(n_gridpoints, (int)(0.95 * n_gridpoints) - 1);
     const double area = 2. * pow(M_PI, 0.5 * (D - 1.)) / tgamma(0.5 * (D - 1.));
     for (int j = 0; j < j_hi; j++)
@@ -4253,14 +4258,16 @@ void Spacetime::write_ft_diagnostics(BSSNSlice* slice_ptr, double t, bool first)
         const double u = fabs(ft_model.pts[j].v) * sqrt(st.bssn.h_zz / chi);
         if (u > vmax) vmax = u;
         if (ft_model.pts[j].T > Tmax) Tmax = ft_model.pts[j].T;
+        if (fabs(ft_model.pts[j].J) > Jmax) Jmax = fabs(ft_model.pts[j].J);
     }
     const FiniteTempMatter::Point& c = ft_model.pts[0];
     std::ofstream out("ft_diagnostics.dat", first ? std::ios::trunc : std::ios::app);
     if (first)
-        out << "#time  sigma_c  T_c  mu_c  Pi_psi_c  N_S  N_N  N_total  S_total  max|v|  T_max  K_sigma_c  c2p_failures  max_c2p_residual" << endl;
+        out << "#time  sigma_c  T_c  mu_c  Pi_psi_c  N_S  N_N  N_total  S_total  max|v|  T_max  K_sigma_c  c2p_failures  max_c2p_residual  max|J|  theta_capped  alpha_c" << endl;
     out << std::setprecision(12) << t << "   " << c.sigma << "   " << c.T << "   " << c.mu << "   " << c.Pi << "   "
         << N_S_tot << "   " << N_N_tot << "   " << N_S_tot + N_N_tot << "   " << S_tot << "   " << vmax << "   " << Tmax << "   "
-        << slice_ptr->states2[0].ftm.K_sigma << "   " << ft_model.c2p_failures << "   " << ft_model.max_c2p_res << endl;
+        << slice_ptr->states2[0].ftm.K_sigma << "   " << ft_model.c2p_failures << "   " << ft_model.max_c2p_res << "   " << Jmax << "   " << ft_model.theta_capped << "   "
+        << slice_ptr->states2[0].bssn.alpha << endl;
 }
 
 //radial profiles of the finite-T variables and primitives

@@ -125,6 +125,10 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "ft_evolve = ", ft_evolve, quiet);
         fill_parameter(current_line, "ft_sigma_atm = ", ft_sigma_atm, quiet);
         fill_parameter(current_line, "ft_fluid_atm_frac = ", ft_fluid_atm_frac, quiet);
+        fill_parameter(current_line, "ft_theta1 = ", ft_theta1, quiet);
+        fill_parameter(current_line, "ft_fluid_sigma_min = ", ft_fluid_sigma_min, quiet);
+        fill_parameter(current_line, "ft_theta_cfl = ", ft_theta_cfl, quiet);
+        fill_parameter(current_line, "ft_B_floor = ", ft_B_floor, quiet);
         fill_parameter(current_line, "ft_max_residual = ", ft_max_residual, quiet);
     }
 }

@@ -133,9 +133,13 @@ class BosonStar
         double ft_max_residual = 1e-6; //ft_relax = 1: abort if the relaxed model's residual (inf-norm) exceeds this
         bool ft_evolve = 1;              // evolve the finite-T matter; 0: evolve the condensate as SBSE's plain complex field
         double ft_sigma_atm = 1e-5;      // below this condensate amplitude the CSF evolves the field itself (FTM slaved, no normal fluid)
-        double ft_fluid_atm_frac = 1e-6; // normal fluid frozen where N_N < this * max N_N
+        double ft_theta1 = 0.;           // conversion coefficient theta_1 (capped locally for explicit stability)
+        double ft_theta_cfl = 0.5;
+        double ft_fluid_atm_frac = 1e-6;
+        double ft_fluid_sigma_min = 0.;   // freeze the normal fluid where sigma < this // normal fluid frozen where N_N < this * max N_N
         bool ft_draft_phase = 1;         // phi ~ e^{-i omega t} (draft sign, matches ft_state); 0: SBSE's e^{+i omega t}
         double T_inf = 0.;               // global temperature; local T = T_inf / alpha
+        double ft_B_floor = 0.;         // convex floor on phonon B factor (evolution only)
         double ft_cph_epsilon = 1e-8;    // relaxer EoS parameters, needed to evolve the same EoS
         double ft_q = 1.;                // pressure_interp_power
         int ft_crossover_mode = 0;       // relaxer crossover_mode and its parameters
