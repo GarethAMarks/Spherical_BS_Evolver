@@ -3586,6 +3586,7 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
         ft_model.fluid_sigma_min = boson_star.ft_fluid_sigma_min;
         ft_model.theta_cfl = boson_star.ft_theta_cfl;
         ft_model.theta_implicit = (boson_star.ft_theta_implicit != 0);
+        ft_model.fluid_atm_taper = boson_star.ft_fluid_atm_taper;
         ft_model.dt = courant_factor * dr; // finest-level step (no subcycling for FT runs)
         if (start_time == 0)
             ft_model.initialize_static(slices[0], ft_background);

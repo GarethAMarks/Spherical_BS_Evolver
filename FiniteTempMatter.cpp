@@ -308,7 +308,7 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
     const int N = (int)slice->states2.size();
     pts.resize(N);
     f_sigma.resize(N); f_T.resize(N); f_mu.resize(N);
-    coef_S.resize(N); flux_S.resize(N); atm.assign(N, 0); bath.assign(N, 0); flux_N.resize(N); flux_Sig.resize(N); flux_P.resize(N);
+    coef_S.resize(N); flux_S.resize(N); atm.assign(N, 0); bath.assign(N, 0); atm_w.assign(N, 0.); flux_N.resize(N); flux_Sig.resize(N); flux_P.resize(N);
     if ((int)guess.size() != N) guess.assign(N, Point{});
 
     for (int j = 0; j < N; j++)
@@ -369,6 +369,14 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
         double res = 0.;
         bath[j] = (sig < fluid_sigma_min) && j < (int)T_alpha0.size() && T_alpha0[j] > 0.;
         fluid_atm[j] = !(s.ftm.N_N > floor) || !(s.ftm.Sigma > floor) || bath[j];
+        // smooth taper of the normal-fluid evolution between floor and fluid_atm_taper * floor (1 = hard switch)
+        if (fluid_atm[j]) atm_w[j] = 0.;
+        else if (fluid_atm_taper > 1.)
+        {
+            const double x = min(1., max(0., (s.ftm.N_N / floor - 1.) / (fluid_atm_taper - 1.)));
+            atm_w[j] = x * x * (3. - 2. * x);
+        }
+        else atm_w[j] = 1.;
         if (fluid_atm[j]) s.ftm.P_z = 0.;
         if (bath[j])
         {
@@ -535,6 +543,7 @@ FTM FiniteTempMatter::rhs(BSSNSlice* slice, int j, double z, double d_z_alpha, d
         r.P_z -= c * p.dz_psi;
     }
     if (fluid_atm[j]) { r.N_N = 0.; r.Sigma = 0.; r.P_z = 0.; }
+    else if (atm_w[j] < 1.) { r.N_N *= atm_w[j]; r.Sigma *= atm_w[j]; r.P_z *= atm_w[j]; }
     return r;
 }
 
