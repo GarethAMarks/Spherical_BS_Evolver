@@ -3585,6 +3585,7 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
         ft_model.theta1 = boson_star.ft_theta1;
         ft_model.fluid_sigma_min = boson_star.ft_fluid_sigma_min;
         ft_model.theta_cfl = boson_star.ft_theta_cfl;
+        ft_model.theta_implicit = (boson_star.ft_theta_implicit != 0);
         ft_model.dt = courant_factor * dr; // finest-level step (no subcycling for FT runs)
         if (start_time == 0)
             ft_model.initialize_static(slices[0], ft_background);
@@ -3857,6 +3858,7 @@ void Spacetime::evolve()
         //enforce that A is traceless
         current_slice_ptr = &slices[n + 1];
         make_A_traceless(current_slice_ptr);
+        if (ft_evolve && ft_model.theta_implicit) ft_model.relax_conversion(current_slice_ptr, dt);
 
         //enforce minimum chi on owned points (ghosts get refreshed by exchange_ghosts below)
         for (int j = owned_begin(); j < owned_end(); j++)

@@ -413,8 +413,8 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
             const double hmu = 1e-6 * max(1e-3, std::abs(p.mu));
             const double n_mu = (eos.thermal(p.T, p.mu + hmu, s2, p.Xi).n - eos.thermal(p.T, p.mu - hmu, s2, p.Xi).n) / (2. * hmu);
             const double rate = b.alpha * (1. / max(1e-300, p.W * n_mu) + 1. / max(1e-300, p.Ups));
-            p.theta = theta1;
-            if (dt > 0. && theta1 * rate * dt > theta_cfl) { p.theta = theta_cfl / (rate * dt); theta_capped++; }
+            p.theta = theta_implicit ? 0. : theta1; // implicit: applied by relax_conversion after each step instead
+            if (!theta_implicit && dt > 0. && theta1 * rate * dt > theta_cfl) { p.theta = theta_cfl / (rate * dt); theta_capped++; }
             if (!(n_mu > 0.) || !(p.Ups > 0.)) p.theta = 0.;
         }
         pts[j] = p;
@@ -566,4 +566,78 @@ FTM FiniteTempMatter::atmosphere_rhs(const State& s, const State& r) const
                       - Ks * sg_dot / sg;
     }
     return out;
+}
+
+// Implicit (backward-Euler) theta_1 conversion, applied by operator splitting after each full RK4 step:
+// at every evolved-fluid point find the converted charge d with d = alpha theta_1 h J(U0 + d e), where
+// e = (dN_S, dN_N, dSigma, dP_z) = (1, -1, J/T, -d_z psi). Unconditionally stable for any theta_1 h; for
+// theta_1 h -> infinity it projects onto chemical equilibrium J = 0.
+void FiniteTempMatter::relax_conversion(BSSNSlice* slice, double h)
+{
+    if (!(theta1 > 0.) || !(h > 0.)) return;
+    prepare(slice);
+    const int N = (int)slice->states2.size();
+    double max_NN = 0.;
+    for (int j = 0; j < N; j++)
+        if (!(f_sigma[j] < fluid_sigma_min)) max_NN = max(max_NN, slice->states2[j].ftm.N_N);
+    const double floor = max(n_floor, fluid_atm_frac * max_NN);
+    for (int j = 0; j < N; j++)
+    {
+        if (atm[j] || fluid_atm[j]) continue;
+        const Point p0 = pts[j];
+        if (!(p0.T > 0.)) continue;
+        State& st_j = slice->states2[j];
+        const BSSNState& b = st_j.bssn;
+        const FTM U0 = st_j.ftm;
+        const double g_zz = b.h_zz / max(st->min_chi, b.chi);
+        const double s2 = p0.sigma * p0.sigma;
+        const double k = b.alpha * theta1 * h;
+        const double J0 = p0.W * (p0.Pi + p0.v * p0.dz_psi) + p0.mu;
+        const double JT0 = J0 / p0.T;
+        FTM Ubest = U0;
+        // evaluate g(d) = d - k J(U(d)); jt is the entropy factor J/T used for Sigma (trapezoidal in d)
+        auto eval = [&](double d, double& g, double& jt, FTM& U) -> bool
+        {
+            double JT1 = JT0;
+            Point q = p0;
+            for (int pass = 0; pass < 2; pass++)
+            {
+                U = U0;
+                U.N_S += d; U.N_N -= d; U.Sigma += d * 0.5 * (JT0 + JT1); U.P_z -= d * p0.dz_psi;
+                if (!(U.N_N > floor) || !(U.Sigma > floor)) return false;
+                double res = 0.;
+                q = p0;
+                if (!recover(U, floor, b, p0.sigma, p0.dz_sigma, p0.dz_psi, U0.K_sigma, q, res)) return false;
+                if (!(q.T > 0.)) return false;
+                const double W = 1. / std::sqrt(1. - min(1. - 1e-15, g_zz * q.v * q.v));
+                const double J = W * (q.Pi + q.v * p0.dz_psi) + q.mu;
+                JT1 = J / q.T;
+                g = d - k * J;
+            }
+            jt = JT1;
+            return true;
+        };
+        // linearised first guess: dJ/dd ~ -(1/(W n_mu) + 1/Upsilon)
+        const double hmu = 1e-6 * max(1e-3, std::abs(p0.mu));
+        const double n_mu = (eos.thermal(p0.T, p0.mu + hmu, s2, p0.Xi).n - eos.thermal(p0.T, p0.mu - hmu, s2, p0.Xi).n) / (2. * hmu);
+        const double rate = 1. / max(1e-300, p0.W * n_mu) + 1. / max(1e-300, p0.Ups);
+        if (!(n_mu > 0.) || !(p0.Ups > 0.)) continue;
+        double da = 0., ga = 0. - k * J0;
+        double db = k * J0 / (1. + k * rate), gb, jt;
+        FTM U;
+        bool ok = false;
+        for (int it = 0; it < 30; it++)
+        {
+            int shrink = 0;
+            while (!eval(db, gb, jt, U) && shrink < 20) { db = 0.5 * (da + db); shrink++; }
+            if (shrink == 20) break;
+            Ubest = U;
+            if (std::abs(gb) <= 1e-12 * max(1e-12, std::abs(db)) + 1e-16) { ok = true; break; }
+            const double denom = gb - ga;
+            if (!(std::abs(denom) > 0.)) { ok = true; break; }
+            const double dn = db - gb * (db - da) / denom;
+            da = db; ga = gb; db = dn;
+        }
+        if (ok || Ubest.N_S != U0.N_S) st_j.ftm = Ubest;
+    }
 }

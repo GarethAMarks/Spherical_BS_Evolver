@@ -90,6 +90,7 @@ public:
     // theta_cfl / (dt * rate) so that the explicit RK4 step stays stable (dt = time step of the evolution).
     double theta1 = 0.;
     double theta_cfl = 0.5;
+    bool theta_implicit = false; // theta_1 by implicit operator splitting (relax_conversion) instead of RHS sources
     double dt = 0.;
     int theta_capped = 0;     // points where theta_1 was capped in the last prepare()
     // atmosphere: where sigma < sigma_atm the polar split phi = sigma e^{i psi} is ill-conditioned (Pi = -N_S / sigma^2), so
@@ -116,6 +117,8 @@ public:
 
     // Primitive recovery on every point of the slice, reconstruction of csf.K_phi_re/K_phi_im, and the flux arrays.
     void prepare(BSSNSlice* slice);
+    // implicit theta_1 conversion over a step h (operator split, after each full RK4 step)
+    void relax_conversion(BSSNSlice* slice, double h);
 
     // Initial FTM values for a static background (K_sigma = 0, v = 0, Pi_psi = -mu, Xi = -mu^2 at t = 0).
     void initialize_static(BSSNSlice& slice, const std::vector<FiniteTempPoint>& bg);

@@ -139,6 +139,7 @@ class BosonStar
         double ft_fluid_sigma_min = 0.;   // freeze the normal fluid where sigma < this // normal fluid frozen where N_N < this * max N_N
         bool ft_draft_phase = 1;         // phi ~ e^{-i omega t} (draft sign, matches ft_state); 0: SBSE's e^{+i omega t}
         double T_inf = 0.;               // global temperature; local T = T_inf / alpha
+        int ft_theta_implicit = 0;      // 1: theta_1 conversion applied implicitly (operator split) after each step
         double ft_B_floor = 0.;         // convex floor on phonon B factor (evolution only)
         double ft_cph_epsilon = 1e-8;    // relaxer EoS parameters, needed to evolve the same EoS
         double ft_q = 1.;                // pressure_interp_power
