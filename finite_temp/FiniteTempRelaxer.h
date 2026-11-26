@@ -40,6 +40,15 @@ struct RelaxerParams
     int decay_exponent = 10;
     double cph_epsilon = 1e-8;
     double pressure_interp_power = 1.0;
+    // crossover_mode 0: P_th = (P_ph^-q + P_gas^-q)^(-1/q) (draft eq. 31).
+    // crossover_mode 1: convex blend P_th = w(sigma^2) P_ph + g(sigma^2) P_gas with
+    //   w = 1 - exp(-(sigma / sigma_phonon)^k), g = exp(-(sigma / sigma_gas)^k), k = crossover_exponent.
+    //   The weights depend on sigma only, so P stays convex in (T, mu, Pi) and Upsilon > 0 for suitable sigma_phonon,
+    //   which the finite-T evolution needs (mode 0 is not hyperbolic in the crossover shell).
+    int crossover_mode = 0;
+    double sigma_phonon = 0.023;
+    double sigma_gas = 0.017;
+    double crossover_exponent = 20.0;
 
     double omega_target = 0.885;
     double omega_step = 0.001;

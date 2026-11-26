@@ -47,6 +47,8 @@ struct FiniteTempEoS
     double sigma_scale = 1.;
     double cph_epsilon = 1e-8;
     double q = 1.;          // pressure_interp_power
+    int crossover_mode = 0; // 0: q-norm (draft eq. 31); 1: convex sigma blend (see FiniteTempRelaxer.h)
+    double sigma_phonon = 0.023, sigma_gas = 0.017, crossover_exponent = 20.;
 
     struct Thermo
     {

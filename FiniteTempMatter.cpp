@@ -85,6 +85,32 @@ FiniteTempEoS::Thermo FiniteTempEoS::thermal(double T, double mu, double sigma_s
     const double Pg_T_over_Pg = 2.5 / T + (m - mu) / (T * T);
     const double Pg_mu_over_Pg = 1. / T;
 
+    if (crossover_mode == 1)
+    {
+        // convex blend P_th = w(s2) P_ph + g(s2) P_gas
+        const double kh = 0.5 * crossover_exponent;
+        if (!(s2 > 0.))
+        {
+            const double Pg = std::exp(lnPg);
+            th.P_th = Pg; th.s = Pg * Pg_T_over_Pg; th.n = Pg * Pg_mu_over_Pg;
+            return th;
+        }
+        const double x_ph = std::pow(s2 / (sigma_phonon * sigma_phonon), kh);
+        const double x_g = std::pow(s2 / (sigma_gas * sigma_gas), kh);
+        const double w = -std::expm1(-x_ph);
+        const double w_s2 = std::exp(-x_ph) * x_ph * kh / s2;
+        const double Pg = std::exp(lnPg - x_g);  // g P_gas
+        const double Pg_s2 = -Pg * x_g * kh / s2; // d(g P_gas)/d(s2)
+        const bool ph = (w > 0.) && std::isfinite(Pph);
+        th.P_th = (ph ? w * Pph : 0.) + Pg;
+        th.s = (ph ? w * Pph_T : 0.) + Pg * Pg_T_over_Pg;
+        th.n = (ph ? w * Pph_mu : 0.) + Pg * Pg_mu_over_Pg;
+        th.dF = 2. * ((ph ? w * Pph_s2 + w_s2 * Pph : 0.) + Pg_s2);
+        th.dUps = ph ? -2. * w * Pph_Xi : 0.;
+        if (!std::isfinite(th.s) || !std::isfinite(th.n) || !std::isfinite(th.dF) || !std::isfinite(th.dUps)) { th = Thermo{}; th.P_th = Pg; }
+        return th;
+    }
+
     // q-norm interpolation, in logs: P_th = (P_ph^-q + P_g^-q)^(-1/q)
     const double qq = max(1e-12, q);
     if (!(Pph > 0.))
@@ -315,8 +341,11 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
             pts[j] = p;
             fluid_atm[j] = 1;
             s.ftm.P_z = 0.;
-            f_T[j] = (j > 0) ? f_T[j - 1] : 0.;     // only enter s T' + n mu' next to the fluid edge; keep them smooth
-            f_mu[j] = (j > 0) ? f_mu[j - 1] : p.mu;
+            // only enter s T' + n mu' next to the fluid edge: continue them with the Tolman/Klein laws (T, mu ~ 1 / alpha)
+            // so that the edge points stay in hydrostatic balance
+            const double ar = (j > 0) ? slice->states2[j - 1].bssn.alpha / alpha : 1.;
+            f_T[j] = (j > 0) ? f_T[j - 1] * ar : 0.;
+            f_mu[j] = (j > 0) ? f_mu[j - 1] * ar : p.mu;
             coef_S[j] = alpha * g_ZZ;
             flux_S[j] = coef_S[j] * cross;
             flux_N[j] = flux_Sig[j] = flux_P[j] = 0.;
@@ -347,8 +376,9 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
         s.csf.K_phi_re = s.csf.phi_re * ks + 0.5 * s.csf.phi_im * p.Pi;
         s.csf.K_phi_im = s.csf.phi_im * ks - 0.5 * s.csf.phi_re * p.Pi;
 
-        f_T[j] = (fluid_atm[j] && j > 0) ? f_T[j - 1] : p.T;
-        f_mu[j] = (fluid_atm[j] && j > 0) ? f_mu[j - 1] : p.mu;
+        const double ar = (j > 0) ? slice->states2[j - 1].bssn.alpha / alpha : 1.;
+        f_T[j] = (fluid_atm[j] && j > 0) ? f_T[j - 1] * ar : p.T;
+        f_mu[j] = (fluid_atm[j] && j > 0) ? f_mu[j - 1] * ar : p.mu;
         // alpha Upsilon gamma^zz d_z psi, with Upsilon d_z psi = (Upsilon / sigma^2) (sigma^2 d_z psi)
         coef_S[j] = (s2 > 1e-300) ? alpha * g_ZZ * (p.Ups / s2) : alpha * g_ZZ;
         flux_S[j] = coef_S[j] * cross;

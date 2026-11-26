@@ -93,6 +93,10 @@ void FiniteTempRelaxer::read_parameters(const std::string& filename, bool quiet)
         fill_parameter(current_line, "decay_exponent = ", p_.decay_exponent, quiet);
         fill_parameter(current_line, "cph_epsilon = ", p_.cph_epsilon, quiet);
         fill_parameter(current_line, "pressure_interp_power = ", p_.pressure_interp_power, quiet);
+        fill_parameter(current_line, "crossover_mode = ", p_.crossover_mode, quiet);
+        fill_parameter(current_line, "sigma_phonon = ", p_.sigma_phonon, quiet);
+        fill_parameter(current_line, "sigma_gas = ", p_.sigma_gas, quiet);
+        fill_parameter(current_line, "crossover_exponent = ", p_.crossover_exponent, quiet);
 
         fill_parameter(current_line, "omega_target = ", p_.omega_target, quiet);
         fill_parameter(current_line, "omega_step = ", p_.omega_step, quiet);
@@ -217,6 +221,17 @@ double FiniteTempRelaxer::thermal_pressure_term(double T, double mu_chem, double
     (void)X;
     double P_phonon = (kPi * kPi / 90.0) * cph * std::pow(std::max(0.0, T), 4.0)
         * std::pow(bracket_safe, -2.0);
+
+    if (p_.crossover_mode == 1)
+    {
+        const double kh = 0.5 * p_.crossover_exponent;
+        const double x_ph = std::pow(sig2 / std::max(1e-300, p_.sigma_phonon * p_.sigma_phonon), kh);
+        const double x_g = std::pow(sig2 / std::max(1e-300, p_.sigma_gas * p_.sigma_gas), kh);
+        const double w = -std::expm1(-x_ph);
+        const double lnPg = 1.5 * std::log(p_.mu / (2. * kPi)) + 2.5 * std::log(std::max(1e-300, T))
+                            - (p_.mu - mu_chem) / std::max(1e-12, T);
+        return ((w > 0.0) ? w * P_phonon : 0.0) + std::exp(lnPg - x_g);
+    }
 
     double P_gas = pow(p_.mu / (2. * kPi), 1.5) * pow(std::max(0.0, T), 2.5) * exp(-(p_.mu - mu_chem) / std::max(1e-12, T));
     const double q = std::max(1e-12, p_.pressure_interp_power);

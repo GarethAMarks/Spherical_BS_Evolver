@@ -3574,8 +3574,13 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
         ft_model.eos.sigma_scale = sigma;
         ft_model.eos.cph_epsilon = boson_star.ft_cph_epsilon;
         ft_model.eos.q = boson_star.ft_q;
+        ft_model.eos.crossover_mode = boson_star.ft_crossover_mode;
+        ft_model.eos.sigma_phonon = boson_star.ft_sigma_phonon;
+        ft_model.eos.sigma_gas = boson_star.ft_sigma_gas;
+        ft_model.eos.crossover_exponent = boson_star.ft_crossover_k;
         ft_evolve = boson_star.ft_evolve;
         ft_model.sigma_atm = boson_star.ft_sigma_atm;
+        ft_model.fluid_atm_frac = boson_star.ft_fluid_atm_frac;
         if (start_time == 0)
             ft_model.initialize_static(slices[0], ft_background);
         else if (mpi_rank == 0)

@@ -133,10 +133,13 @@ class BosonStar
         double ft_max_residual = 1e-6; //ft_relax = 1: abort if the relaxed model's residual (inf-norm) exceeds this
         bool ft_evolve = 1;              // evolve the finite-T matter; 0: evolve the condensate as SBSE's plain complex field
         double ft_sigma_atm = 1e-5;      // below this condensate amplitude the CSF evolves the field itself (FTM slaved, no normal fluid)
+        double ft_fluid_atm_frac = 1e-6; // normal fluid frozen where N_N < this * max N_N
         bool ft_draft_phase = 1;         // phi ~ e^{-i omega t} (draft sign, matches ft_state); 0: SBSE's e^{+i omega t}
         double T_inf = 0.;               // global temperature; local T = T_inf / alpha
         double ft_cph_epsilon = 1e-8;    // relaxer EoS parameters, needed to evolve the same EoS
         double ft_q = 1.;                // pressure_interp_power
+        int ft_crossover_mode = 0;       // relaxer crossover_mode and its parameters
+        double ft_sigma_phonon = 0.023, ft_sigma_gas = 0.017, ft_crossover_k = 20.;
         bool ft_suppression = 0;         // relaxer use_suppression_factor (not a local EoS: evolutions need 0)
         std::vector<FiniteTempPoint> ft_state; // background thermodynamics on radius_array (draft sign convention)
         void read_finite_temp();         // fill state/radius_array/omega/ft_state from the relaxer; rank 0 only

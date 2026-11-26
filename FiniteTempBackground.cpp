@@ -125,6 +125,7 @@ void BosonStar::read_finite_temp()
     warn_if_differs("G", rp.G, G);
     ft_cph_epsilon = rp.cph_epsilon;
     ft_q = rp.pressure_interp_power;
+    ft_crossover_mode = rp.crossover_mode; ft_sigma_phonon = rp.sigma_phonon; ft_sigma_gas = rp.sigma_gas; ft_crossover_k = rp.crossover_exponent;
     ft_suppression = rp.use_suppression_factor;
     rp.mu = mu;
     rp.lambda = lambda;

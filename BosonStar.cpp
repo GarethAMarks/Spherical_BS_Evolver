@@ -124,6 +124,7 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "ft_draft_phase = ", ft_draft_phase, quiet);
         fill_parameter(current_line, "ft_evolve = ", ft_evolve, quiet);
         fill_parameter(current_line, "ft_sigma_atm = ", ft_sigma_atm, quiet);
+        fill_parameter(current_line, "ft_fluid_atm_frac = ", ft_fluid_atm_frac, quiet);
         fill_parameter(current_line, "ft_max_residual = ", ft_max_residual, quiet);
     }
 }
