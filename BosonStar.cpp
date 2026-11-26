@@ -132,6 +132,9 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "ft_B_floor = ", ft_B_floor, quiet);
         fill_parameter(current_line, "ft_theta_implicit = ", ft_theta_implicit, quiet);
         fill_parameter(current_line, "ft_hrsc = ", ft_hrsc, quiet);
+        fill_parameter(current_line, "ft_av_quad = ", ft_av_quad, quiet);
+        fill_parameter(current_line, "ft_av_lin = ", ft_av_lin, quiet);
+        fill_parameter(current_line, "ft_av_cs = ", ft_av_cs, quiet);
         fill_parameter(current_line, "ft_fluid_atm_fixed = ", ft_fluid_atm_fixed, quiet);
         fill_parameter(current_line, "ft_hrsc_cmax = ", ft_hrsc_cmax, quiet);
         fill_parameter(current_line, "ft_fluid_atm_taper = ", ft_fluid_atm_taper, quiet);

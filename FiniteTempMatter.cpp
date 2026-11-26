@@ -308,7 +308,7 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
     const int N = (int)slice->states2.size();
     pts.resize(N);
     f_sigma.resize(N); f_T.resize(N); f_mu.resize(N);
-    coef_S.resize(N); flux_S.resize(N); atm.assign(N, 0); bath.assign(N, 0); atm_w.assign(N, 0.); vel_V.assign(N, 0.); flux_N.resize(N); flux_Sig.resize(N); flux_P.resize(N);
+    coef_S.resize(N); flux_S.resize(N); atm.assign(N, 0); bath.assign(N, 0); atm_w.assign(N, 0.); vel_V.assign(N, 0.); av_Q.assign(N, 0.); av_theta.assign(N, 0.); flux_N.resize(N); flux_Sig.resize(N); flux_P.resize(N);
     if ((int)guess.size() != N) guess.assign(N, Point{});
 
     for (int j = 0; j < N; j++)
@@ -444,6 +444,31 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
         flux_N[j] = alpha * s.ftm.N_N * p.v;
         flux_Sig[j] = alpha * s.ftm.Sigma * p.v;
         flux_P[j] = alpha * s.ftm.P_z * p.v;
+    }
+
+    // artificial bulk viscosity on the normal fluid (von Neumann-Richtmyer + linear term), active only in compression:
+    // Q = w [c_q (dr theta)^2 + c_l c_s dr |theta|] for theta = div v < 0
+    if (av_quad > 0. || av_lin > 0.)
+    {
+        std::vector<double> fv(N);
+        for (int j = 0; j < N; j++) fv[j] = pts[j].v;
+        const double d = st->D - 2.;
+        for (int j = 0; j < N; j++)
+        {
+            av_Q[j] = 0.; av_theta[j] = 0.;
+            if (atm[j] || fluid_atm[j] || !(pts[j].T > 0.)) continue;
+            BSSNSlice::DerivStencil stn;
+            slice->build_stencil(j, stn);
+            const double z = (double)j * stn.h + st->grid_offset * stn.h; // uniform grid without refinement
+            const double vz = deriv(slice, fv, j, 1, true);
+            const double th = (z > st->min_z) ? (vz + d * fv[j] / z) : (d + 1.) * vz;
+            av_theta[j] = th;
+            if (th < 0.)
+            {
+                const double h = stn.h;
+                av_Q[j] = pts[j].w * (av_quad * h * h * th * th + av_lin * av_cs * h * (-th));
+            }
+        }
     }
 }
 
@@ -581,6 +606,12 @@ FTM FiniteTempMatter::rhs(BSSNSlice* slice, int j, double z, double d_z_alpha, d
                                   : (beta * slice->d_z(v_P_z, j, 1) - div_even(flux_P) + s.ftm.P_z * d_z_beta);
     r.P_z = transport_P + alpha * K * s.ftm.P_z
             + 0.5 * alpha * wW2 * p.v * p.v * dz_gzz - wW2 * d_z_alpha - alpha * (p.s * Tz + p.n * muz);
+    if (av_quad > 0. || av_lin > 0.)
+    {
+        // viscous pressure force and the matching entropy production Q (-theta) / T >= 0
+        r.P_z -= alpha * deriv(slice, av_Q, j, 1, false);
+        if (p.T > 0.) r.Sigma += alpha * av_Q[j] * (-av_theta[j]) / p.T;
+    }
     if (p.theta > 0.)
     {
         // conversion (draft theta_1 terms); N_S + N_N is conserved, entropy is produced

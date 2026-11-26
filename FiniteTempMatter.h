@@ -80,6 +80,8 @@ public:
     std::vector<double> atm_w;
     bool fluid_atm_fixed = false; // floor relative to the initial max N_N instead of the current one
     double max_NN0 = 0.;
+    double av_quad = 0., av_lin = 0., av_cs = 0.1; // artificial viscosity coefficients (0 = off)
+    std::vector<double> av_Q, av_theta;
     bool hrsc = false;        // finite-volume LLF + MC transport for N_N, Sigma, P_z
     double hrsc_cmax = 1.;    // LLF wave-speed bound added to |V| (times alpha)
     std::vector<double> vel_V; // alpha v - beta

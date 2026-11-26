@@ -142,6 +142,7 @@ class BosonStar
         double T_inf = 0.;               // global temperature; local T = T_inf / alpha
         double ft_fluid_atm_taper = 1.;  // >1: smooth taper of the normal-fluid RHS above the atmosphere floor
         int ft_fluid_atm_fixed = 0;      // 1: atmosphere floor from the initial max N_N
+        double ft_av_quad = 0., ft_av_lin = 0., ft_av_cs = 0.1; // artificial viscosity on the normal fluid
         int ft_hrsc = 0;                 // 1: HRSC (LLF + MC) transport for the normal fluid
         double ft_hrsc_cmax = 1.;
         int ft_theta_implicit = 0;      // 1: theta_1 conversion applied implicitly (operator split) after each step
