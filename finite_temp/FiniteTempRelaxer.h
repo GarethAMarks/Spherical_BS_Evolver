@@ -59,6 +59,7 @@ struct RelaxerParams
     double line_search_min_step = 1e-4;
 
     std::string output_profile = "profile.dat";
+    bool save_model_profiles = false; // write model_NNNN.dat for every converged family member
 };
 
 struct RelaxerState

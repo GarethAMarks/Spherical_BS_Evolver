@@ -11,7 +11,7 @@ CXXFLAGS="-Wall -fexceptions $OPTFLAGS -I."
 OBJDIR=obj/Release
 
 # finite_temp/: finite-temperature relaxation solver (ported from Finite_Temp_Relaxer), used when finite_temp = 1
-SOURCES="mathutils BosonStar LinearPerturbation EvolutionVariables main ComplexScalarField RealScalarField FiniteTempBackground finite_temp/FiniteTempRelaxer finite_temp/seed_shooter"
+SOURCES="mathutils BosonStar LinearPerturbation EvolutionVariables main ComplexScalarField RealScalarField FiniteTempBackground FiniteTempMatter finite_temp/FiniteTempRelaxer finite_temp/seed_shooter"
 
 mkdir -p "$OBJDIR/finite_temp"
 OBJECTS=""

@@ -123,6 +123,9 @@ void BosonStar::read_finite_temp()
     warn_if_differs("solitonic", rp.solitonic, solitonic);
     if (solitonic) warn_if_differs("sigma_scale", rp.sigma_scale, sigma);
     warn_if_differs("G", rp.G, G);
+    ft_cph_epsilon = rp.cph_epsilon;
+    ft_q = rp.pressure_interp_power;
+    ft_suppression = rp.use_suppression_factor;
     rp.mu = mu;
     rp.lambda = lambda;
     rp.solitonic = solitonic;

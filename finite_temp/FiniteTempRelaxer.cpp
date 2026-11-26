@@ -112,6 +112,7 @@ void FiniteTempRelaxer::read_parameters(const std::string& filename, bool quiet)
         fill_parameter(current_line, "line_search_min_step = ", p_.line_search_min_step, quiet);
 
         fill_parameter(current_line, "output_profile = ", p_.output_profile, quiet);
+        fill_parameter(current_line, "save_model_profiles = ", p_.save_model_profiles, quiet);
     }
 }
 
@@ -1266,6 +1267,14 @@ bool FiniteTempRelaxer::run(bool quiet)
             }
 
             append_model_summary("bs_models.dat");
+            if (p_.save_model_profiles)
+            {
+                // one profile per family member, e.g. for picking SBSE backgrounds along a branch
+                static int model_counter = 0;
+                std::ostringstream name;
+                name << "model_" << std::setw(4) << std::setfill('0') << model_counter++ << ".dat";
+                write_profile(name.str());
+            }
         }
         return true;
     };

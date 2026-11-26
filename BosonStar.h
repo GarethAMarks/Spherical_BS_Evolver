@@ -131,8 +131,13 @@ class BosonStar
         std::string ft_par_file = "FiniteTempRelaxer.par";
         std::string ft_profile_file = "profile.dat"; // relaxer profile on the compactified grid (input or output)
         double ft_max_residual = 1e-6; //ft_relax = 1: abort if the relaxed model's residual (inf-norm) exceeds this
+        bool ft_evolve = 1;              // evolve the finite-T matter; 0: evolve the condensate as SBSE's plain complex field
+        double ft_sigma_atm = 1e-5;      // below this condensate amplitude the CSF evolves the field itself (FTM slaved, no normal fluid)
         bool ft_draft_phase = 1;         // phi ~ e^{-i omega t} (draft sign, matches ft_state); 0: SBSE's e^{+i omega t}
         double T_inf = 0.;               // global temperature; local T = T_inf / alpha
+        double ft_cph_epsilon = 1e-8;    // relaxer EoS parameters, needed to evolve the same EoS
+        double ft_q = 1.;                // pressure_interp_power
+        bool ft_suppression = 0;         // relaxer use_suppression_factor (not a local EoS: evolutions need 0)
         std::vector<FiniteTempPoint> ft_state; // background thermodynamics on radius_array (draft sign convention)
         void read_finite_temp();         // fill state/radius_array/omega/ft_state from the relaxer; rank 0 only
         void write_finite_temp(std::string filename = "FiniteTempBackground.dat");

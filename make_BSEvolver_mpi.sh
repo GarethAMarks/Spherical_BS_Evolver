@@ -10,6 +10,7 @@ mpicxx -Wall -fexceptions -g -DUSE_MPI -I.  -c "main.cpp" -o obj/MPI/main.o
 mpicxx -Wall -fexceptions -g -DUSE_MPI -I.  -c "ComplexScalarField.cpp" -o obj/MPI/ComplexScalarField.o
 mpicxx -Wall -fexceptions -g -DUSE_MPI -I.  -c "RealScalarField.cpp" -o obj/MPI/RealScalarField.o
 mpicxx -Wall -fexceptions -g -DUSE_MPI -I.  -c "FiniteTempBackground.cpp" -o obj/MPI/FiniteTempBackground.o
+mpicxx -Wall -fexceptions -g -DUSE_MPI -I.  -c "FiniteTempMatter.cpp" -o obj/MPI/FiniteTempMatter.o
 mpicxx -Wall -fexceptions -g -DUSE_MPI -I.  -c "finite_temp/FiniteTempRelaxer.cpp" -o obj/MPI/finite_temp/FiniteTempRelaxer.o
 mpicxx -Wall -fexceptions -g -DUSE_MPI -I.  -c "finite_temp/seed_shooter.cpp" -o obj/MPI/finite_temp/seed_shooter.o
-mpicxx  -o BosonStarStability_mpi.o obj/MPI/FiniteTempBackground.o obj/MPI/finite_temp/FiniteTempRelaxer.o obj/MPI/finite_temp/seed_shooter.o obj/MPI/BosonStar.o obj/MPI/LinearPerturbation.o obj/MPI/EvolutionVariables.o obj/MPI/main.o obj/MPI/mathutils.o obj/MPI/ComplexScalarField.o obj/MPI/RealScalarField.o  -lm
+mpicxx  -o BosonStarStability_mpi.o obj/MPI/FiniteTempBackground.o obj/MPI/FiniteTempMatter.o obj/MPI/finite_temp/FiniteTempRelaxer.o obj/MPI/finite_temp/seed_shooter.o obj/MPI/BosonStar.o obj/MPI/LinearPerturbation.o obj/MPI/EvolutionVariables.o obj/MPI/main.o obj/MPI/mathutils.o obj/MPI/ComplexScalarField.o obj/MPI/RealScalarField.o  -lm
