@@ -308,7 +308,7 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
     const int N = (int)slice->states2.size();
     pts.resize(N);
     f_sigma.resize(N); f_T.resize(N); f_mu.resize(N);
-    coef_S.resize(N); flux_S.resize(N); atm.assign(N, 0); bath.assign(N, 0); atm_w.assign(N, 0.); flux_N.resize(N); flux_Sig.resize(N); flux_P.resize(N);
+    coef_S.resize(N); flux_S.resize(N); atm.assign(N, 0); bath.assign(N, 0); atm_w.assign(N, 0.); vel_V.assign(N, 0.); flux_N.resize(N); flux_Sig.resize(N); flux_P.resize(N);
     if ((int)guess.size() != N) guess.assign(N, Point{});
 
     for (int j = 0; j < N; j++)
@@ -324,7 +324,8 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
     double max_NN = 0.;
     for (int j = 0; j < N; j++)
         if (!(f_sigma[j] < fluid_sigma_min)) max_NN = max(max_NN, slice->states2[j].ftm.N_N); // evolved fluid only
-    const double floor = max(n_floor, fluid_atm_frac * max_NN);
+    if (fluid_atm_fixed && !(max_NN0 > 0.)) max_NN0 = max_NN; // freeze the reference at the first call (t = 0)
+    const double floor = max(n_floor, fluid_atm_frac * ((fluid_atm_fixed && max_NN0 > 0.) ? max_NN0 : max_NN));
     for (int j = 0; j < N; j++)
     {
         State& s = slice->states2[j];
@@ -439,6 +440,7 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
         // alpha Upsilon gamma^zz d_z psi, with Upsilon d_z psi = (Upsilon / sigma^2) (sigma^2 d_z psi)
         coef_S[j] = (s2 > 1e-300) ? alpha * g_ZZ * (p.Ups / s2) : alpha * g_ZZ;
         flux_S[j] = coef_S[j] * cross;
+        vel_V[j] = alpha * p.v - b.beta;
         flux_N[j] = alpha * s.ftm.N_N * p.v;
         flux_Sig[j] = alpha * s.ftm.Sigma * p.v;
         flux_P[j] = alpha * s.ftm.P_z * p.v;
@@ -522,16 +524,62 @@ FTM FiniteTempMatter::rhs(BSSNSlice* slice, int j, double z, double d_z_alpha, d
         r.N_S = beta * slice->d_z(v_N_S, j, 1) + alpha * K * s.ftm.N_S - div_S;
     }
 
+    // HRSC option for the normal-fluid transport: the principal part -(V U)' with coordinate velocity V = alpha v - beta
+    // is a finite-volume difference of local Lax-Friedrichs fluxes from MC-limited reconstructions of U and V; the
+    // remaining (lower-order) pieces of beta U' - Div[alpha v U] are added pointwise.
+    BSSNSlice::DerivStencil stn;
+    slice->build_stencil(j, stn);
+    const bool fv = hrsc && stn.outer_pos == 0 && !stn.flip0 && !stn.flip1; // centred scheme on the two points next to the origin
+    auto mc = [](double a, double b) {
+        if (a * b <= 0.) return 0.;
+        const double m = min(2. * std::abs(a), min(2. * std::abs(b), 0.5 * std::abs(a + b)));
+        return std::copysign(m, a);
+    };
+    // d/dz of the flux V U at j; u_odd: parity of U (V is odd)
+    auto fv_flux_dz = [&](auto get, bool u_odd) {
+        double u[5], V[5];
+        for (int k = 0; k < 5; k++)
+        {
+            const int jj = stn.J[k];
+            const bool fl = (k == 0 && stn.flip0) || (k == 1 && stn.flip1);
+            u[k] = get(slice->states2[jj].ftm) * ((fl && u_odd) ? -1. : 1.);
+            V[k] = vel_V[jj] * (fl ? -1. : 1.);
+        }
+        double su[3], sV[3];
+        for (int k = 1; k <= 3; k++) { su[k - 1] = mc(u[k] - u[k - 1], u[k + 1] - u[k]); sV[k - 1] = mc(V[k] - V[k - 1], V[k + 1] - V[k]); }
+        auto flux = [&](double uL, double uR, double VL, double VR) {
+            const double a = max(std::abs(VL), std::abs(VR)) + alpha * hrsc_cmax;
+            return 0.5 * (VL * uL + VR * uR) - 0.5 * a * (uR - uL);
+        };
+        const double Fp = flux(u[2] + 0.5 * su[1], u[3] - 0.5 * su[2], V[2] + 0.5 * sV[1], V[3] - 0.5 * sV[2]);
+        const double Fm = flux(u[1] + 0.5 * su[0], u[2] - 0.5 * su[1], V[1] + 0.5 * sV[0], V[2] - 0.5 * sV[1]);
+        return (Fp - Fm) / stn.h;
+    };
+    const double geo = (z > min_z) ? (g_ln + d / z) : g_ln;
+
     // normal number and entropy
-    r.N_N = beta * slice->d_z(v_N_N, j, 1) + alpha * K * s.ftm.N_N - div_odd(flux_N);
-    r.Sigma = beta * slice->d_z(v_Sigma, j, 1) + alpha * K * s.ftm.Sigma - div_odd(flux_Sig);
+    if (fv)
+    {
+        const double dN = fv_flux_dz([](const FTM& U) { return U.N_N; }, false);
+        const double dS = fv_flux_dz([](const FTM& U) { return U.Sigma; }, false);
+        const double fac = (z > min_z) ? 1. : (d + 1.);
+        r.N_N = alpha * K * s.ftm.N_N - fac * (dN + d_z_beta * s.ftm.N_N) - flux_N[j] * geo;
+        r.Sigma = alpha * K * s.ftm.Sigma - fac * (dS + d_z_beta * s.ftm.Sigma) - flux_Sig[j] * geo;
+    }
+    else
+    {
+        r.N_N = beta * slice->d_z(v_N_N, j, 1) + alpha * K * s.ftm.N_N - div_odd(flux_N);
+        r.Sigma = beta * slice->d_z(v_Sigma, j, 1) + alpha * K * s.ftm.Sigma - div_odd(flux_Sig);
+    }
 
     // normal momentum (Valencia-type sources; pressure force s grad T + n grad mu)
     const double Tz = deriv(slice, f_T, j, 1, false);
     const double muz = deriv(slice, f_mu, j, 1, false);
     const double dz_gzz = d_z_h_zz / chi - b.h_zz * d_z_chi / (chi * chi);
     const double wW2 = p.w * p.W * p.W;
-    r.P_z = beta * slice->d_z(v_P_z, j, 1) + alpha * K * s.ftm.P_z - div_even(flux_P) + s.ftm.P_z * d_z_beta
+    const double transport_P = fv ? (-fv_flux_dz([](const FTM& U) { return U.P_z; }, true) - flux_P[j] * geo)
+                                  : (beta * slice->d_z(v_P_z, j, 1) - div_even(flux_P) + s.ftm.P_z * d_z_beta);
+    r.P_z = transport_P + alpha * K * s.ftm.P_z
             + 0.5 * alpha * wW2 * p.v * p.v * dz_gzz - wW2 * d_z_alpha - alpha * (p.s * Tz + p.n * muz);
     if (p.theta > 0.)
     {
@@ -589,7 +637,8 @@ void FiniteTempMatter::relax_conversion(BSSNSlice* slice, double h)
     double max_NN = 0.;
     for (int j = 0; j < N; j++)
         if (!(f_sigma[j] < fluid_sigma_min)) max_NN = max(max_NN, slice->states2[j].ftm.N_N);
-    const double floor = max(n_floor, fluid_atm_frac * max_NN);
+    if (fluid_atm_fixed && !(max_NN0 > 0.)) max_NN0 = max_NN; // freeze the reference at the first call (t = 0)
+    const double floor = max(n_floor, fluid_atm_frac * ((fluid_atm_fixed && max_NN0 > 0.) ? max_NN0 : max_NN));
     for (int j = 0; j < N; j++)
     {
         if (atm[j] || fluid_atm[j]) continue;

@@ -121,6 +121,7 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "ft_relax = ", ft_relax, quiet);
         fill_parameter(current_line, "ft_par_file = ", ft_par_file, quiet);
         fill_parameter(current_line, "ft_profile_file = ", ft_profile_file, quiet);
+        fill_parameter(current_line, "ft_profile_filter = ", ft_profile_filter, quiet);
         fill_parameter(current_line, "ft_draft_phase = ", ft_draft_phase, quiet);
         fill_parameter(current_line, "ft_evolve = ", ft_evolve, quiet);
         fill_parameter(current_line, "ft_sigma_atm = ", ft_sigma_atm, quiet);
@@ -130,6 +131,9 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "ft_theta_cfl = ", ft_theta_cfl, quiet);
         fill_parameter(current_line, "ft_B_floor = ", ft_B_floor, quiet);
         fill_parameter(current_line, "ft_theta_implicit = ", ft_theta_implicit, quiet);
+        fill_parameter(current_line, "ft_hrsc = ", ft_hrsc, quiet);
+        fill_parameter(current_line, "ft_fluid_atm_fixed = ", ft_fluid_atm_fixed, quiet);
+        fill_parameter(current_line, "ft_hrsc_cmax = ", ft_hrsc_cmax, quiet);
         fill_parameter(current_line, "ft_fluid_atm_taper = ", ft_fluid_atm_taper, quiet);
         fill_parameter(current_line, "ft_max_residual = ", ft_max_residual, quiet);
     }

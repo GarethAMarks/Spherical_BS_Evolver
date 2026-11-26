@@ -78,6 +78,11 @@ public:
     double n_floor = 1e-40;   // below this N_N (and Sigma) the normal component is treated as absent (T = 0, v = 0)
     double fluid_atm_taper = 1.; // >1: normal-fluid RHS tapered smoothly from 0 at the floor to 1 at taper*floor
     std::vector<double> atm_w;
+    bool fluid_atm_fixed = false; // floor relative to the initial max N_N instead of the current one
+    double max_NN0 = 0.;
+    bool hrsc = false;        // finite-volume LLF + MC transport for N_N, Sigma, P_z
+    double hrsc_cmax = 1.;    // LLF wave-speed bound added to |V| (times alpha)
+    std::vector<double> vel_V; // alpha v - beta
     double fluid_atm_frac = 1e-6; // fluid atmosphere: N_N < fluid_atm_frac * max N_N -> normal fluid frozen, v = 0
     // heat bath: where sigma < fluid_sigma_min (outer gas region of the convex crossover) the normal component is not evolved;
     // it is held at the Tolman/Klein values T = (T alpha)_initial / alpha, mu = (mu alpha)_initial / alpha, v = 0, and

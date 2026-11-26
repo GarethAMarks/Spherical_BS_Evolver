@@ -27,6 +27,7 @@ class ProfileInterpolator
 {
 public:
     struct Fields { double sigma, eta, alpha, Xs; };
+    int filter_passes = 0;
 
     // r_max: largest physical radius that will be requested. Returns false if the relaxer grid does not reach it.
     bool build(const FiniteTempRelaxer& relaxer, double r_max)
@@ -56,6 +57,24 @@ public:
             cerr << "ERROR: finite-T relaxer grid only reaches r = " << (r_knots.empty() ? 0. : r_knots.back())
                  << " but SBSE needs r = " << r_max << "; raise rbar_max towards 1 in the relaxer" << endl;
             return false;
+        }
+
+        // optional removal of the relaxer's odd-even (checkerboard) mode: one 1-2-1 pass in the knot index, with the
+        // origin parity (even fields mirror, eta odd). Annihilates the Nyquist mode; changes smooth parts by O(h^2).
+        for (int pass = 0; pass < filter_passes; pass++)
+        {
+            auto f121 = [](std::vector<double>& f, double parity)
+            {
+                std::vector<double> g = f;
+                for (size_t i = 0; i + 1 < f.size(); i++)
+                {
+                    const double fm = (i == 0) ? parity * f[1] : f[i - 1];
+                    g[i] = 0.25 * (fm + 2. * f[i] + f[i + 1]);
+                }
+                f = g;
+            };
+            f121(sig, 1.); f121(alp, 1.); f121(xs, 1.); f121(eta, -1.);
+            eta[0] = 0.;
         }
 
         s_sigma.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
@@ -176,6 +195,7 @@ void BosonStar::read_finite_temp()
     // Physical uniform grid, as for the T = 0 solver (vertex-centred; read_BS_data handles cell-centred offsets).
     const double dr = R / (n_gridpoints - 1.);
     ProfileInterpolator interp;
+    interp.filter_passes = ft_profile_filter;
     if (!interp.build(relaxer, R + 4. * dr))
         exit(1);
 
