@@ -72,11 +72,13 @@ public:
     FiniteTempMatter() = delete;
 
     FiniteTempEoS eos;
-    double n_floor = 1e-40;
+    double n_floor = 1e-40;   // below this N_N (and Sigma) the normal component is treated as absent (T = 0, v = 0)
+    double fluid_atm_frac = 1e-6; // fluid atmosphere: N_N < fluid_atm_frac * max N_N -> normal fluid frozen, v = 0
+    std::vector<char> fluid_atm;
     // atmosphere: where sigma < sigma_atm the polar split phi = sigma e^{i psi} is ill-conditioned (Pi = -N_S / sigma^2), so
     // there the CSF evolves (phi, K_phi) itself, K_sigma and N_S are slaved to it, and the normal fluid is frozen and ignored
     double sigma_atm = 1e-5;
-    std::vector<char> atm;   // below this N_N (and Sigma) the normal component is treated as absent (T = 0, v = 0)
+    std::vector<char> atm;
     int c2p_max_iter = 40;
     double c2p_tol = 1e-12;
 
@@ -116,7 +118,7 @@ public:
 private:
     Spacetime* st;
     std::vector<Point> guess; // previous primitives, used as the Newton starting guess
-    bool recover(const FTM& U, const BSSNState& b, double sigma, double dz_sigma, double dz_psi, double K_sigma, Point& p, double& res) const;
+    bool recover(const FTM& U, double floor, const BSSNState& b, double sigma, double dz_sigma, double dz_psi, double K_sigma, Point& p, double& res) const;
 };
 
 #endif

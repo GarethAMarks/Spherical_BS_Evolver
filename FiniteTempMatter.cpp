@@ -166,7 +166,7 @@ bool solve4(double A[4][4], double b[4], double x[4])
 } // namespace
 
 // Primitive recovery: find (T, mu, v, Pi_psi) with W n = N_N, W s = Sigma, w W^2 gamma_zz v = P_z, -Upsilon Pi = N_S.
-bool FiniteTempMatter::recover(const FTM& U, const BSSNState& b, double sigma, double dz_sigma, double dz_psi,
+bool FiniteTempMatter::recover(const FTM& U, double floor, const BSSNState& b, double sigma, double dz_sigma, double dz_psi,
                                double K_sigma, Point& p, double& res) const
 {
     (void)dz_sigma; (void)K_sigma; // the thermal EoS has no X dependence (delta Y = 0)
@@ -176,7 +176,7 @@ bool FiniteTempMatter::recover(const FTM& U, const BSSNState& b, double sigma, d
     const double s2 = sigma * sigma;
     const double grad_psi2 = g_ZZ * dz_psi * dz_psi;
 
-    const bool no_fluid = !(U.N_N > n_floor) || !(U.Sigma > n_floor);
+    const bool no_fluid = !(U.N_N > floor) || !(U.Sigma > floor);
     if (no_fluid)
     {
         // T = 0: Upsilon = sigma^2 exactly
@@ -282,6 +282,10 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
 
     c2p_failures = 0;
     max_c2p_res = 0.;
+    fluid_atm.assign(N, 0);
+    double max_NN = 0.;
+    for (int j = 0; j < N; j++) max_NN = max(max_NN, slice->states2[j].ftm.N_N);
+    const double floor = max(n_floor, fluid_atm_frac * max_NN);
     for (int j = 0; j < N; j++)
     {
         State& s = slice->states2[j];
@@ -309,8 +313,10 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
             p.mu = -p.Pi; p.W = 1.; p.Ups = s2;
             p.Xi = -p.Pi * p.Pi + g_ZZ * dz_psi * dz_psi;
             pts[j] = p;
-            f_T[j] = 0.;
-            f_mu[j] = (j > 0) ? f_mu[j - 1] : p.mu; // only enters n mu' with n = 0 nearby; keep it smooth
+            fluid_atm[j] = 1;
+            s.ftm.P_z = 0.;
+            f_T[j] = (j > 0) ? f_T[j - 1] : 0.;     // only enter s T' + n mu' next to the fluid edge; keep them smooth
+            f_mu[j] = (j > 0) ? f_mu[j - 1] : p.mu;
             coef_S[j] = alpha * g_ZZ;
             flux_S[j] = coef_S[j] * cross;
             flux_N[j] = flux_Sig[j] = flux_P[j] = 0.;
@@ -319,7 +325,9 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
 
         Point p = guess[j];
         double res = 0.;
-        if (!recover(s.ftm, b, sig, dz_sigma, dz_psi, s.ftm.K_sigma, p, res))
+        fluid_atm[j] = !(s.ftm.N_N > floor) || !(s.ftm.Sigma > floor);
+        if (fluid_atm[j]) s.ftm.P_z = 0.;
+        if (!recover(s.ftm, floor, b, sig, dz_sigma, dz_psi, s.ftm.K_sigma, p, res))
             c2p_failures++;
         if (std::isfinite(res)) max_c2p_res = max(max_c2p_res, res);
         guess[j] = p;
@@ -339,8 +347,8 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
         s.csf.K_phi_re = s.csf.phi_re * ks + 0.5 * s.csf.phi_im * p.Pi;
         s.csf.K_phi_im = s.csf.phi_im * ks - 0.5 * s.csf.phi_re * p.Pi;
 
-        f_T[j] = p.T;
-        f_mu[j] = p.mu;
+        f_T[j] = (fluid_atm[j] && j > 0) ? f_T[j - 1] : p.T;
+        f_mu[j] = (fluid_atm[j] && j > 0) ? f_mu[j - 1] : p.mu;
         // alpha Upsilon gamma^zz d_z psi, with Upsilon d_z psi = (Upsilon / sigma^2) (sigma^2 d_z psi)
         coef_S[j] = (s2 > 1e-300) ? alpha * g_ZZ * (p.Ups / s2) : alpha * g_ZZ;
         flux_S[j] = coef_S[j] * cross;
@@ -434,6 +442,7 @@ FTM FiniteTempMatter::rhs(BSSNSlice* slice, int j, double z, double d_z_alpha, d
     const double wW2 = p.w * p.W * p.W;
     r.P_z = beta * slice->d_z(v_P_z, j, 1) + alpha * K * s.ftm.P_z - div_even(flux_P) + s.ftm.P_z * d_z_beta
             + 0.5 * alpha * wW2 * p.v * p.v * dz_gzz - wW2 * d_z_alpha - alpha * (p.s * Tz + p.n * muz);
+    if (fluid_atm[j]) { r.N_N = 0.; r.Sigma = 0.; r.P_z = 0.; }
     return r;
 }
 
