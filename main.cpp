@@ -28,7 +28,21 @@ int main(int argc, char** argv)
     BosonStar boson_star{};
     boson_star.read_parameters();
 
-    if (mpi_rank == 0)
+    if (boson_star.finite_temp && (boson_star.cycle_only || boson_star.pert_only || boson_star.gaussian_start || boson_star.perturb))
+    {
+        if (mpi_rank == 0)
+            cerr << "ERROR: finite_temp = 1 is only supported for a plain evolution: set cycle_only = 0, pert_only = 0, gaussian_start = 0 and perturb = 0" << endl;
+        bss_mpi::finalize();
+        return 1;
+    }
+
+    if (mpi_rank == 0 && boson_star.finite_temp)
+    {
+        //finite-temperature background from the relaxation solver (finite_temp/), converted to SBSE's physical grid
+        boson_star.read_finite_temp();
+        boson_star.write_field();
+    }
+    else if (mpi_rank == 0)
     {
         boson_star.solve();
         if (boson_star.isotropic)

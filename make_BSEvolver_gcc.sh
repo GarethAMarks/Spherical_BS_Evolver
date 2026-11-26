@@ -10,9 +10,10 @@ OPTFLAGS=${OPTFLAGS:-"-O2"}
 CXXFLAGS="-Wall -fexceptions $OPTFLAGS -I."
 OBJDIR=obj/Release
 
-SOURCES="mathutils BosonStar LinearPerturbation EvolutionVariables main ComplexScalarField RealScalarField"
+# finite_temp/: finite-temperature relaxation solver (ported from Finite_Temp_Relaxer), used when finite_temp = 1
+SOURCES="mathutils BosonStar LinearPerturbation EvolutionVariables main ComplexScalarField RealScalarField FiniteTempBackground finite_temp/FiniteTempRelaxer finite_temp/seed_shooter"
 
-mkdir -p "$OBJDIR"
+mkdir -p "$OBJDIR/finite_temp"
 OBJECTS=""
 for src in $SOURCES; do
     echo "compiling $src.cpp"

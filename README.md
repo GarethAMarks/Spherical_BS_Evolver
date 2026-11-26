@@ -39,6 +39,30 @@ This compiles the same sources with `-DUSE_MPI` into `BosonStarStability_mpi.o`,
 
 ---
 
+## Finite-temperature backgrounds (`finite_temperature_evolutions` branch)
+
+`finite_temp/` contains the finite-temperature relaxation solver ported from Finite_Temp_Relaxer (Newton relaxation of the static
+superfluid boson-star equations on the compactified coordinate `rbar = r / (1 + r)`, with a T = 0 shooting seed). With
+`finite_temp = 1` SBSE starts from such a background instead of its own T = 0 solution:
+
+- `ft_relax = 1` runs the relaxer in-process from `ft_par_file` (temperature stepping to `temperature_target`, then a final Newton
+  polish; the omega-family continuation is skipped) and writes the relaxed profile to `ft_profile_file`.
+  `ft_relax = 0` instead reads an existing relaxer profile (`profile.dat` from a standalone run: `cd finite_temp && make`).
+- The scalar potential always comes from `BSParams.par` (`mu`, `lambda`, `solitonic`, `sigma`, `G` override the relaxer's values).
+  Both codes use `V = mu^2 A^2 + lambda A^4`, so values map 1:1 (the draft's lambda is twice this).
+- The compactified profile is splined in physical `r` onto SBSE's uniform grid (`A = sigma`, `X = Xs`, `phi = log(alpha)`, `eta`),
+  and the background thermodynamics (local `T = T_inf / alpha`, `mu = omega / alpha`, `P`, `s`, `n`, `Upsilon`, `F`, `w`, `rho`) are
+  re-evaluated from the relaxer's EoS on that grid. They are written to `FiniteTempBackground.dat`, held in `BosonStar::ft_state`,
+  splined onto the evolution grid by `BSSNSlice::read_BS_data` (`BSSNSlice::ft_background`) and kept in `Spacetime::ft_background`.
+  `ft_static_conserved()` (`FiniteTempBackground.h`) gives the initial `N_S`, `N_N`, `Sigma` of the planned finite-T evolution system.
+- Sign convention: the stored thermodynamics follow the draft's `phi = sigma e^{-i omega t}` (`mu > 0`). With `ft_draft_phase = 1`
+  (default) `K_phi_im` is flipped to match, so SBSE's Noether charge diagnostic comes out negative.
+- At startup SBSE prints a Hamiltonian-constraint check (`m' = 4 pi r^2 rho` with the thermal `rho`) on its own grid.
+- Restrictions: D = 4, areal coordinates (`isotropic = 0`), no `perturb`, `gaussian_start`, `critical_study`, `cycle_only` or `pert_only`.
+  The evolution equations still only contain the scalar field: the thermal matter is read in but not yet evolved.
+
+---
+
 ## Output files
 
 | File | Written every | Contents |

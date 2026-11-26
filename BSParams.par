@@ -103,6 +103,14 @@ thinshell_res_fac = 1
 uniform_data = 1 #if true (and read_thinshell is true) will expect data smoothed + interpolated onto uniform grid via smooth_and_interp.py
 cutoff_frac = 0.75 
 
+#finite-temperature backgrounds (D = 4, isotropic = 0 only): relaxation solver in finite_temp/, compactified rbar = r/(1+r) converted to this grid
+finite_temp = 0 #if 1, start from a finite-T background instead of solving the T = 0 BS (needs cycle_only = 0, pert_only = 0, perturb = 0, gaussian_start = 0)
+ft_relax = 1 #1: run the relaxer now with ft_par_file (mu, lambda, solitonic, sigma, G are taken from this file); 0: read an existing relaxer profile
+ft_par_file = FiniteTempRelaxer.par
+ft_profile_file = profile.dat #relaxer profile: read when ft_relax = 0, written when ft_relax = 1
+ft_max_residual = 1e-6 #ft_relax = 1: abort if the relaxed model's Newton residual exceeds this
+ft_draft_phase = 1 #1: phi ~ e^{-i omega t} (draft convention, mu > 0, consistent with the stored thermodynamics); 0: SBSE's usual e^{+i omega t}
+
 #Linear Perturbation params
 pert_only = 0 #toggles computing linear perturbation (1) / dynamical evolution (0)
 

@@ -1039,8 +1039,32 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
 
     states2[j].csf.K_phi_im = - boson_star.omega * states2[j].csf.phi_re / (2. * states2[j].bssn.alpha) + pert_correction;
 
+        //finite-T backgrounds follow the draft's phi = sigma e^{-i omega t} (mu > 0, n odd in mu), so flip the phase
+        //direction to match ft_background unless ft_draft_phase = 0 (see finiteT_BSSN_equations.tex, Conventions)
+        if (boson_star.finite_temp && boson_star.ft_draft_phase)
+            states2[j].csf.K_phi_im = -states2[j].csf.K_phi_im;
+
         if (use_CCZ4)
             theta[j] = 0.;
+    }
+
+    //finite-temperature background thermodynamics, splined from the BosonStar grid onto this slice's (possibly cell-centred) grid
+    ft_background.clear();
+    if (boson_star.finite_temp && (int)boson_star.ft_state.size() == N_bs)
+    {
+        ft_background.resize(n_gridpoints);
+        //members of FiniteTempPoint, in order; T, mu, s, n, Upsilon, w, rho are even in z, so zero slope at the origin
+        for (int q = 0; q < FT_POINT_NDOUBLES; q++)
+        {
+            std::vector<double> vals(N_bs);
+            for (int k = 0; k < N_bs; ++k)
+                vals[k] = reinterpret_cast<const double*>(&boson_star.ft_state[k])[q];
+            tk::spline s_q;
+            s_q.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
+            s_q.set_points(X_nodes, vals, tk::spline::cspline);
+            for (int j = 0; j < n_gridpoints; j++)
+                reinterpret_cast<double*>(&ft_background[j])[q] = s_q((j + 0.5 * (double)cell_centered) * dr);
+        }
     }
 
     //separate loop to fill in values for the contracted Christoffel symbols as they require derivatives of h (hence info off j value)
@@ -3304,6 +3328,8 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
     M = boson_star.M;
     r_99 = boson_star.r_99;
     BS_perturbed = boson_star.perturb;
+    finite_temp = boson_star.finite_temp;
+    T_inf = boson_star.T_inf;
 
     if (!skip_read)
     {
@@ -3346,6 +3372,18 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
 
     if (read_thinshell)
         BS_resolution_factor = 1;
+
+    if (finite_temp)
+    {
+        //the finite-T background comes from the relaxer at fixed resolution; there is no T = 0 solve to redo
+        BS_resolution_factor = 1;
+        if (read_thinshell || isotropic || critical_study || D != 4.)
+        {
+            if (mpi_rank == 0)
+                cerr << "ERROR: finite_temp = 1 is incompatible with read_thinshell, isotropic, critical_study and D != 4" << endl;
+            bss_mpi::abort_all(1);
+        }
+    }
 
     if ((BS_resolution_factor & (BS_resolution_factor - 1)) != 0 || BS_resolution_factor <= 0)
         {
@@ -3461,6 +3499,25 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
     // Keep composite state vector in sync with the trimmed grid size
     slices[0].states2.resize(n_gridpoints);
     slices[0].R = R;
+
+    //finite-T background: trim alongside the state and keep a copy that survives the rolling slice buffer
+    if (finite_temp)
+    {
+        if (start_time > 0)
+        {
+            if (mpi_rank == 0)
+                cout << "WARNING: finite-T background is not stored in checkpoints; ft_background is the freshly read t = 0 background" << endl;
+            //read the background into a scratch slice so the checkpointed state in slices[0] is untouched
+            BSSNSlice scratch{};
+            scratch.active_points = active_points;
+            scratch.refinement_points = refinement_points;
+            scratch.use_CCZ4 = use_CCZ4;
+            scratch.read_BS_data(boson_star, BS_resolution_factor, isotropic, cell_centered);
+            slices[0].ft_background = scratch.ft_background;
+        }
+        slices[0].ft_background.resize(n_gridpoints);
+        ft_background = slices[0].ft_background;
+    }
 
     if (use_CCZ4)
         slices[0].theta.resize(n_gridpoints);

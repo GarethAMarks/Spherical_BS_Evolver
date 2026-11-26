@@ -7,6 +7,7 @@
 #include<string>
 #include <fstream>
 #include <quadmath.h>
+#include "FiniteTempBackground.h"
 
 
 //holds field amplitude, conformal factor, their derivative, and the lapse
@@ -123,6 +124,18 @@ class BosonStar
         bool cycle_only = 0;
         bool pert_only = 0;
         bool write_column_files = 0;
+
+        // Finite-temperature backgrounds from the relaxation solver in finite_temp/ (D = 4, areal coordinates only).
+        bool finite_temp = 0;            // if true, use a finite-T background instead of solving the T = 0 BS
+        bool ft_relax = 0;               // 1: run the relaxer now (reads ft_par_file); 0: read ft_profile_file
+        std::string ft_par_file = "FiniteTempRelaxer.par";
+        std::string ft_profile_file = "profile.dat"; // relaxer profile on the compactified grid (input or output)
+        double ft_max_residual = 1e-6; //ft_relax = 1: abort if the relaxed model's residual (inf-norm) exceeds this
+        bool ft_draft_phase = 1;         // phi ~ e^{-i omega t} (draft sign, matches ft_state); 0: SBSE's e^{+i omega t}
+        double T_inf = 0.;               // global temperature; local T = T_inf / alpha
+        std::vector<FiniteTempPoint> ft_state; // background thermodynamics on radius_array (draft sign convention)
+        void read_finite_temp();         // fill state/radius_array/omega/ft_state from the relaxer; rank 0 only
+        void write_finite_temp(std::string filename = "FiniteTempBackground.dat");
 
         BosonStar() = default;
         //BosonStar(const BosonStar& boson_star); //copy constructor(don't seem to need for now)

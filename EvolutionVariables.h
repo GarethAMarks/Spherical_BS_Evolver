@@ -83,6 +83,7 @@ class BSSNSlice
         std::vector<double> theta; //array of theta-values, only to be allocated if CCZ4 is used
 
         std::vector<int> refinement_points; //points at which refinement should be halved; to be copied from spacetime version at start of each step
+        std::vector<FiniteTempPoint> ft_background; //finite-T background thermodynamics on this slice's grid (filled by read_BS_data when finite_temp; empty otherwise)
 
         void read_BS_data(BosonStar& boson_star,int BS_resolution_factor = 1., bool isotropic = 1, bool cell_centered = 0);
         void read_checkpoint(int time, int n_gridpoints);
@@ -418,6 +419,12 @@ class Spacetime
         double M;
         double M_bc = 0.; // mass used by the Sommerfeld asymptotics: Misner-Sharp mass at ms_radius_frac * R
         double r_99;
+
+        //finite-temperature background (see FiniteTempBackground.h); inherited from BosonStar when finite_temp = 1.
+        //ft_background is the t = 0 background on the final (trimmed) evolution grid, draft sign convention.
+        bool finite_temp = 0;
+        double T_inf = 0.;
+        std::vector<FiniteTempPoint> ft_background;
 
         double sigma_BSSN; //multiplier of constraint term in the gamma evolution equation
         double eta; //gamma driver condition parameter
