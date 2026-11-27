@@ -117,6 +117,29 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "A0 = ", A0, quiet);
         fill_parameter(current_line, "dA = ", dA, quiet);
         fill_parameter(current_line, "n_stars = ", n_stars, quiet);
+        fill_parameter(current_line, "finite_temp = ", finite_temp, quiet);
+        fill_parameter(current_line, "ft_relax = ", ft_relax, quiet);
+        fill_parameter(current_line, "ft_par_file = ", ft_par_file, quiet);
+        fill_parameter(current_line, "ft_profile_file = ", ft_profile_file, quiet);
+        fill_parameter(current_line, "ft_profile_filter = ", ft_profile_filter, quiet);
+        fill_parameter(current_line, "ft_draft_phase = ", ft_draft_phase, quiet);
+        fill_parameter(current_line, "ft_evolve = ", ft_evolve, quiet);
+        fill_parameter(current_line, "ft_sigma_atm = ", ft_sigma_atm, quiet);
+        fill_parameter(current_line, "ft_fluid_atm_frac = ", ft_fluid_atm_frac, quiet);
+        fill_parameter(current_line, "ft_theta1 = ", ft_theta1, quiet);
+        fill_parameter(current_line, "ft_fluid_sigma_min = ", ft_fluid_sigma_min, quiet);
+        fill_parameter(current_line, "ft_theta_cfl = ", ft_theta_cfl, quiet);
+        fill_parameter(current_line, "ft_B_floor = ", ft_B_floor, quiet);
+        fill_parameter(current_line, "ft_theta_implicit = ", ft_theta_implicit, quiet);
+        fill_parameter(current_line, "ft_theta_pole_p = ", ft_theta_pole_p, quiet);
+        fill_parameter(current_line, "ft_hrsc = ", ft_hrsc, quiet);
+        fill_parameter(current_line, "ft_av_quad = ", ft_av_quad, quiet);
+        fill_parameter(current_line, "ft_av_lin = ", ft_av_lin, quiet);
+        fill_parameter(current_line, "ft_av_cs = ", ft_av_cs, quiet);
+        fill_parameter(current_line, "ft_fluid_atm_fixed = ", ft_fluid_atm_fixed, quiet);
+        fill_parameter(current_line, "ft_hrsc_cmax = ", ft_hrsc_cmax, quiet);
+        fill_parameter(current_line, "ft_fluid_atm_taper = ", ft_fluid_atm_taper, quiet);
+        fill_parameter(current_line, "ft_max_residual = ", ft_max_residual, quiet);
     }
 }
 
@@ -1659,6 +1682,19 @@ void BosonStar::broadcast()
     bcast_vec(pert_array);
     bcast_vec(rsf_array);
     bcast_vec(radius_array);
+
+    // Scalars used by the evolution diagnostics (r_99 for only_BS_violation) and the finite-T background.
+    {
+        double sbuf[3] = {M, r_99, T_inf};
+        bss_mpi::bcast_doubles(sbuf, 3);
+        M = sbuf[0]; r_99 = sbuf[1]; T_inf = sbuf[2];
+
+        int sz = (int)ft_state.size();
+        bss_mpi::bcast_ints(&sz, 1);
+        ft_state.resize(sz);
+        if (sz > 0)
+            bss_mpi::bcast_doubles(reinterpret_cast<double*>(ft_state.data()), sz * FT_POINT_NDOUBLES);
+    }
 #endif
 }
 

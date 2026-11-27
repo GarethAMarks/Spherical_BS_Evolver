@@ -4,6 +4,7 @@
 #include<string.h>
 #include<sstream>
 #include<vector>
+#include<cmath>
 //#include"mathutils.cpp"
 
 using std::string;

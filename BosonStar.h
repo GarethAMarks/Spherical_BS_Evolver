@@ -7,6 +7,7 @@
 #include<string>
 #include <fstream>
 #include <quadmath.h>
+#include "FiniteTempBackground.h"
 
 
 //holds field amplitude, conformal factor, their derivative, and the lapse
@@ -123,6 +124,41 @@ class BosonStar
         bool cycle_only = 0;
         bool pert_only = 0;
         bool write_column_files = 0;
+
+        // Finite-temperature backgrounds from the relaxation solver in finite_temp/ (D = 4, areal coordinates only).
+        bool finite_temp = 0;            // if true, use a finite-T background instead of solving the T = 0 BS
+        bool ft_relax = 0;               // 1: run the relaxer now (reads ft_par_file); 0: read ft_profile_file
+        std::string ft_par_file = "FiniteTempRelaxer.par";
+        int ft_profile_filter = 0;       // passes of a 1-2-1 filter on the relaxer knots (removes odd-even noise)
+        std::string ft_profile_file = "profile.dat"; // relaxer profile on the compactified grid (input or output)
+        double ft_max_residual = 1e-6; //ft_relax = 1: abort if the relaxed model's residual (inf-norm) exceeds this
+        bool ft_evolve = 1;              // evolve the finite-T matter; 0: evolve the condensate as SBSE's plain complex field
+        double ft_sigma_atm = 1e-5;      // below this condensate amplitude the CSF evolves the field itself (FTM slaved, no normal fluid)
+        double ft_theta1 = 0.;           // conversion coefficient theta_1 (capped locally for explicit stability)
+        double ft_theta_cfl = 0.5;
+        double ft_fluid_atm_frac = 1e-6;
+        double ft_fluid_sigma_min = 0.;   // freeze the normal fluid where sigma < this // normal fluid frozen where N_N < this * max N_N
+        bool ft_draft_phase = 1;         // phi ~ e^{-i omega t} (draft sign, matches ft_state); 0: SBSE's e^{+i omega t}
+        double T_inf = 0.;               // global temperature; local T = T_inf / alpha
+        double ft_fluid_atm_taper = 1.;  // >1: smooth taper of the normal-fluid RHS above the atmosphere floor
+        int ft_fluid_atm_fixed = 0;      // 1: atmosphere floor from the initial max N_N
+        double ft_av_quad = 0., ft_av_lin = 0., ft_av_cs = 0.1; // artificial viscosity on the normal fluid
+        int ft_hrsc = 0;                 // 1: HRSC (LLF + MC) transport for the normal fluid
+        double ft_hrsc_cmax = 1.;
+        int ft_theta_implicit = 0;
+        double ft_theta_pole_p = 0.;     // >0: implicit conversion rate enhanced by (c^2/B)^p near the Landau pole      // 1: theta_1 conversion applied implicitly (operator split) after each step
+        double ft_B_floor = 0.;         // convex floor on phonon B factor (evolution only)
+        double ft_cph_epsilon = 1e-8;    // relaxer EoS parameters, needed to evolve the same EoS
+        double ft_q = 1.;                // pressure_interp_power
+        int ft_crossover_mode = 0;       // relaxer crossover_mode and its parameters
+        int ft_gas_statistics = 0;       // relaxer gas_statistics
+        double ft_sigma_phonon = 0.023, ft_sigma_gas = 0.017, ft_crossover_k = 20.;
+        double ft_bogoliubov_gap_width = 1.; // relaxer bogoliubov_gap_width (crossover_mode 2)
+        double ft_bogoliubov_sigma_gap = 0.005; // relaxer bogoliubov_sigma_gap (crossover_mode 2)
+        bool ft_suppression = 0;         // relaxer use_suppression_factor (not a local EoS: evolutions need 0)
+        std::vector<FiniteTempPoint> ft_state; // background thermodynamics on radius_array (draft sign convention)
+        void read_finite_temp();         // fill state/radius_array/omega/ft_state from the relaxer; rank 0 only
+        void write_finite_temp(std::string filename = "FiniteTempBackground.dat");
 
         BosonStar() = default;
         //BosonStar(const BosonStar& boson_star); //copy constructor(don't seem to need for now)

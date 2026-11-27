@@ -8,6 +8,7 @@
 #include "BosonStar.h"
 #include "ComplexScalarField.h" // for CSF in composite State
 #include "RealScalarField.h"   // for RSF in composite State
+#include "FiniteTempMatter.h"  // for FTM in composite State
 
 class ComplexScalarField; // forward declaration for friendship
 
@@ -29,7 +30,13 @@ enum bssn_var
     v_beta,
     v_theta, //this isn't a BSSN var (CCZ4), but added for derivatives.
     v_psi,
-    v_K_psi
+    v_K_psi,
+    v_K_sigma, //finite-temperature matter (FiniteTempMatter); P_z is odd across z = 0
+    v_N_S,
+    v_N_N,
+    v_Sigma,
+    v_P_z,
+    N_BSSN_VARS
 };
 
 struct BSSNState
@@ -52,6 +59,7 @@ struct State {
     CSF csf;         // complex scalar field variables
     BSSNState bssn;  // geometric and gauge variables
     RSF rsf;        // real scalar field variables if enabled
+    FTM ftm;        // finite-temperature matter variables if finite_temp (zero otherwise)
 };
 
 //the BSSN variables, along with some auxiliary quantities, on a single time slice.
@@ -83,6 +91,7 @@ class BSSNSlice
         std::vector<double> theta; //array of theta-values, only to be allocated if CCZ4 is used
 
         std::vector<int> refinement_points; //points at which refinement should be halved; to be copied from spacetime version at start of each step
+        std::vector<FiniteTempPoint> ft_background; //finite-T background thermodynamics on this slice's grid (filled by read_BS_data when finite_temp; empty otherwise)
 
         void read_BS_data(BosonStar& boson_star,int BS_resolution_factor = 1., bool isotropic = 1, bool cell_centered = 0);
         void read_checkpoint(int time, int n_gridpoints);
@@ -124,6 +133,8 @@ class Spacetime
         void write_diagnostics(std::string file_name = "Diagnostics.dat");
         void evolve();
         void write_current_slice( std::string file_name = "SliceData.dat");
+        void write_ft_diagnostics(BSSNSlice* slice_ptr, double t, bool first); //finite-T totals to ft_diagnostics.dat
+        void write_ft_slice(BSSNSlice* slice_ptr, std::string file_name = "FTSliceData.dat");
         //void read_isotropic_data();
 
         void halve_resolution();
@@ -202,10 +213,14 @@ class Spacetime
     private:
         friend class ComplexScalarField; // allow matter models to access potential V, dV
         friend class RealScalarField;    // allow RSF to access spacetime internals (e.g., D, min_z)
+        friend class FiniteTempMatter;   // finite-T matter: D, min_z, min_chi
 
         // Matter model instances reused across evaluations to avoid per-point construction
         ComplexScalarField csf_model;
         RealScalarField    rsf_model;
+    public:
+        FiniteTempMatter   ft_model; // finite-temperature matter (used when finite_temp)
+    private:
         BSSNSlice* current_slice_ptr; //pointer to current slice, updated on each time step
         
         double D;
@@ -419,6 +434,13 @@ class Spacetime
         double M_bc = 0.; // mass used by the Sommerfeld asymptotics: Misner-Sharp mass at ms_radius_frac * R
         double r_99;
 
+        //finite-temperature background (see FiniteTempBackground.h); inherited from BosonStar when finite_temp = 1.
+        //ft_background is the t = 0 background on the final (trimmed) evolution grid, draft sign convention.
+        bool finite_temp = 0;
+        bool ft_evolve = 0; //evolve the finite-T matter (FiniteTempMatter); otherwise only the condensate, as a plain CSF
+        double T_inf = 0.;
+        std::vector<FiniteTempPoint> ft_background;
+
         double sigma_BSSN; //multiplier of constraint term in the gamma evolution equation
         double eta; //gamma driver condition parameter
         double gamma_fac; //factor on gamma in the gamma-driver condition; usually 0.75
@@ -529,7 +551,7 @@ class Spacetime
         //one-entry cache of the stencil at the last (slice, index) used by d_z / d_zz: the RHS evaluates ~24 derivatives
         //per point, so the index set is built once per point instead of once per call
         BSSNSlice::DerivStencil deriv_cache;
-        double deriv_vals[16][5];                 //stencil values of every variable at the cached point (parity applied)
+        double deriv_vals[N_BSSN_VARS][5];                 //stencil values of every variable at the cached point (parity applied)
         const BSSNSlice* deriv_cache_slice = nullptr;
         int deriv_cache_index = -1, deriv_cache_n = -1, deriv_cache_frf = 0, deriv_cache_fbj = -1;
         double deriv_cache_R = -1.;

@@ -32,3 +32,10 @@
 	obj/*
 	update_boundaries
 	*.dat
+
+# build artifacts
+BosonStarStability.o
+obj/
+finite_temp/*.o
+finite_temp/*.d
+finite_temp/finite_temp_relaxer

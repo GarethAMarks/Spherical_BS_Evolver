@@ -33,7 +33,7 @@ using std::min;
 using std::max;
 using std::rotate;
 // Spacetime constructor: initialize reusable CSF model with this context
-Spacetime::Spacetime() : csf_model(this), rsf_model(this) {
+Spacetime::Spacetime() : csf_model(this), rsf_model(this), ft_model(this) {
 
     sub_min_time = 10.0;
     adaptive_timestep = false;
@@ -378,19 +378,19 @@ BSSNState operator*(double c, const BSSNState& s);
 
 // Composite State elementwise operations (applies to both csf and bssn)
 State operator+(const State& a, const State& b) {
-    return State{a.csf + b.csf, a.bssn + b.bssn, a.rsf + b.rsf};
+    return State{a.csf + b.csf, a.bssn + b.bssn, a.rsf + b.rsf, a.ftm + b.ftm};
 }
 
 State operator-(const State& a, const State& b) {
-    return State{a.csf - b.csf, a.bssn - b.bssn, a.rsf - b.rsf};
+    return State{a.csf - b.csf, a.bssn - b.bssn, a.rsf - b.rsf, a.ftm - b.ftm};
 }
 
 State operator*(const State& a, const State& b) {
-    return State{a.csf * b.csf, a.bssn * b.bssn, a.rsf * b.rsf};
+    return State{a.csf * b.csf, a.bssn * b.bssn, a.rsf * b.rsf, a.ftm * b.ftm};
 }
 
 State operator*(double c, const State& a) {
-    return State{c * a.csf, c * a.bssn, c * a.rsf};
+    return State{c * a.csf, c * a.bssn, c * a.rsf, c * a.ftm};
 }
 
 inline State operator/(const State& a, double c) {
@@ -571,12 +571,17 @@ double BSSNSlice::d_z_with(bssn_var var, const DerivStencil& st, int order) cons
         case v_theta:    for (int j = 0; j < 5; j++) F[j] = theta[J[j]];                 break;
         case v_psi:      for (int j = 0; j < 5; j++) F[j] = states2[J[j]].rsf.psi;       break;
         case v_K_psi:    for (int j = 0; j < 5; j++) F[j] = states2[J[j]].rsf.K_psi;     break;
+        case v_K_sigma:  for (int j = 0; j < 5; j++) F[j] = states2[J[j]].ftm.K_sigma;   break;
+        case v_N_S:      for (int j = 0; j < 5; j++) F[j] = states2[J[j]].ftm.N_S;       break;
+        case v_N_N:      for (int j = 0; j < 5; j++) F[j] = states2[J[j]].ftm.N_N;       break;
+        case v_Sigma:    for (int j = 0; j < 5; j++) F[j] = states2[J[j]].ftm.Sigma;     break;
+        case v_P_z:      for (int j = 0; j < 5; j++) F[j] = states2[J[j]].ftm.P_z;       break;
         default:
             cerr << "ERROR: invalid variable requested for differentiation" << endl;
             exit(0);
     }
 
-    const bool parity_is_odd = ((var == v_c_chris_Z || var == v_beta)/*|| (has_BH && (var == v_chi || var == v_alpha))*/);
+    const bool parity_is_odd = ((var == v_c_chris_Z || var == v_beta || var == v_P_z)/*|| (has_BH && (var == v_chi || var == v_alpha))*/);
 
     //account for odd parity of contracted christoffel symbols and beta across z = 0
     if (st.flip0 && parity_is_odd)
@@ -694,6 +699,7 @@ void Spacetime::apply_damping_at_point(int j,
         };
         damping_corr.bssn.c_chris_Z = odd_corr([](const State& st) { return st.bssn.c_chris_Z; });
         damping_corr.bssn.beta      = odd_corr([](const State& st) { return st.bssn.beta; });
+        damping_corr.ftm.P_z        = odd_corr([](const State& st) { return st.ftm.P_z; });
     }
 
     // CCZ4: taper the dissipation of chi (a zero-speed field) to zero in the outer region
@@ -1039,8 +1045,32 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
 
     states2[j].csf.K_phi_im = - boson_star.omega * states2[j].csf.phi_re / (2. * states2[j].bssn.alpha) + pert_correction;
 
+        //finite-T backgrounds follow the draft's phi = sigma e^{-i omega t} (mu > 0, n odd in mu), so flip the phase
+        //direction to match ft_background unless ft_draft_phase = 0 (see finiteT_BSSN_equations.tex, Conventions)
+        if (boson_star.finite_temp && boson_star.ft_draft_phase)
+            states2[j].csf.K_phi_im = -states2[j].csf.K_phi_im;
+
         if (use_CCZ4)
             theta[j] = 0.;
+    }
+
+    //finite-temperature background thermodynamics, splined from the BosonStar grid onto this slice's (possibly cell-centred) grid
+    ft_background.clear();
+    if (boson_star.finite_temp && (int)boson_star.ft_state.size() == N_bs)
+    {
+        ft_background.resize(n_gridpoints);
+        //members of FiniteTempPoint, in order; T, mu, s, n, Upsilon, w, rho are even in z, so zero slope at the origin
+        for (int q = 0; q < FT_POINT_NDOUBLES; q++)
+        {
+            std::vector<double> vals(N_bs);
+            for (int k = 0; k < N_bs; ++k)
+                vals[k] = reinterpret_cast<const double*>(&boson_star.ft_state[k])[q];
+            tk::spline s_q;
+            s_q.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
+            s_q.set_points(X_nodes, vals, tk::spline::cspline);
+            for (int j = 0; j < n_gridpoints; j++)
+                reinterpret_cast<double*>(&ft_background[j])[q] = s_q((j + 0.5 * (double)cell_centered) * dr);
+        }
     }
 
     //separate loop to fill in values for the contracted Christoffel symbols as they require derivatives of h (hence info off j value)
@@ -1227,10 +1257,13 @@ double Spacetime::d_z(bssn_var var, int index, int order = 1)
             deriv_vals[v_alpha][k] = st.bssn.alpha;       deriv_vals[v_beta][k] = st.bssn.beta;
             deriv_vals[v_theta][k] = has_theta ? sl->theta[deriv_cache.J[k]] : 0.;
             deriv_vals[v_psi][k] = st.rsf.psi;            deriv_vals[v_K_psi][k] = st.rsf.K_psi;
+            deriv_vals[v_K_sigma][k] = st.ftm.K_sigma;    deriv_vals[v_N_S][k] = st.ftm.N_S;
+            deriv_vals[v_N_N][k] = st.ftm.N_N;            deriv_vals[v_Sigma][k] = st.ftm.Sigma;
+            deriv_vals[v_P_z][k] = st.ftm.P_z;
         }
         //odd parity of the contracted Christoffel symbol and the shift across z = 0
-        if (deriv_cache.flip0) { deriv_vals[v_c_chris_Z][0] = -deriv_vals[v_c_chris_Z][0]; deriv_vals[v_beta][0] = -deriv_vals[v_beta][0]; }
-        if (deriv_cache.flip1) { deriv_vals[v_c_chris_Z][1] = -deriv_vals[v_c_chris_Z][1]; deriv_vals[v_beta][1] = -deriv_vals[v_beta][1]; }
+        if (deriv_cache.flip0) { deriv_vals[v_c_chris_Z][0] = -deriv_vals[v_c_chris_Z][0]; deriv_vals[v_beta][0] = -deriv_vals[v_beta][0]; deriv_vals[v_P_z][0] = -deriv_vals[v_P_z][0]; }
+        if (deriv_cache.flip1) { deriv_vals[v_c_chris_Z][1] = -deriv_vals[v_c_chris_Z][1]; deriv_vals[v_beta][1] = -deriv_vals[v_beta][1]; deriv_vals[v_P_z][1] = -deriv_vals[v_P_z][1]; }
     }
 
     const double* F = deriv_vals[var];
@@ -1771,6 +1804,15 @@ void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
         S_ww[j] += rsf_model.S_ww(rsf, bssn, d_z_rsf, d_zz_rsf);
     }
 
+    // finite-temperature matter: thermal parts of the stress-energy (the condensate part is the CSF one above, with
+    // K_phi reconstructed from K_sigma and Pi_psi in ft_model.prepare)
+    if (ft_evolve && (int)ft_model.pts.size() == (int)slice_ptr->states2.size())
+    {
+        double r_th, j_th, Szz_th, Sww_th;
+        ft_model.stress_energy(bssn, j, r_th, j_th, Szz_th, Sww_th);
+        rho[j] += r_th; j_z[j] += j_th; S_zz[j] += Szz_th; S_ww[j] += Sww_th;
+    }
+
     // Trace S = gamma^{ij} S_ij = chi * (h^{zz} S_zz + n h^{ww} S_ww)
     S[j] = chi * (inv_hzz * S_zz[j] + n * inv_hww * S_ww[j]);
 
@@ -1783,6 +1825,12 @@ void Spacetime::compute_auxiliary_quantities(BSSNSlice* slice_ptr, bool derivati
 {
     //double n = D - 2.;
     dr = R / ((double)n_gridpoints - 1.0);
+
+    if (ft_evolve)
+    {
+        ft_model.prepare(slice_ptr); //primitives + reconstructed K_phi on this slice
+        deriv_cache_slice = nullptr;
+    }
 
     // MPI: only compute aux at owned points; each rank's aux[] arrays are
     // therefore only valid in [owned_begin, owned_end). Downstream users
@@ -1823,6 +1871,13 @@ void Spacetime::slice_rhs_into(BSSNSlice* slice_ptr, BSSNSlice& rhs, int skipped
 
     int max_ref = (refinement_levels.size() == 0 ) ? 1 : refinement_levels[refinement_levels.size() - 1]; //refinement level at outermost bdry
     const int res_fac_outer = (max_ref > 0) ? (1 << (max_ref - 1)) : 1;
+
+    //finite-temperature matter: recover primitives and rebuild the derived K_phi before any derivative is taken
+    if (ft_evolve)
+    {
+        ft_model.prepare(slice_ptr);
+        deriv_cache_slice = nullptr;
+    }
 
     // MPI: only compute RHS at points this rank owns. Under replicated storage,
     // rhs.states2 is still sized n_gridpoints; non-owned slots are left zero
@@ -1935,6 +1990,18 @@ void Spacetime::slice_rhs_into(BSSNSlice* slice_ptr, BSSNSlice& rhs, int skipped
             z);
 
         rhs.states2[j].csf = csf_rhs;
+
+        //finite-temperature matter: K_phi is derived (rebuilt from K_sigma, Pi_psi), the FTM variables are evolved
+        if (ft_evolve && ft_model.atm[j])
+            rhs.states2[j].ftm = ft_model.atmosphere_rhs(slice_ptr->states2[j], rhs.states2[j]);
+        else if (ft_evolve)
+        {
+            rhs.states2[j].csf.K_phi_re = 0.;
+            rhs.states2[j].csf.K_phi_im = 0.;
+            rhs.states2[j].ftm = ft_model.rhs(slice_ptr, j, z, d_z_alpha, d_z_chi, d_z_h_zz, d_z_h_ww, d_z_beta, chris_Zzz[j], chris_Zww[j]);
+        }
+        else
+            rhs.states2[j].ftm = FTM{0., 0., 0., 0., 0.};
 
         // RealScalarField RHS for massless real scalar (optional)
         if (add_real_field)
@@ -3304,6 +3371,8 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
     M = boson_star.M;
     r_99 = boson_star.r_99;
     BS_perturbed = boson_star.perturb;
+    finite_temp = boson_star.finite_temp;
+    T_inf = boson_star.T_inf;
 
     if (!skip_read)
     {
@@ -3346,6 +3415,18 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
 
     if (read_thinshell)
         BS_resolution_factor = 1;
+
+    if (finite_temp)
+    {
+        //the finite-T background comes from the relaxer at fixed resolution; there is no T = 0 solve to redo
+        BS_resolution_factor = 1;
+        if (read_thinshell || isotropic || critical_study || D != 4.)
+        {
+            if (mpi_rank == 0)
+                cerr << "ERROR: finite_temp = 1 is incompatible with read_thinshell, isotropic, critical_study and D != 4" << endl;
+            bss_mpi::abort_all(1);
+        }
+    }
 
     if ((BS_resolution_factor & (BS_resolution_factor - 1)) != 0 || BS_resolution_factor <= 0)
         {
@@ -3461,6 +3542,65 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
     // Keep composite state vector in sync with the trimmed grid size
     slices[0].states2.resize(n_gridpoints);
     slices[0].R = R;
+
+    //finite-T background: trim alongside the state and keep a copy that survives the rolling slice buffer
+    if (finite_temp)
+    {
+        if (start_time > 0)
+        {
+            if (mpi_rank == 0)
+                cout << "WARNING: finite-T background is not stored in checkpoints; ft_background is the freshly read t = 0 background" << endl;
+            //read the background into a scratch slice so the checkpointed state in slices[0] is untouched
+            BSSNSlice scratch{};
+            scratch.active_points = active_points;
+            scratch.refinement_points = refinement_points;
+            scratch.use_CCZ4 = use_CCZ4;
+            scratch.read_BS_data(boson_star, BS_resolution_factor, isotropic, cell_centered);
+            slices[0].ft_background = scratch.ft_background;
+        }
+        slices[0].ft_background.resize(n_gridpoints);
+        ft_background = slices[0].ft_background;
+
+        //finite-temperature matter evolution (finiteT_BSSN_equations.tex, theta_1 = theta_2 = 0)
+        if (boson_star.ft_evolve && (mpi_size > 1 || boson_star.ft_suppression || !boson_star.ft_draft_phase))
+        {
+            if (mpi_rank == 0)
+                cerr << "ERROR: finite-T evolutions need a single rank, use_suppression_factor = 0 in the relaxer and ft_draft_phase = 1" << endl;
+            bss_mpi::abort_all(1);
+        }
+        ft_model.eos.m = mu;
+        ft_model.eos.lambda = lambda;
+        ft_model.eos.solitonic = solitonic;
+        ft_model.eos.sigma_scale = sigma;
+        ft_model.eos.cph_epsilon = boson_star.ft_cph_epsilon;
+        ft_model.eos.B_floor = boson_star.ft_B_floor;
+        ft_model.eos.q = boson_star.ft_q;
+        ft_model.eos.crossover_mode = boson_star.ft_crossover_mode;
+        ft_model.eos.gas_statistics = boson_star.ft_gas_statistics;
+        ft_model.eos.bogoliubov_gap_width = boson_star.ft_bogoliubov_gap_width;
+        ft_model.eos.bogoliubov_sigma_gap = boson_star.ft_bogoliubov_sigma_gap;
+        ft_model.eos.sigma_phonon = boson_star.ft_sigma_phonon;
+        ft_model.eos.sigma_gas = boson_star.ft_sigma_gas;
+        ft_model.eos.crossover_exponent = boson_star.ft_crossover_k;
+        ft_evolve = boson_star.ft_evolve;
+        ft_model.sigma_atm = boson_star.ft_sigma_atm;
+        ft_model.fluid_atm_frac = boson_star.ft_fluid_atm_frac;
+        ft_model.theta1 = boson_star.ft_theta1;
+        ft_model.fluid_sigma_min = boson_star.ft_fluid_sigma_min;
+        ft_model.theta_cfl = boson_star.ft_theta_cfl;
+        ft_model.theta_implicit = (boson_star.ft_theta_implicit != 0);
+        ft_model.theta_pole_p = boson_star.ft_theta_pole_p;
+        ft_model.fluid_atm_taper = boson_star.ft_fluid_atm_taper;
+        ft_model.hrsc = (boson_star.ft_hrsc != 0);
+        ft_model.av_quad = boson_star.ft_av_quad; ft_model.av_lin = boson_star.ft_av_lin; ft_model.av_cs = boson_star.ft_av_cs;
+        ft_model.fluid_atm_fixed = (boson_star.ft_fluid_atm_fixed != 0);
+        ft_model.hrsc_cmax = boson_star.ft_hrsc_cmax;
+        ft_model.dt = courant_factor * dr; // finest-level step (no subcycling for FT runs)
+        if (start_time == 0)
+            ft_model.initialize_static(slices[0], ft_background);
+        else if (mpi_rank == 0)
+            cout << "WARNING: finite-T matter variables are not checkpointed; restarting from a checkpoint is not supported" << endl;
+    }
 
     if (use_CCZ4)
         slices[0].theta.resize(n_gridpoints);
@@ -3650,6 +3790,8 @@ void Spacetime::evolve()
 
         if (time_step % write_CN_interval == 0) //write time-dependent diagnostics to constraint_norms.dat
         {
+            if (ft_evolve)
+                write_ft_diagnostics(current_slice_ptr, start_time + dt * time_step, time_step == 0);
             compute_scalar_energies(current_slice_ptr);
             const double charge_now = slice_charge(current_slice_ptr);
             const double ah_mass_now = get_ah_mass(); // 0 on non-owners since ah_radius<0 when AH search is off
@@ -3725,6 +3867,7 @@ void Spacetime::evolve()
         //enforce that A is traceless
         current_slice_ptr = &slices[n + 1];
         make_A_traceless(current_slice_ptr);
+        if (ft_evolve && ft_model.theta_implicit) ft_model.relax_conversion(current_slice_ptr, dt);
 
         //enforce minimum chi on owned points (ghosts get refreshed by exchange_ghosts below)
         for (int j = owned_begin(); j < owned_end(); j++)
@@ -3754,6 +3897,7 @@ void Spacetime::evolve()
             // Both writes are collective (they gather from every rank; rank 0 writes).
             write_current_slice();
             write_diagnostics();
+            if (ft_evolve) write_ft_slice(current_slice_ptr);
         }
 
         //write checkpoint files (collective: gather to rank 0, rank 0 writes)
@@ -3774,6 +3918,7 @@ void Spacetime::evolve()
                 std::string tag = std::to_string(current_dump);
                 write_current_slice("SliceData_" + tag + ".dat");
                 write_diagnostics("Diagnostics_" + tag + ".dat");
+                if (ft_evolve) write_ft_slice(current_slice_ptr, "FTSliceData_" + tag + ".dat");
                 last_dump_time = current_dump;
             }
         }
@@ -4097,5 +4242,62 @@ double Spacetime::apparent_horizon_search(const BSSNSlice* slice_ptr)
     }
     return outermost_r;
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// finite-temperature matter output (serial only)
+
+//integrated finite-T diagnostics, one row per call: totals use sqrt(gamma) = sqrt(h_zz h_ww^n) chi^{-(D-1)/2} and the
+//sphere area, with the same quadrature weights / 95% cut as slice_charge
+void Spacetime::write_ft_diagnostics(BSSNSlice* slice_ptr, double t, bool first)
+{
+    ft_model.prepare(slice_ptr);
+    deriv_cache_slice = nullptr;
+    const double n = D - 2.;
+    double N_S_tot = 0., N_N_tot = 0., S_tot = 0., vmax = 0., Tmax = 0., Jmax = 0.;
+    const int j_hi = std::min(n_gridpoints, (int)(0.95 * n_gridpoints) - 1);
+    const double area = 2. * pow(M_PI, 0.5 * (D - 1.)) / tgamma(0.5 * (D - 1.));
+    for (int j = 0; j < j_hi; j++)
+    {
+        if (!active_points[j]) continue;
+        const State& st = slice_ptr->states2[j];
+        const double z = (j + grid_offset) * dr;
+        const double chi = max(min_chi, st.bssn.chi);
+        const double vol = area * quad_weights[j] * pow(z, n) * sqrt(st.bssn.h_zz * pow(st.bssn.h_ww, n)) * pow(chi, -0.5 * (D - 1.));
+        N_S_tot += vol * st.ftm.N_S;
+        N_N_tot += vol * st.ftm.N_N;
+        S_tot += vol * st.ftm.Sigma;
+        const double u = fabs(ft_model.pts[j].v) * sqrt(st.bssn.h_zz / chi);
+        if (u > vmax) vmax = u;
+        if (ft_model.pts[j].T > Tmax) Tmax = ft_model.pts[j].T;
+        if (fabs(ft_model.pts[j].J) > Jmax) Jmax = fabs(ft_model.pts[j].J);
+    }
+    const FiniteTempMatter::Point& c = ft_model.pts[0];
+    std::ofstream out("ft_diagnostics.dat", first ? std::ios::trunc : std::ios::app);
+    if (first)
+        out << "#time  sigma_c  T_c  mu_c  Pi_psi_c  N_S  N_N  N_total  S_total  max|v|  T_max  K_sigma_c  c2p_failures  max_c2p_residual  max|J|  theta_capped  alpha_c" << endl;
+    out << std::setprecision(12) << t << "   " << c.sigma << "   " << c.T << "   " << c.mu << "   " << c.Pi << "   "
+        << N_S_tot << "   " << N_N_tot << "   " << N_S_tot + N_N_tot << "   " << S_tot << "   " << vmax << "   " << Tmax << "   "
+        << slice_ptr->states2[0].ftm.K_sigma << "   " << ft_model.c2p_failures << "   " << ft_model.max_c2p_res << "   " << Jmax << "   " << ft_model.theta_capped << "   "
+        << slice_ptr->states2[0].bssn.alpha << endl;
+}
+
+//radial profiles of the finite-T variables and primitives
+void Spacetime::write_ft_slice(BSSNSlice* slice_ptr, std::string file_name)
+{
+    ft_model.prepare(slice_ptr);
+    deriv_cache_slice = nullptr;
+    std::ofstream out(file_name);
+    out << "# z  sigma  K_sigma  N_S  N_N  Sigma  P_z  T  mu  v  Pi_psi  Upsilon  P_th  w" << endl;
+    for (int j = 0; j < n_gridpoints; j++)
+    {
+        if (!active_points[j]) continue;
+        const FTM& u = slice_ptr->states2[j].ftm;
+        const FiniteTempMatter::Point& p = ft_model.pts[j];
+        out << std::setprecision(12) << (j + grid_offset) * dr << "   " << p.sigma << "   " << u.K_sigma << "   " << u.N_S << "   "
+            << u.N_N << "   " << u.Sigma << "   " << u.P_z << "   " << p.T << "   " << p.mu << "   " << p.v << "   " << p.Pi << "   "
+            << p.Ups << "   " << p.P_th << "   " << p.w << endl;
+    }
+}
+
 
 #endif /*EVOLUTIONVARIABLES*/
