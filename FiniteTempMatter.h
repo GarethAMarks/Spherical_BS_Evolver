@@ -21,7 +21,7 @@ struct State;
 
 // Evolved finite-T variables at a gridpoint (in addition to phi_re, phi_im in CSF)
 struct FTM {
-    double K_sigma; // -Pi_sigma / 2 (even)
+    double K_sigma; // -Y Pi_sigma / 2 (even); = K_sigma for delta Y = 0
     double N_S;     // superfluid charge density -Upsilon Pi_psi (even)
     double N_N;     // normal charge density W n (even)
     double Sigma;   // entropy density W s (even)
@@ -53,6 +53,10 @@ struct FiniteTempEoS
     double bogoliubov_gap_width = 1.; // crossover_mode 2: softening of the phase-mode gap at mu_c = m, in units of T
     double bogoliubov_sigma_gap = 0.005; // crossover_mode 2: gap switched off where sigma >> bogoliubov_sigma_gap
     double sigma_phonon = 0.023, sigma_gas = 0.017, crossover_exponent = 20.;
+    // crossover_mode 3 (EoS R): w(sigma) P_qp + (1 - w) P_BE, w = 1 - exp(-(sigma/sigma_decouple)^decouple_exponent);
+    // P_qp = (mu_c T / 2 pi)^{3/2} T f(delta, gam, eta), delta = X / (2 m sigma^2 T) (gradient gap, softened for X <= 0 by
+    // gap_soft), gam = sigma^2 V'' / (2 mu_c T), eta = (mu - mu_c) / T; f from bogoliubov_table.h.
+    double sigma_decouple = 0.003, decouple_exponent = 8., gap_soft = 0.;
 
     struct Thermo
     {
@@ -61,9 +65,12 @@ struct FiniteTempEoS
         double n = 0.;       // dP/dmu
         double dF = 0.;      // delta F = 2 dP_th/d(sigma^2)
         double dUps = 0.;    // delta Upsilon = -2 dP_th/dXi
+        double dY = 0.;      // delta Y = -2 dP_th/dX (crossover_mode 3 only)
     };
     // thermal part only (the scalar part is the Lagrangian, handled by SBSE's ComplexScalarField)
-    Thermo thermal(double T, double mu, double sigma_sq, double Xi) const;
+    Thermo thermal(double T, double mu, double sigma_sq, double Xi, double X = 0.) const;
+    // smoothed gradient gap delta_eff(delta) >= 0 and its derivative
+    double soft_gap(double delta, double& d_ddelta) const;
     void phonon_B(double mu, double sigma_sq, double Xi, double& c2, double& B) const;
 
     double V(double s2) const;   // V(sigma^2)
@@ -121,11 +128,14 @@ public:
         double sigma = 0., dz_sigma = 0., dz_psi = 0.;
         double W = 1., w = 0., P_th = 0., s = 0., n = 0., dF = 0., dUps = 0., Ups = 0.;
         double Xi = 0.;
+        double Ksig = 0.;  // primitive K_sigma = (evolved Y K_sigma) / Y
+        double X = 0.;     // X = -4 K_sigma^2 + gamma^zz (d_z sigma)^2
+        double dY = 0.;    // delta Y = Y - 1
         double cross = 0.;
         double J = 0., theta = 0.; // deviation from Josephson and the (capped) theta_1 used here   // sigma^2 d_z psi = phi_re d_z phi_im - phi_im d_z phi_re
     };
     std::vector<Point> pts;
-    std::vector<double> f_sigma, f_T, f_mu, coef_S, flux_S, flux_N, flux_Sig, flux_P; // arrays that get differentiated
+    std::vector<double> f_sigma, f_T, f_mu, f_Y, coef_S, flux_S, flux_N, flux_Sig, flux_P; // arrays that get differentiated
     int c2p_failures = 0;     // in the last prepare()
     double max_c2p_res = 0.;  // worst relative residual in the last prepare()
 
@@ -149,6 +159,10 @@ public:
 
     // derivative of a cached array with the slice's stencil machinery (origin mirror with given parity, refinement)
     double deriv(const BSSNSlice* slice, const std::vector<double>& f, int j, int order, bool odd) const;
+
+    // K_sigma from the evolved Y K_sigma (Kt) at fixed (T, mu, sigma^2, Xi): fixed point K = Kt / Y(X(K)), with
+    // X = -4 K^2 + gzz_sz2; returns K and the thermodynamics at the final X
+    double solve_Ksig(double T, double mu, double s2, double Xi, double Kt, double gzz_sz2, FiniteTempEoS::Thermo& th, double& X) const;
 
 private:
     Spacetime* st;

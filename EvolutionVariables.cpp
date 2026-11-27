@@ -3582,6 +3582,9 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
         ft_model.eos.sigma_phonon = boson_star.ft_sigma_phonon;
         ft_model.eos.sigma_gas = boson_star.ft_sigma_gas;
         ft_model.eos.crossover_exponent = boson_star.ft_crossover_k;
+        ft_model.eos.sigma_decouple = boson_star.ft_sigma_decouple;
+        ft_model.eos.decouple_exponent = boson_star.ft_decouple_exponent;
+        ft_model.eos.gap_soft = boson_star.ft_gap_soft;
         ft_evolve = boson_star.ft_evolve;
         ft_model.sigma_atm = boson_star.ft_sigma_atm;
         ft_model.fluid_atm_frac = boson_star.ft_fluid_atm_frac;

@@ -107,6 +107,7 @@ void FiniteTempRelaxer::read_parameters(const std::string& filename, bool quiet)
         fill_parameter(current_line, "sigma_decouple = ", p_.sigma_decouple, quiet);
         fill_parameter(current_line, "decouple_exponent = ", p_.decouple_exponent, quiet);
         fill_parameter(current_line, "use_thermal_Y = ", p_.use_thermal_Y, quiet);
+        fill_parameter(current_line, "gap_soft = ", p_.gap_soft, quiet);
 
         fill_parameter(current_line, "omega_target = ", p_.omega_target, quiet);
         fill_parameter(current_line, "omega_step = ", p_.omega_step, quiet);
@@ -291,7 +292,9 @@ double FiniteTempRelaxer::gapped_qp_pressure(double T, double mu_chem, double mu
     double P = 0.0;
     if (w > 1e-14)
     {
-        const double delta = std::max(0.0, X) / (2.0 * m * sig2 * T);
+        const double draw = X / (2.0 * m * sig2 * T);
+        const double delta = (p_.gap_soft > 0.0) ? 0.5 * (draw + std::sqrt(draw * draw + p_.gap_soft * p_.gap_soft))
+                                                  : std::max(0.0, draw);
         const double gam = sig2 * ddV(sig2) / (2.0 * mu_c * T);
         const double eta = (mu_chem - mu_c) / T;
         const double pre = std::pow(mu_c * T / (2.0 * kPi), 1.5) * T;

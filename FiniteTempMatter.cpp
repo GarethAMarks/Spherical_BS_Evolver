@@ -61,10 +61,71 @@ void FiniteTempEoS::phonon_B(double mu, double sigma_sq, double Xi, double& c2, 
     B = 1. + (1. - c2) * mu * mu / Xs;
 }
 
-FiniteTempEoS::Thermo FiniteTempEoS::thermal(double T, double mu, double sigma_sq, double Xi) const
+double FiniteTempEoS::soft_gap(double delta, double& d_ddelta) const
+{
+    if (gap_soft > 0.)
+    {
+        const double q = std::sqrt(delta * delta + gap_soft * gap_soft);
+        d_ddelta = 0.5 * (1. + delta / q);
+        return 0.5 * (delta + q);
+    }
+    d_ddelta = (delta > 0.) ? 1. : 0.;
+    return max(0., delta);
+}
+
+FiniteTempEoS::Thermo FiniteTempEoS::thermal(double T, double mu, double sigma_sq, double Xi, double X) const
 {
     Thermo th;
     if (!(T >= 1e-12)) return th;
+
+    if (crossover_mode == 3)
+    {
+        // EoS R (finite_temp/FiniteTempRelaxer.cpp gapped_qp_pressure), with the tabulated f
+        if (!(Xi < 0.)) return th;
+        const double s2 = max(0., sigma_sq);
+        const double mu_c = std::sqrt(-Xi);
+        // decoupled Bose-Einstein gas
+        const double xg = (mu - m) / T;
+        double lnF, kap;
+        bose_gas::lnF_kappa(min(700., xg), 1, lnF, kap);
+        const double Pb = std::exp(min(700., 1.5 * std::log(m / (2. * M_PI)) + 2.5 * std::log(T) + lnF));
+        const double Pb_T = Pb * (2.5 - xg * kap) / T, Pb_mu = Pb * kap / T;
+        const double sd2 = max(1e-300, sigma_decouple * sigma_decouple);
+        const double kh = 0.5 * decouple_exponent;
+        const double xw = (s2 > 0.) ? std::pow(s2 / sd2, kh) : 0.;
+        const double w = -std::expm1(-xw);
+        const double w_s2 = (s2 > 0.) ? std::exp(-xw) * xw * kh / s2 : 0.;
+        double Pq = 0., Pq_T = 0., Pq_mu = 0., Pq_c = 0., Pq_s2 = 0., Pq_X = 0.;
+        if (w > 1e-14)
+        {
+            const double draw = X / (2. * m * s2 * T);
+            double dd;
+            const double delta = soft_gap(draw, dd);
+            const double a = s2 * ddV(s2), a_p = ddV(s2) + s2 * dddV(s2);
+            const double gam = max(0., a) / (2. * mu_c * T), eta = (mu - mu_c) / T;
+            double F, F_d, F_g, F_e;
+            bogoliubov::table().lnf(delta, gam, eta, F, F_d, F_g, F_e);
+            const double lnP = 1.5 * std::log(mu_c * T / (2. * M_PI)) + std::log(T) + F;
+            if (lnP < 700.)
+            {
+                Pq = std::exp(lnP);
+                Pq_T = Pq * (2.5 / T + F_d * dd * (-draw / T) + F_g * (-gam / T) + F_e * (-eta / T));
+                Pq_mu = Pq * F_e / T;
+                Pq_c = Pq * (1.5 / mu_c + F_g * (-gam / mu_c) - F_e / T);
+                Pq_s2 = Pq * (F_d * dd * (-draw / s2) + F_g * a_p / (2. * mu_c * T));
+                Pq_X = Pq * F_d * dd / (2. * m * s2 * T);
+            }
+        }
+        th.P_th = w * Pq + (1. - w) * Pb;
+        th.s = w * Pq_T + (1. - w) * Pb_T;
+        th.n = w * Pq_mu + (1. - w) * Pb_mu;
+        th.dF = 2. * (w * Pq_s2 + w_s2 * (Pq - Pb));
+        th.dUps = w * Pq_c / mu_c; // -2 dP/dXi, dmu_c/dXi = -1/(2 mu_c)
+        th.dY = -2. * w * Pq_X;
+        if (!std::isfinite(th.P_th) || !std::isfinite(th.s) || !std::isfinite(th.n) || !std::isfinite(th.dF)
+            || !std::isfinite(th.dUps) || !std::isfinite(th.dY)) return Thermo{};
+        return th;
+    }
 
     if (crossover_mode == 2)
     {
@@ -239,16 +300,36 @@ bool solve4(double A[4][4], double b[4], double x[4])
 }
 } // namespace
 
+double FiniteTempMatter::solve_Ksig(double T, double mu, double s2, double Xi, double Kt, double gzz_sz2,
+                                    FiniteTempEoS::Thermo& th, double& X) const
+{
+    double K = Kt;
+    X = -4. * K * K + gzz_sz2;
+    th = eos.thermal(T, mu, s2, Xi, X);
+    if (eos.crossover_mode != 3 || Kt == 0.) return K;
+    for (int it = 0; it < 8; it++)
+    {
+        const double Kn = Kt / max(1e-3, 1. + th.dY);
+        const bool done = std::abs(Kn - K) <= 1e-14 * std::abs(Kt);
+        K = Kn;
+        X = -4. * K * K + gzz_sz2;
+        th = eos.thermal(T, mu, s2, Xi, X);
+        if (done) break;
+    }
+    return K;
+}
+
 // Primitive recovery: find (T, mu, v, Pi_psi) with W n = N_N, W s = Sigma, w W^2 gamma_zz v = P_z, -Upsilon Pi = N_S.
 bool FiniteTempMatter::recover(const FTM& U, double floor, const BSSNState& b, double sigma, double dz_sigma, double dz_psi,
                                double K_sigma, Point& p, double& res) const
 {
-    (void)dz_sigma; (void)K_sigma; // the thermal EoS has no X dependence (delta Y = 0)
+    // K_sigma here is the evolved Y K_sigma; X = -4 K_sigma^2 + gamma^zz (d_z sigma)^2 enters through solve_Ksig
     const double chi = max(st->min_chi, b.chi);
     const double g_zz = b.h_zz / chi;
     const double g_ZZ = chi / b.h_zz;
     const double s2 = sigma * sigma;
     const double grad_psi2 = g_ZZ * dz_psi * dz_psi;
+    const double gzz_sz2 = g_ZZ * dz_sigma * dz_sigma;
 
     const bool no_fluid = !(U.N_N > floor) || !(U.Sigma > floor);
     if (no_fluid)
@@ -271,7 +352,9 @@ bool FiniteTempMatter::recover(const FTM& U, double floor, const BSSNState& b, d
         if (!(u * u < 1.)) return false;
         const double W = 1. / std::sqrt(1. - u * u);
         const double Xi = -Pi * Pi + grad_psi2;
-        const FiniteTempEoS::Thermo th = eos.thermal(T, mu, s2, Xi);
+        FiniteTempEoS::Thermo th;
+        double Xg;
+        solve_Ksig(T, mu, s2, Xi, K_sigma, gzz_sz2, th, Xg);
         const double w = T * th.s + mu * th.n;
         const double Ups = s2 + th.dUps;
         r[0] = W * th.n / U.N_N - 1.;
@@ -344,7 +427,7 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
 {
     const int N = (int)slice->states2.size();
     pts.resize(N);
-    f_sigma.resize(N); f_T.resize(N); f_mu.resize(N);
+    f_sigma.resize(N); f_T.resize(N); f_mu.resize(N); f_Y.assign(N, 1.);
     coef_S.resize(N); flux_S.resize(N); atm.assign(N, 0); bath.assign(N, 0); atm_w.assign(N, 0.); vel_V.assign(N, 0.); av_Q.assign(N, 0.); av_theta.assign(N, 0.); flux_N.resize(N); flux_Sig.resize(N); flux_P.resize(N);
     if ((int)guess.size() != N) guess.assign(N, Point{});
 
@@ -388,6 +471,7 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
             p.sigma = sig; p.dz_sigma = dz_sigma; p.dz_psi = dz_psi; p.cross = cross;
             p.Pi = (s2 > 1e-300) ? -s.ftm.N_S / s2 : 0.;
             p.mu = -p.Pi; p.W = 1.; p.Ups = s2;
+            p.Ksig = s.ftm.K_sigma; p.X = -4. * p.Ksig * p.Ksig + g_ZZ * dz_sigma * dz_sigma;
             p.Xi = -p.Pi * p.Pi + g_ZZ * dz_psi * dz_psi;
             pts[j] = p;
             fluid_atm[j] = 1;
@@ -421,7 +505,11 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
             // 1D Newton for Pi at T = T_bath, mu = mu_bath, v = 0: -Upsilon(T, mu, Xi(Pi)) Pi = N_S
             const double Tb = T_alpha0[j] / b.alpha, mub = mu_alpha0[j] / b.alpha;
             const double gp2 = g_ZZ * dz_psi * dz_psi;
-            auto fres = [&](double Pi) { return -(s2 + eos.thermal(Tb, mub, s2, -Pi * Pi + gp2).dUps) * Pi - s.ftm.N_S; };
+            const double gs2 = g_ZZ * dz_sigma * dz_sigma;
+            auto fres = [&](double Pi) {
+                FiniteTempEoS::Thermo thb; double Xb;
+                solve_Ksig(Tb, mub, s2, -Pi * Pi + gp2, s.ftm.K_sigma, gs2, thb, Xb);
+                return -(s2 + thb.dUps) * Pi - s.ftm.N_S; };
             double Pi = (p.Pi < 0.) ? p.Pi : ((s2 > 1e-300) ? -s.ftm.N_S / s2 : -1.);
             bool ok = false;
             for (int it = 0; it < 40; it++)
@@ -453,7 +541,15 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
 
         p.sigma = sig; p.dz_sigma = dz_sigma; p.dz_psi = dz_psi; p.cross = cross;
         p.Xi = -p.Pi * p.Pi + g_ZZ * dz_psi * dz_psi;
-        const FiniteTempEoS::Thermo th = eos.thermal(p.T, p.mu, s2, p.Xi);
+        FiniteTempEoS::Thermo th;
+        if (p.T > 0.)
+            p.Ksig = solve_Ksig(p.T, p.mu, s2, p.Xi, s.ftm.K_sigma, g_ZZ * dz_sigma * dz_sigma, th, p.X);
+        else
+        {
+            p.Ksig = s.ftm.K_sigma;
+            p.X = -4. * p.Ksig * p.Ksig + g_ZZ * dz_sigma * dz_sigma;
+        }
+        p.dY = th.dY;
         const double u2 = min(1. - 1e-15, g_zz * p.v * p.v);
         p.W = 1. / std::sqrt(1. - u2);
         p.P_th = th.P_th; p.s = th.s; p.n = th.n; p.dF = th.dF; p.dUps = th.dUps;
@@ -464,16 +560,17 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
         {
             p.J = p.W * (p.Pi + p.v * dz_psi) + p.mu;
             const double hmu = 1e-6 * max(1e-3, std::abs(p.mu));
-            const double n_mu = (eos.thermal(p.T, p.mu + hmu, s2, p.Xi).n - eos.thermal(p.T, p.mu - hmu, s2, p.Xi).n) / (2. * hmu);
+            const double n_mu = (eos.thermal(p.T, p.mu + hmu, s2, p.Xi, p.X).n - eos.thermal(p.T, p.mu - hmu, s2, p.Xi, p.X).n) / (2. * hmu);
             const double rate = b.alpha * (1. / max(1e-300, p.W * n_mu) + 1. / max(1e-300, p.Ups));
             p.theta = theta_implicit ? 0. : theta1; // implicit: applied by relax_conversion after each step instead
             if (!theta_implicit && dt > 0. && theta1 * rate * dt > theta_cfl) { p.theta = theta_cfl / (rate * dt); theta_capped++; }
             if (!(n_mu > 0.) || !(p.Ups > 0.)) p.theta = 0.;
         }
         pts[j] = p;
+        f_Y[j] = 1. + p.dY;
 
         // derived SBSE momenta: K_phi = (phi / sigma) K_sigma - (i / 2) phi Pi_psi
-        const double ks = (sig > 1e-300) ? s.ftm.K_sigma / sig : 0.;
+        const double ks = (sig > 1e-300) ? p.Ksig / sig : 0.;
         s.csf.K_phi_re = s.csf.phi_re * ks + 0.5 * s.csf.phi_im * p.Pi;
         s.csf.K_phi_im = s.csf.phi_im * ks - 0.5 * s.csf.phi_re * p.Pi;
 
@@ -528,7 +625,15 @@ void FiniteTempMatter::initialize_static(BSSNSlice& slice, const std::vector<Fin
         const double s2 = s.csf.phi_re * s.csf.phi_re + s.csf.phi_im * s.csf.phi_im;
         const double T = (j < (int)bg.size()) ? bg[j].T : 0.;
         const double mu = (j < (int)bg.size()) ? bg[j].mu : 0.;
-        const FiniteTempEoS::Thermo th = eos.thermal(T, mu, s2, -mu * mu);
+        double X = 0.;
+        if (eos.crossover_mode == 3 && s2 > 0.)
+        {
+            const double dre = slice.d_z(v_phi_re, j, 1), dim = slice.d_z(v_phi_im, j, 1);
+            const double dz_sigma = (s.csf.phi_re * dre + s.csf.phi_im * dim) / std::sqrt(s2);
+            const double chi = max(st->min_chi, s.bssn.chi);
+            X = chi / s.bssn.h_zz * dz_sigma * dz_sigma;
+        }
+        const FiniteTempEoS::Thermo th = eos.thermal(T, mu, s2, -mu * mu, X);
         s.ftm.K_sigma = 0.;
         s.ftm.N_S = (s2 + th.dUps) * mu;
         s.ftm.N_N = th.n;
@@ -576,8 +681,12 @@ FTM FiniteTempMatter::rhs(BSSNSlice* slice, int j, double z, double d_z_alpha, d
     const double lap = chi * (h_ZZ * (szz - chris_Zzz * sz) + d * h_WW * (sz_over_z - chris_Zww * sz))
                        - 0.5 * (D - 3.) * h_ZZ * d_z_chi * sz;
     const double sig = p.sigma;
+    // general Y: d_t (Y K_sigma) = ... - Div[alpha Y gamma^zz sigma'] / 2 + ..., with
+    // Div[alpha Y gamma^zz sigma'] = Y (gamma^zz alpha' sigma' + alpha Lap sigma) + alpha gamma^zz Y' sigma'
+    const double Yj = 1. + p.dY;
+    const double Yz = (eos.crossover_mode == 3) ? deriv(slice, f_Y, j, 1, false) : 0.;
     r.K_sigma = beta * slice->d_z(v_K_sigma, j, 1) + alpha * K * s.ftm.K_sigma
-                - 0.5 * (g_ZZ * d_z_alpha * sz + alpha * lap)
+                - 0.5 * (Yj * (g_ZZ * d_z_alpha * sz + alpha * lap) + alpha * g_ZZ * Yz * sz)
                 + 0.5 * alpha * (eos.dV(sig * sig) + p.Xi - p.dF) * sig;
 
     // superfluid charge
@@ -677,9 +786,9 @@ void FiniteTempMatter::stress_energy(const BSSNState& b, int j, double& rho, dou
     const double g_zz = b.h_zz / chi;
     const double wW2 = p.w * p.W * p.W;
     const double P_z = wW2 * g_zz * p.v;
-    rho = wW2 - p.P_th + p.dUps * p.Pi * p.Pi;
-    j_z = P_z - p.dUps * p.Pi * p.dz_psi;
-    S_zz = P_z * g_zz * p.v + p.P_th * b.h_zz / chi + p.dUps * p.dz_psi * p.dz_psi;
+    rho = wW2 - p.P_th + p.dUps * p.Pi * p.Pi + 4. * p.dY * p.Ksig * p.Ksig;
+    j_z = P_z - p.dUps * p.Pi * p.dz_psi + 2. * p.dY * p.Ksig * p.dz_sigma;
+    S_zz = P_z * g_zz * p.v + p.P_th * b.h_zz / chi + p.dUps * p.dz_psi * p.dz_psi + p.dY * p.dz_sigma * p.dz_sigma;
     S_ww = p.P_th * b.h_ww / chi;
 }
 
@@ -761,7 +870,7 @@ void FiniteTempMatter::relax_conversion(BSSNSlice* slice, double h)
         };
         // linearised first guess: dJ/dd ~ -(1/(W n_mu) + 1/Upsilon)
         const double hmu = 1e-6 * max(1e-3, std::abs(p0.mu));
-        const double n_mu = (eos.thermal(p0.T, p0.mu + hmu, s2, p0.Xi).n - eos.thermal(p0.T, p0.mu - hmu, s2, p0.Xi).n) / (2. * hmu);
+        const double n_mu = (eos.thermal(p0.T, p0.mu + hmu, s2, p0.Xi, p0.X).n - eos.thermal(p0.T, p0.mu - hmu, s2, p0.Xi, p0.X).n) / (2. * hmu);
         const double rate = 1. / max(1e-300, p0.W * n_mu) + 1. / max(1e-300, p0.Ups);
         if (!(n_mu > 0.) || !(p0.Ups > 0.)) continue;
         const double k = rate_k(p0, p0.Xi);
