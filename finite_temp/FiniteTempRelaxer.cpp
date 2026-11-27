@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include "FiniteTempRelaxer.h"
 #include "../bose_gas.h"
 #include "../bogoliubov.h"
@@ -105,6 +106,7 @@ void FiniteTempRelaxer::read_parameters(const std::string& filename, bool quiet)
         fill_parameter(current_line, "crossover_exponent = ", p_.crossover_exponent, quiet);
         fill_parameter(current_line, "sigma_decouple = ", p_.sigma_decouple, quiet);
         fill_parameter(current_line, "decouple_exponent = ", p_.decouple_exponent, quiet);
+        fill_parameter(current_line, "use_thermal_Y = ", p_.use_thermal_Y, quiet);
 
         fill_parameter(current_line, "omega_target = ", p_.omega_target, quiet);
         fill_parameter(current_line, "omega_step = ", p_.omega_step, quiet);
@@ -322,7 +324,7 @@ double FiniteTempRelaxer::gapped_qp_pressure(double T, double mu_chem, double mu
 
 double FiniteTempRelaxer::thermal_Y(double T, double mu_chem, double sigma_sq, double X, double Xi, double r) const
 {
-    if (p_.crossover_mode != 3 || T < 1e-12 || Xi >= 0.0)
+    if (p_.crossover_mode != 3 || !p_.use_thermal_Y || T < 1e-12 || Xi >= 0.0)
         return 1.0;
     const double mu_c = std::sqrt(-Xi);
     const double sig2 = std::max(1e-300, sigma_sq);
@@ -340,7 +342,7 @@ double FiniteTempRelaxer::thermal_Y(double T, double mu_chem, double sigma_sq, d
 double FiniteTempRelaxer::eta_dlnY_dr(double sigma, double eta, double alpha, double omega, double r,
                                       double ds_dr, double de_dr, double da_dr, double Y0) const
 {
-    if (p_.crossover_mode != 3 || current_temperature_ < 1e-12)
+    if (p_.crossover_mode != 3 || !p_.use_thermal_Y || current_temperature_ < 1e-12)
         return 0.0;
     // Directional derivative of Y along the profile: evaluate Y at the linearly extrapolated local state r +- h.
     const double h = 1e-4 * std::max(1.0, r);
@@ -1668,6 +1670,10 @@ bool FiniteTempRelaxer::newton_solve_stage()
                       << '\n';
         }
 
+        if (std::getenv("FTR_DEBUG"))
+            std::cout << std::scientific << std::setprecision(6) << "[newton] iter=" << iter << " |res|_inf=" << base_norm
+                      << " sigma=" << sig_max << "@" << sig_idx << " eta=" << eta_max << "@" << eta_idx << " alpha=" << alp_max
+                      << "@" << alp_idx << " Xs=" << xs_max << "@" << xs_idx << " omega=" << om_max << "@" << om_idx << '\n';
         if (base_norm < p_.newton_tolerance)
         {
             return true;
@@ -1758,6 +1764,8 @@ bool FiniteTempRelaxer::newton_solve_stage()
 
         if (!accepted)
         {
+            if (std::getenv("FTR_DEBUG"))
+                std::cout << "[newton] line search failed: base=" << base_norm << " last_trial=" << last_trial_norm << '\n';
             if (p_.increment_omega)
             {
                 std::cout << std::scientific << std::setprecision(6)

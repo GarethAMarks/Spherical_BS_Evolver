@@ -57,6 +57,7 @@ struct RelaxerParams
     int crossover_mode = 0;
     double sigma_decouple = 0.003;
     double decouple_exponent = 8.0;
+    int use_thermal_Y = 1; // mode 3: 0 drops the X-dependence of P_th from the field equations (Y = 1), for diagnostics
     // crossover_mode 2: width (in units of T) of the softened phase-mode gap at mu_c = m; 0 = hard max (kink)
     double bogoliubov_gap_width = 1.0;
     // crossover_mode 2: the phase-mode gap (m - mu_c) is switched off where sigma >> bogoliubov_sigma_gap (exp(-(sigma/sigma_gap)^4));
