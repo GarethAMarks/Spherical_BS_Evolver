@@ -48,7 +48,15 @@ struct RelaxerParams
     //   which the finite-T evolution needs (mode 0 is not hyperbolic in the crossover shell).
     // crossover_mode 2: one-loop Bogoliubov quasiparticle pressure (notes sec:bogoliubov, ../bogoliubov.h); no
     //   sigma_phonon, sigma_gas or q. gas_statistics is ignored (the sigma -> 0 limit is the Bose-Einstein gas).
+    // crossover_mode 3: recommended EoS "R" (notes microphysics/phonons_beyond_GO.tex, sec:R):
+    //   P_th = w(sigma) P_qp(T, mu, mu_c; sigma^2, Delta_X) + (1 - w(sigma)) P_BE(T, mu),
+    //   P_qp = Bogoliubov quasiparticles (scaling form of bogoliubov.h, kinetic mass mu_c) with the scale-height gap
+    //   Delta_X = X / (2 m sigma^2) (X = grad sigma . grad sigma), P_BE = free Bose-Einstein gas decoupled from the
+    //   superflow, w = 1 - exp(-(sigma / sigma_decouple)^decouple_exponent). P depends on X, so Y = 1 - 2 dP/dX != 1
+    //   enters the sigma equation and the radial pressure.
     int crossover_mode = 0;
+    double sigma_decouple = 0.003;
+    double decouple_exponent = 8.0;
     // crossover_mode 2: width (in units of T) of the softened phase-mode gap at mu_c = m; 0 = hard max (kink)
     double bogoliubov_gap_width = 1.0;
     // crossover_mode 2: the phase-mode gap (m - mu_c) is switched off where sigma >> bogoliubov_sigma_gap (exp(-(sigma/sigma_gap)^4));
@@ -106,6 +114,7 @@ public:
         double n = 0.0;
         double F = 0.0;
         double Upsilon = 0.0;
+        double Y = 1.0;
     };
 
     void read_parameters(bool quiet = false);
@@ -211,6 +220,11 @@ private:
     double scalar_pressure_term(double sigma_sq, double X, double Xi) const;
     double thermal_pressure_term(double T, double mu_chem, double sigma_sq, double X, double Xi) const;
     double bogoliubov_pressure(double T, double mu_chem, double sigma_sq, double Xi) const;
+    double gapped_qp_pressure(double T, double mu_chem, double mu_c, double sigma_sq, double X) const; // crossover_mode 3
+    double thermal_Y(double T, double mu_chem, double sigma_sq, double X, double Xi, double r) const;
+    // crossover_mode 3: eta * (dY/dr) / Y along the profile, from the local state and its radial derivatives
+    double eta_dlnY_dr(double sigma, double eta, double alpha, double omega, double r,
+                       double ds_dr, double de_dr, double da_dr, double Y0) const;
     double compute_suppression_factor(double r) const;
     ThermoConjugates conjugates_analytic(double T, double mu_chem, double sigma_sq, double X, double Xi, double r) const;
 

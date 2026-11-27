@@ -103,6 +103,8 @@ void FiniteTempRelaxer::read_parameters(const std::string& filename, bool quiet)
         fill_parameter(current_line, "sigma_phonon = ", p_.sigma_phonon, quiet);
         fill_parameter(current_line, "sigma_gas = ", p_.sigma_gas, quiet);
         fill_parameter(current_line, "crossover_exponent = ", p_.crossover_exponent, quiet);
+        fill_parameter(current_line, "sigma_decouple = ", p_.sigma_decouple, quiet);
+        fill_parameter(current_line, "decouple_exponent = ", p_.decouple_exponent, quiet);
 
         fill_parameter(current_line, "omega_target = ", p_.omega_target, quiet);
         fill_parameter(current_line, "omega_step = ", p_.omega_step, quiet);
@@ -229,6 +231,8 @@ double FiniteTempRelaxer::thermal_pressure_term(double T, double mu_chem, double
 {
     if (p_.crossover_mode == 2)
         return bogoliubov_pressure(T, mu_chem, sigma_sq, Xi);
+    if (p_.crossover_mode == 3)
+        return (Xi < 0.0) ? gapped_qp_pressure(T, mu_chem, std::sqrt(-Xi), sigma_sq, X) : 0.0;
     const double sig2 = std::max(0.0, sigma_sq);
     const double cph2 = cph_sq(sig2, Xi);
     const double cph = std::sqrt(std::max(1e-12, cph2));
@@ -271,6 +275,86 @@ double FiniteTempRelaxer::bogoliubov_pressure(double T, double mu_chem, double s
                                                 bogoliubov::gap_factor(sig2, p_.bogoliubov_sigma_gap));
     // Beyond the Landau limit P is +inf; return a large finite value so line searches reject the trial.
     return std::isfinite(P) ? P : 1e30;
+}
+
+double FiniteTempRelaxer::gapped_qp_pressure(double T, double mu_chem, double mu_c, double sigma_sq, double X) const
+{
+    if (T <= 0.0 || mu_c <= 0.0)
+        return 0.0;
+    const double sig2 = std::max(0.0, sigma_sq);
+    const double m = p_.mu;
+    const double sd = std::max(1e-300, p_.sigma_decouple);
+    const double xw = std::pow(sig2 / (sd * sd), 0.5 * p_.decouple_exponent);
+    const double w = -std::expm1(-xw);
+    double P = 0.0;
+    if (w > 1e-14)
+    {
+        const double delta = std::max(0.0, X) / (2.0 * m * sig2 * T);
+        const double gam = sig2 * ddV(sig2) / (2.0 * mu_c * T);
+        const double eta = (mu_chem - mu_c) / T;
+        const double pre = std::pow(mu_c * T / (2.0 * kPi), 1.5) * T;
+        double Pqp;
+        if (!std::isfinite(delta) || delta > 700.0)
+            Pqp = 0.0;
+        else
+        {
+            const double lnf = bogoliubov::lnf_quad(delta, gam, eta);
+            if (std::isfinite(lnf))
+                Pqp = pre * std::exp(lnf);
+            else
+            {
+                const double fv = bogoliubov::f(delta, gam, eta);
+                if (!std::isfinite(fv)) return 1e30; // beyond the Landau limit: reject in line searches
+                Pqp = pre * std::max(0.0, fv);
+            }
+        }
+        P += w * Pqp;
+    }
+    if (1.0 - w > 1e-14)
+    {
+        double lnF, kap;
+        const double x = (mu_chem - m) / std::max(1e-12, T);
+        bose_gas::lnF_kappa(std::min(700.0, x), 1, lnF, kap);
+        P += (1.0 - w) * std::pow(m / (2.0 * kPi), 1.5) * std::pow(T, 2.5) * std::exp(std::min(700.0, lnF));
+    }
+    return P;
+}
+
+double FiniteTempRelaxer::thermal_Y(double T, double mu_chem, double sigma_sq, double X, double Xi, double r) const
+{
+    if (p_.crossover_mode != 3 || T < 1e-12 || Xi >= 0.0)
+        return 1.0;
+    const double mu_c = std::sqrt(-Xi);
+    const double sig2 = std::max(1e-300, sigma_sq);
+    // step: relative in X, or a change of 1e-4 in delta = X/(2 m sigma^2 T) near X = 0
+    const double hX = std::max(1e-4 * X, 1e-4 * 2.0 * p_.mu * sig2 * T);
+    double dPdX;
+    if (X > hX)
+        dPdX = (gapped_qp_pressure(T, mu_chem, mu_c, sig2, X + hX) - gapped_qp_pressure(T, mu_chem, mu_c, sig2, X - hX)) / (2.0 * hX);
+    else
+        dPdX = (-3.0 * gapped_qp_pressure(T, mu_chem, mu_c, sig2, X) + 4.0 * gapped_qp_pressure(T, mu_chem, mu_c, sig2, X + hX)
+                - gapped_qp_pressure(T, mu_chem, mu_c, sig2, X + 2.0 * hX)) / (2.0 * hX);
+    return 1.0 - 2.0 * compute_suppression_factor(r) * dPdX;
+}
+
+double FiniteTempRelaxer::eta_dlnY_dr(double sigma, double eta, double alpha, double omega, double r,
+                                      double ds_dr, double de_dr, double da_dr, double Y0) const
+{
+    if (p_.crossover_mode != 3 || current_temperature_ < 1e-12)
+        return 0.0;
+    // Directional derivative of Y along the profile: evaluate Y at the linearly extrapolated local state r +- h.
+    const double h = 1e-4 * std::max(1.0, r);
+    auto Yat = [&](double sgn) -> double
+    {
+        const double s = sigma + sgn * h * ds_dr;
+        const double e = eta + sgn * h * de_dr;
+        const double a = std::max(1e-12, alpha + sgn * h * da_dr);
+        const double T = current_temperature_ / a;
+        const double mu = omega / a;
+        return thermal_Y(T, mu, s * s, e * e, -mu * mu, r + sgn * h);
+    };
+    const double dY = (Yat(1.0) - Yat(-1.0)) / (2.0 * h);
+    return eta * dY / std::max(1e-12, Y0);
 }
 
 double FiniteTempRelaxer::compute_suppression_factor(double r) const
@@ -356,6 +440,31 @@ FiniteTempRelaxer::ThermoConjugates FiniteTempRelaxer::conjugates_analytic(
     const double dPsc_dXi = -0.5 * sig2;
 
     const double sup = compute_suppression_factor(r);
+
+    if (p_.crossover_mode == 3 && T >= 1e-12)
+    {
+        // Recommended EoS R: central differences of the smooth quadrature (lnf_quad), one-sided near sigma^2 = 0.
+        const double mu_c = (Xi < 0.0) ? std::sqrt(-Xi) : 0.0;
+        auto Pq = [&](double TT, double mm, double mc, double ss) -> double
+        {
+            return gapped_qp_pressure(TT, mm, mc, ss, X);
+        };
+        const double hT = 1e-4 * T, hm = 1e-4 * T, hc = 1e-4 * T;
+        const double hs = 1e-4 * std::max(sig2, 1e-300);
+        const double dP_dT = (Pq(T + hT, mu_chem, mu_c, sig2) - Pq(T - hT, mu_chem, mu_c, sig2)) / (2.0 * hT);
+        const double dP_dmu = (Pq(T, mu_chem + hm, mu_c, sig2) - Pq(T, mu_chem - hm, mu_c, sig2)) / (2.0 * hm);
+        const double dP_dmuc = (mu_c > 2.0 * hc)
+            ? (Pq(T, mu_chem, mu_c + hc, sig2) - Pq(T, mu_chem, mu_c - hc, sig2)) / (2.0 * hc) : 0.0;
+        const double dP_ds2 = (sig2 > 0.0)
+            ? (Pq(T, mu_chem, mu_c, sig2 + hs) - Pq(T, mu_chem, mu_c, sig2 - hs)) / (2.0 * hs) : 0.0;
+        const double dP_dXi = (mu_c > 0.0) ? -dP_dmuc / (2.0 * mu_c) : 0.0;
+        out.s = sup * dP_dT;
+        out.n = sup * dP_dmu;
+        out.F = 2.0 * (dPsc_ds2 + sup * dP_ds2);
+        out.Upsilon = -2.0 * (dPsc_dXi + sup * dP_dXi);
+        out.Y = thermal_Y(T, mu_chem, sig2, X, Xi, r);
+        return out;
+    }
 
     if (p_.crossover_mode == 2 && T >= 1e-12)
     {
@@ -896,9 +1005,11 @@ FiniteTempRelaxer::Residuals FiniteTempRelaxer::compute_residuals() const
         const double F = tc.F;
         const double source_X = mu_chem * mu_chem * tc.Upsilon + mu_chem * tc.n + tc.s * temp_local - P;
 
+        const double Ysig = tc.Y;
+        const double yterm = eta_dlnY_dr(sigma, eta, alpha, omega, r, ds_dr, de_dr, da_dr, Ysig);
         R.sigma[j] = ds_dr - Xs * eta;
-        R.eta[j] = de_dr + 2.0 * eta / r + (da_dr / alpha) * eta + Xs * sigma * F;
-        R.alpha[j] = da_dr / alpha - ((Xs * Xs - 1.0) / (2.0 * r) + 4.0 * kPi * r * Xs * Xs * (eta * eta + P));
+        R.eta[j] = de_dr + 2.0 * eta / r + (da_dr / alpha) * eta + yterm + Xs * sigma * F / Ysig;
+        R.alpha[j] = da_dr / alpha - ((Xs * Xs - 1.0) / (2.0 * r) + 4.0 * kPi * r * Xs * Xs * (Ysig * eta * eta + P));
         R.Xs[j] = dx_dr / Xs - ((1.0 - Xs * Xs) / (2.0 * r) + 4.0 * kPi * r * Xs * Xs * source_X);
         if (p_.increment_omega)
         {
@@ -1155,9 +1266,11 @@ void FiniteTempRelaxer::build_jacobian_fd(const std::vector<double>& x_base,
                     const double F        = tc.F;
                     const double source_X = mu_chem * mu_chem * tc.Upsilon + mu_chem * tc.n + tc.s * temp_local - P;
 
+                    const double Ysig = tc.Y;
+                    const double yterm = eta_dlnY_dr(sigma, eta, alpha, omega, r, ds_dr, de_dr, da_dr, Ysig);
                     r_window[base + 0] = ds_dr - Xs * eta;
-                    r_window[base + 1] = de_dr + 2.0 * eta / r + (da_dr / alpha) * eta + Xs * sigma * F;
-                    r_window[base + 2] = da_dr / alpha - ((Xs * Xs - 1.0) / (2.0 * r) + 4.0 * kPi * r * Xs * Xs * (eta * eta + P));
+                    r_window[base + 1] = de_dr + 2.0 * eta / r + (da_dr / alpha) * eta + yterm + Xs * sigma * F / Ysig;
+                    r_window[base + 2] = da_dr / alpha - ((Xs * Xs - 1.0) / (2.0 * r) + 4.0 * kPi * r * Xs * Xs * (Ysig * eta * eta + P));
                     r_window[base + 3] = dx_dr / Xs - ((1.0 - Xs * Xs) / (2.0 * r) + 4.0 * kPi * r * Xs * Xs * source_X);
 
                     if (!p_.increment_omega)
