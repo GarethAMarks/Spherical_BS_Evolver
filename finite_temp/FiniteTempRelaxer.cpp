@@ -1,5 +1,6 @@
 #include "FiniteTempRelaxer.h"
 #include "../bose_gas.h"
+#include "../bogoliubov.h"
 
 #include <algorithm>
 #include <cmath>
@@ -96,6 +97,8 @@ void FiniteTempRelaxer::read_parameters(const std::string& filename, bool quiet)
         fill_parameter(current_line, "cph_epsilon = ", p_.cph_epsilon, quiet);
         fill_parameter(current_line, "pressure_interp_power = ", p_.pressure_interp_power, quiet);
         fill_parameter(current_line, "crossover_mode = ", p_.crossover_mode, quiet);
+        fill_parameter(current_line, "bogoliubov_gap_width = ", p_.bogoliubov_gap_width, quiet);
+        fill_parameter(current_line, "bogoliubov_sigma_gap = ", p_.bogoliubov_sigma_gap, quiet);
         fill_parameter(current_line, "gas_statistics = ", p_.gas_statistics, quiet);
         fill_parameter(current_line, "sigma_phonon = ", p_.sigma_phonon, quiet);
         fill_parameter(current_line, "sigma_gas = ", p_.sigma_gas, quiet);
@@ -224,6 +227,8 @@ double FiniteTempRelaxer::scalar_pressure_term(double sigma_sq, double X, double
 
 double FiniteTempRelaxer::thermal_pressure_term(double T, double mu_chem, double sigma_sq, double X, double Xi) const
 {
+    if (p_.crossover_mode == 2)
+        return bogoliubov_pressure(T, mu_chem, sigma_sq, Xi);
     const double sig2 = std::max(0.0, sigma_sq);
     const double cph2 = cph_sq(sig2, Xi);
     const double cph = std::sqrt(std::max(1e-12, cph2));
@@ -254,6 +259,18 @@ double FiniteTempRelaxer::thermal_pressure_term(double T, double mu_chem, double
     double P_total = pow(pow(P_phonon, -q) + pow(P_gas, -q), -1.0 / q);
     
     return P_total;
+}
+
+double FiniteTempRelaxer::bogoliubov_pressure(double T, double mu_chem, double sigma_sq, double Xi) const
+{
+    // mu_c = sqrt(-Xi) (timelike phase gradient), a = sigma^2 V''(sigma^2), mass m = p_.mu.
+    if (T <= 0.0 || Xi >= 0.0)
+        return 0.0;
+    const double sig2 = std::max(0.0, sigma_sq);
+    const double P = bogoliubov::pressure(T, mu_chem, std::sqrt(-Xi), sig2 * ddV(sig2), p_.mu, p_.bogoliubov_gap_width,
+                                                bogoliubov::gap_factor(sig2, p_.bogoliubov_sigma_gap));
+    // Beyond the Landau limit P is +inf; return a large finite value so line searches reject the trial.
+    return std::isfinite(P) ? P : 1e30;
 }
 
 double FiniteTempRelaxer::compute_suppression_factor(double r) const
@@ -339,6 +356,54 @@ FiniteTempRelaxer::ThermoConjugates FiniteTempRelaxer::conjugates_analytic(
     const double dPsc_dXi = -0.5 * sig2;
 
     const double sup = compute_suppression_factor(r);
+
+    if (p_.crossover_mode == 2 && T >= 1e-12)
+    {
+        // Bogoliubov EoS: central differences of the (smooth) quadrature. sigma^2 enters only through
+        // a = sigma^2 V'', so dP/dsigma^2 = (dP/da) (V'' + sigma^2 V'''); the a-step is relative to a, one-sided near a = 0.
+        const double mu_c = (Xi < 0.0) ? std::sqrt(-Xi) : 0.0;
+        const double Vpp = ddV(sig2);
+        double Vppp = 0.0;
+        if (p_.solitonic)
+        {
+            const double scale2 = std::max(1e-12, p_.sigma_scale * p_.sigma_scale);
+            Vppp = 24.0 * p_.mu * p_.mu / (scale2 * scale2);
+        }
+        const double a = sig2 * Vpp;
+        double dg_ds2 = 0.0;
+        const double gf = bogoliubov::gap_factor(sig2, p_.bogoliubov_sigma_gap, &dg_ds2);
+        auto Pb = [&](double TT, double mm, double aa, double mc, double gg) -> double
+        {
+            if (TT <= 0.0 || mc <= 0.0) return 0.0;
+            const double P = bogoliubov::pressure(TT, mm, mc, std::max(0.0, aa), p_.mu, p_.bogoliubov_gap_width, gg);
+            return std::isfinite(P) ? P : 1e30;
+        };
+        const double hT = 1e-4 * T;
+        const double hm = 1e-4 * T;
+        const double ha = 1e-4 * std::max(a, 1e-3 * mu_c * T);
+        const double hc = 1e-4 * T;
+        const double dP_dT = (Pb(T + hT, mu_chem, a, mu_c, gf) - Pb(T - hT, mu_chem, a, mu_c, gf)) / (2.0 * hT);
+        const double dP_dmu = (Pb(T, mu_chem + hm, a, mu_c, gf) - Pb(T, mu_chem - hm, a, mu_c, gf)) / (2.0 * hm);
+        const double dP_da = (a > ha)
+            ? (Pb(T, mu_chem, a + ha, mu_c, gf) - Pb(T, mu_chem, a - ha, mu_c, gf)) / (2.0 * ha)
+            : (-3.0 * Pb(T, mu_chem, a, mu_c, gf) + 4.0 * Pb(T, mu_chem, a + ha, mu_c, gf) - Pb(T, mu_chem, a + 2.0 * ha, mu_c, gf)) / (2.0 * ha);
+        const double dP_dmuc = (mu_c > 2.0 * hc)
+            ? (Pb(T, mu_chem, a, mu_c + hc, gf) - Pb(T, mu_chem, a, mu_c - hc, gf)) / (2.0 * hc)
+            : 0.0;
+        const double hg = 1e-4;
+        const double dP_dg = (dg_ds2 != 0.0)
+            ? (Pb(T, mu_chem, a, mu_c, std::min(1.0, gf + hg)) - Pb(T, mu_chem, a, mu_c, std::max(0.0, gf - hg)))
+                / (std::min(1.0, gf + hg) - std::max(0.0, gf - hg))
+            : 0.0;
+        // dmu_c/dXi = -1/(2 mu_c)
+        const double dP_dXi = (mu_c > 0.0) ? -dP_dmuc / (2.0 * mu_c) : 0.0;
+        out.s = sup * dP_dT;
+        out.n = sup * dP_dmu;
+        out.F = 2.0 * (dPsc_ds2 + sup * (dP_da * (Vpp + sig2 * Vppp) + dP_dg * dg_ds2));
+        out.Upsilon = -2.0 * (dPsc_dXi + sup * dP_dXi);
+        (void)X;
+        return out;
+    }
 
     if (T < 1e-12)
     {

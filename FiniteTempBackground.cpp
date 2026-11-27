@@ -145,6 +145,8 @@ void BosonStar::read_finite_temp()
     ft_cph_epsilon = rp.cph_epsilon;
     ft_q = rp.pressure_interp_power;
     ft_gas_statistics = rp.gas_statistics;
+    ft_bogoliubov_gap_width = rp.bogoliubov_gap_width;
+    ft_bogoliubov_sigma_gap = rp.bogoliubov_sigma_gap;
     ft_crossover_mode = rp.crossover_mode; ft_sigma_phonon = rp.sigma_phonon; ft_sigma_gas = rp.sigma_gas; ft_crossover_k = rp.crossover_exponent;
     ft_suppression = rp.use_suppression_factor;
     rp.mu = mu;

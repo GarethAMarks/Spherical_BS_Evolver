@@ -49,7 +49,9 @@ struct FiniteTempEoS
     double B_floor = 0.;   // >0: convex floor on the phonon B factor at B_floor*c^2 (evolution only)
     double q = 1.;          // pressure_interp_power
     int gas_statistics = 0; // 0 Boltzmann, 1 Bose-Einstein free gas (bose_gas.h)
-    int crossover_mode = 0; // 0: q-norm (draft eq. 31); 1: convex sigma blend (see FiniteTempRelaxer.h)
+    int crossover_mode = 0; // 0: q-norm (draft eq. 31); 1: convex sigma blend; 2: Bogoliubov (see FiniteTempRelaxer.h)
+    double bogoliubov_gap_width = 1.; // crossover_mode 2: softening of the phase-mode gap at mu_c = m, in units of T
+    double bogoliubov_sigma_gap = 0.005; // crossover_mode 2: gap switched off where sigma >> bogoliubov_sigma_gap
     double sigma_phonon = 0.023, sigma_gas = 0.017, crossover_exponent = 20.;
 
     struct Thermo

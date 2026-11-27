@@ -46,7 +46,14 @@ struct RelaxerParams
     //   w = 1 - exp(-(sigma / sigma_phonon)^k), g = exp(-(sigma / sigma_gas)^k), k = crossover_exponent.
     //   The weights depend on sigma only, so P stays convex in (T, mu, Pi) and Upsilon > 0 for suitable sigma_phonon,
     //   which the finite-T evolution needs (mode 0 is not hyperbolic in the crossover shell).
+    // crossover_mode 2: one-loop Bogoliubov quasiparticle pressure (notes sec:bogoliubov, ../bogoliubov.h); no
+    //   sigma_phonon, sigma_gas or q. gas_statistics is ignored (the sigma -> 0 limit is the Bose-Einstein gas).
     int crossover_mode = 0;
+    // crossover_mode 2: width (in units of T) of the softened phase-mode gap at mu_c = m; 0 = hard max (kink)
+    double bogoliubov_gap_width = 1.0;
+    // crossover_mode 2: the phase-mode gap (m - mu_c) is switched off where sigma >> bogoliubov_sigma_gap (exp(-(sigma/sigma_gap)^4));
+    //   0 = gap (m - mu_c)_+ set by mu_c alone (non-convex at mu_c = m, see bogoliubov.h)
+    double bogoliubov_sigma_gap = 0.005;
     // gas_statistics 0: Boltzmann gas (draft eq. 31); 1: Bose-Einstein gas, P_gas = (m/2pi)^{3/2} T^{5/2} Li_{5/2}(e^{(mu-m)/T}) (see bose_gas.h)
     int gas_statistics = 0;
     double sigma_phonon = 0.023;
@@ -203,6 +210,7 @@ private:
     double cph_sq(double sigma_sq, double Xi) const;
     double scalar_pressure_term(double sigma_sq, double X, double Xi) const;
     double thermal_pressure_term(double T, double mu_chem, double sigma_sq, double X, double Xi) const;
+    double bogoliubov_pressure(double T, double mu_chem, double sigma_sq, double Xi) const;
     double compute_suppression_factor(double r) const;
     ThermoConjugates conjugates_analytic(double T, double mu_chem, double sigma_sq, double X, double Xi, double r) const;
 

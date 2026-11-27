@@ -1,9 +1,11 @@
 #include "FiniteTempMatter.h"
 #include "bose_gas.h"
+#include "bogoliubov_table.h"
 #include "EvolutionVariables.h"
 #include "mathutils.h"
 
 #include <cmath>
+#include <cstdlib>
 #include <algorithm>
 #include <iostream>
 
@@ -63,6 +65,25 @@ FiniteTempEoS::Thermo FiniteTempEoS::thermal(double T, double mu, double sigma_s
 {
     Thermo th;
     if (!(T >= 1e-12)) return th;
+
+    if (crossover_mode == 2)
+    {
+        // Bogoliubov quasiparticle pressure, tabulated (bogoliubov_table.h); mu_c = sqrt(-Xi), a = sigma^2 V''
+        if (!(Xi < 0.)) return th;
+        const double s2b = max(0., sigma_sq);
+        const double mu_c = std::sqrt(-Xi);
+        const double a = s2b * ddV(s2b), a_p = ddV(s2b) + s2b * dddV(s2b);
+        double dg_ds2 = 0.;
+        const double gfac = bogoliubov::gap_factor(s2b, bogoliubov_sigma_gap, &dg_ds2);
+        double P, P_T, P_mu, P_a, P_c, P_g;
+        bogoliubov::pressure_table(T, mu, mu_c, a, m, bogoliubov_gap_width, gfac, P, P_T, P_mu, P_a, P_c, P_g);
+        if (!std::isfinite(P) || !std::isfinite(P_T) || !std::isfinite(P_mu) || !std::isfinite(P_a) || !std::isfinite(P_c)
+            || !std::isfinite(P_g)) return th;
+        th.P_th = P; th.s = P_T; th.n = P_mu;
+        th.dF = 2. * (P_a * a_p + P_g * dg_ds2);
+        th.dUps = P_c / mu_c; // -2 dP/dXi, dmu_c/dXi = -1/(2 mu_c)
+        return th;
+    }
 
     const double s2 = max(0., sigma_sq);
     const double Xs = (std::abs(Xi) < 1e-12) ? ((Xi >= 0.) ? 1e-12 : -1e-12) : Xi;
@@ -419,7 +440,14 @@ void FiniteTempMatter::prepare(BSSNSlice* slice)
             res = 0.;
         }
         else if (!recover(s.ftm, floor, b, sig, dz_sigma, dz_psi, s.ftm.K_sigma, p, res))
+        {
             c2p_failures++;
+            static const bool dbg = std::getenv("FT_C2P_DEBUG") != nullptr;
+            if (dbg)
+                std::cerr << "[c2p fail] j=" << j << " sigma=" << sig << " N_N=" << s.ftm.N_N << " Sigma=" << s.ftm.Sigma
+                          << " N_S=" << s.ftm.N_S << " P_z=" << s.ftm.P_z << " -> T=" << p.T << " mu=" << p.mu << " Pi=" << p.Pi
+                          << " v=" << p.v << " res=" << res << '\n';
+        }
         if (std::isfinite(res)) max_c2p_res = max(max_c2p_res, res);
         guess[j] = p;
 

@@ -153,6 +153,8 @@ class BosonStar
         int ft_crossover_mode = 0;       // relaxer crossover_mode and its parameters
         int ft_gas_statistics = 0;       // relaxer gas_statistics
         double ft_sigma_phonon = 0.023, ft_sigma_gas = 0.017, ft_crossover_k = 20.;
+        double ft_bogoliubov_gap_width = 1.; // relaxer bogoliubov_gap_width (crossover_mode 2)
+        double ft_bogoliubov_sigma_gap = 0.005; // relaxer bogoliubov_sigma_gap (crossover_mode 2)
         bool ft_suppression = 0;         // relaxer use_suppression_factor (not a local EoS: evolutions need 0)
         std::vector<FiniteTempPoint> ft_state; // background thermodynamics on radius_array (draft sign convention)
         void read_finite_temp();         // fill state/radius_array/omega/ft_state from the relaxer; rank 0 only
