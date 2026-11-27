@@ -59,6 +59,20 @@ double BosonStarSeedShooter::ddV(const double A) const
 
 SeedState BosonStarSeedShooter::state_RHS(const double radius, long double frequency, SeedState s, bool asymptotic_region) const
 {
+    if (qball_mode)
+    {
+        // Flat Minkowski: X = 1, alpha = 1 (phi = 0) throughout.
+        // Metric fields do not evolve; only the scalar sector is integrated.
+        const double eta_corr = (radius == 0.0) ? (1.0 / (D - 1.0)) : 1.0;
+        const double T3       = (radius == 0.0) ? 0.0 : s.eta / radius;
+        return SeedState{
+            s.eta,
+            0.0,
+            0.0,
+            static_cast<double>(eta_corr * (-(D - 2.0) * T3
+                + s.A * (dV(s.A) - static_cast<double>(frequency * frequency))))};
+    }
+
     const double epsilon = 1e-7;
     const double r = (radius == 0.0) ? epsilon : radius;
 

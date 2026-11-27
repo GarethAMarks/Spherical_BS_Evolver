@@ -35,6 +35,8 @@ decay_exponent = 100
 cph_epsilon = 1e-8
 pressure_interp_power = 2.0
 use_suppression_factor = 0
+# 0 = dense Jacobian (legacy), 1 = block-banded Jacobian with bordered solve (much faster, same solutions)
+solver_mode = 1
 
 omega_target = 0.885
 omega_step = -0.0005

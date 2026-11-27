@@ -37,6 +37,7 @@ struct RelaxerParams
     bool force_continue = false;
     bool first_thermalized_only = false;
     bool use_suppression_factor = true;
+    double cutoff_percent = 99.0;
     int decay_exponent = 10;
     double cph_epsilon = 1e-8;
     double pressure_interp_power = 1.0;
@@ -68,6 +69,8 @@ struct RelaxerParams
     double jacobian_fd_step = 1e-6;
     double line_search_shrink = 0.5;
     double line_search_min_step = 1e-4;
+    int solver_mode = 0;
+    bool qball_mode = false;
 
     std::string output_profile = "profile.dat";
     bool save_model_profiles = false; // write model_NNNN.dat for every converged family member
@@ -140,12 +143,13 @@ public:
         double w = 0.0;       // normal enthalpy density T s + mu n
         double rho = 0.0;     // energy density n^a n^b T_ab = mu^2 Upsilon + w - P (static, v = 0)
     };
-    PointThermo thermo_at(double sigma, double eta, double alpha, double omega) const;
+    PointThermo thermo_at(double sigma, double eta, double alpha, double omega, double r = 0.0) const;
 
     // EoS P(T, mu, sigma^2, X, Xi) and its conjugates. Note: with use_suppression_factor the thermal
     // part depends on the central amplitude state().sigma.front(), so a profile must be loaded first.
-    double pressure_Pthermal(double T, double mu_chem, double sigma_sq, double X, double Xi) const;
-    ThermoConjugates conjugates_from_pressure(double T, double mu_chem, double sigma_sq, double X, double Xi) const;
+    // r is the areal radius, used only by the (radius-based) suppression factor; r = 0 means unsuppressed.
+    double pressure_Pthermal(double T, double mu_chem, double sigma_sq, double X, double Xi, double r = 0.0) const;
+    ThermoConjugates conjugates_from_pressure(double T, double mu_chem, double sigma_sq, double X, double Xi, double r = 0.0) const;
 
     double areal_radius(double rbar) const;
     double asymptotic_mass() const;
@@ -154,6 +158,12 @@ public:
 
 private:
     std::shared_ptr<Compactification> compactification_;
+    enum class SolverMode
+    {
+        DenseLegacy = 0,
+        BlockBanded = 1,
+    };
+
     struct Residuals
     {
         std::vector<double> sigma;
@@ -167,6 +177,7 @@ private:
     RelaxerParams p_{};
     RelaxerState state_{};
     double current_temperature_ = 0.0;
+    double r_cutoff_ = 0.0;
     int last_newton_iterations_ = 0;
     double last_residual_norm_ = 0.0;
     double target_particle_number_ = 0.0;
@@ -181,6 +192,7 @@ private:
     void append_model_summary(const std::string& filename) const;
 
     double metric_mass(double r, double Xs) const;
+    double qball_total_energy() const;
     double particle_number_from_rho() const;
     size_t active_field_count() const;
 
@@ -191,7 +203,8 @@ private:
     double cph_sq(double sigma_sq, double Xi) const;
     double scalar_pressure_term(double sigma_sq, double X, double Xi) const;
     double thermal_pressure_term(double T, double mu_chem, double sigma_sq, double X, double Xi) const;
-    double compute_suppression_factor(double sigma_sq) const;
+    double compute_suppression_factor(double r) const;
+    ThermoConjugates conjugates_analytic(double T, double mu_chem, double sigma_sq, double X, double Xi, double r) const;
 
     double d1_rbar(const std::vector<double>& u, int i, double h) const;
     double d2_rbar(const std::vector<double>& u, int i, double h) const;
@@ -202,9 +215,12 @@ private:
 
     std::vector<double> pack_state() const;
     void unpack_state(const std::vector<double>& x);
+    std::vector<double> pack_state_interleaved() const;
+    void unpack_state_interleaved(const std::vector<double>& x);
 
     Residuals compute_residuals() const;
     std::vector<double> pack_residual_vector(const Residuals& R) const;
+    std::vector<double> pack_residual_vector_interleaved(const Residuals& R) const;
 
     double residual_norm(const Residuals& R) const;
     double vector_norm_inf(const std::vector<double>& v) const;
@@ -215,6 +231,17 @@ private:
     bool solve_linear_system(std::vector<double> A,
                              std::vector<double> b,
                              std::vector<double>& x) const;
+    bool solve_banded_system(std::vector<double> A,
+                             std::vector<double> b,
+                             std::vector<double>& x,
+                             size_t half_bandwidth) const;
+    bool solve_compact_banded_system(std::vector<double> A,
+                                     std::vector<double> b,
+                                     std::vector<double>& x,
+                                     size_t half_bandwidth) const;
+    bool solve_bordered_banded_system(const std::vector<double>& J,
+                                      const std::vector<double>& rhs,
+                                      std::vector<double>& x) const;
     bool newton_solve_stage();
 
     std::vector<double> stage_targets(bool charge_mode, double start_value) const;

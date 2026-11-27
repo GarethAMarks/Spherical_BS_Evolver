@@ -29,6 +29,7 @@ public:
     double mu = 1.0;
     double lambda = 0.0;
     bool solitonic = false;
+    bool qball_mode = false;
     double G = 1.0;
     double sigma_scale = 1.0;
     int eigen = 0;

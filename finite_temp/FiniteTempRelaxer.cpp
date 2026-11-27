@@ -91,6 +91,7 @@ void FiniteTempRelaxer::read_parameters(const std::string& filename, bool quiet)
         fill_parameter(current_line, "force_continue = ", p_.force_continue, quiet);
         fill_parameter(current_line, "first_thermalized_only = ", p_.first_thermalized_only, quiet);
         fill_parameter(current_line, "use_suppression_factor = ", p_.use_suppression_factor, quiet);
+        fill_parameter(current_line, "cutoff_percent = ", p_.cutoff_percent, quiet);
         fill_parameter(current_line, "decay_exponent = ", p_.decay_exponent, quiet);
         fill_parameter(current_line, "cph_epsilon = ", p_.cph_epsilon, quiet);
         fill_parameter(current_line, "pressure_interp_power = ", p_.pressure_interp_power, quiet);
@@ -116,9 +117,18 @@ void FiniteTempRelaxer::read_parameters(const std::string& filename, bool quiet)
         fill_parameter(current_line, "jacobian_fd_step = ", p_.jacobian_fd_step, quiet);
         fill_parameter(current_line, "line_search_shrink = ", p_.line_search_shrink, quiet);
         fill_parameter(current_line, "line_search_min_step = ", p_.line_search_min_step, quiet);
+        fill_parameter(current_line, "solver_mode = ", p_.solver_mode, quiet);
+        fill_parameter(current_line, "qball_mode = ", p_.qball_mode, quiet);
 
         fill_parameter(current_line, "output_profile = ", p_.output_profile, quiet);
         fill_parameter(current_line, "save_model_profiles = ", p_.save_model_profiles, quiet);
+    }
+
+    if (p_.cutoff_percent < 0.0 || p_.cutoff_percent > 100.0)
+    {
+        std::cerr << "[WARNING] cutoff_percent = " << p_.cutoff_percent
+                  << " is out of range [0, 100]; clamping.\n";
+        p_.cutoff_percent = std::min(100.0, std::max(0.0, p_.cutoff_percent));
     }
 }
 
@@ -246,45 +256,25 @@ double FiniteTempRelaxer::thermal_pressure_term(double T, double mu_chem, double
     return P_total;
 }
 
-double FiniteTempRelaxer::compute_suppression_factor(double sigma_sq) const
+double FiniteTempRelaxer::compute_suppression_factor(double r) const
 {
-    // Suppress thermal contribution as sigma_sq -> 0 to avoid non-vanishing
-    // asymptotic thermal energy density in asymptotically-flat BS solutions.
-    const int n = std::max(1, p_.decay_exponent);
-    const double sigma0 = state_.sigma.empty() ? 0.0 : state_.sigma.front();
-    const double sigma0_sq = std::max(1e-16, sigma0 * sigma0);
-    const double x = std::min(std::max(0.0, sigma_sq / sigma0_sq), 1.0);
-    const double inner = 1.0 - std::pow(1.0 - x, static_cast<double>(n));
-    double suppression_factor = std::pow(std::max(0.0, inner), static_cast<double>(n));
-    
-    //suppression_factor = pow(x, 4.0);
-
-    double f = 1. / (1. - x) - 1. / x;
-    double a = 1.0;
-    double k = 1.0; 
-
-    double g = 1.0;
-
-    if (x < 1e-12)
-        g = 0.0;
-
-    else if (std::abs(x - 1.0) > 1e-12)
-        g = 0.5 * (1.0 + std::tanh(k * (f + a)));
-
-    //suppression_factor = g;
-
     if (!p_.use_suppression_factor)
-    {
-        suppression_factor = 1.0;
-    }
+        return 1.0;
 
-    return suppression_factor;
+    if (r_cutoff_ <= 0.0)
+        return 1.0;
+
+    if (r <= r_cutoff_)
+        return 1.0;
+
+    const double dr = r - r_cutoff_;
+    return std::exp(-16. * (dr * dr) / (r_cutoff_ * r_cutoff_));
 }
 
-double FiniteTempRelaxer::pressure_Pthermal(double T, double mu_chem, double sigma_sq, double X, double Xi) const
+double FiniteTempRelaxer::pressure_Pthermal(double T, double mu_chem, double sigma_sq, double X, double Xi, double r) const
 {
     // Pthermal Eq. (notes): P = scalar piece + suppression * thermal piece
-    const double suppression_factor = compute_suppression_factor(sigma_sq);
+    const double suppression_factor = compute_suppression_factor(r);
     if (T < 1e-12)
     {
         return scalar_pressure_term(sigma_sq, X, Xi);
@@ -299,7 +289,8 @@ FiniteTempRelaxer::ThermoConjugates FiniteTempRelaxer::conjugates_from_pressure(
     double mu_chem,
     double sigma_sq,
     double X,
-    double Xi) const
+    double Xi,
+    double r) const
 {
     ThermoConjugates out;
 
@@ -309,22 +300,207 @@ FiniteTempRelaxer::ThermoConjugates FiniteTempRelaxer::conjugates_from_pressure(
     const double ds2 = fd * std::max(1.0, std::abs(sigma_sq));
     const double dXi = fd * std::max(1.0, std::abs(Xi));
 
-    const double pTp = pressure_Pthermal(T + dT, mu_chem, sigma_sq, X, Xi);
-    const double pTm = pressure_Pthermal(T - dT, mu_chem, sigma_sq, X, Xi);
+    const double pTp = pressure_Pthermal(T + dT, mu_chem, sigma_sq, X, Xi, r);
+    const double pTm = pressure_Pthermal(T - dT, mu_chem, sigma_sq, X, Xi, r);
     out.s = (pTp - pTm) / (2.0 * dT);
 
-    const double pMup = pressure_Pthermal(T, mu_chem + dmu, sigma_sq, X, Xi);
-    const double pMum = pressure_Pthermal(T, mu_chem - dmu, sigma_sq, X, Xi);
+    const double pMup = pressure_Pthermal(T, mu_chem + dmu, sigma_sq, X, Xi, r);
+    const double pMum = pressure_Pthermal(T, mu_chem - dmu, sigma_sq, X, Xi, r);
     out.n = (pMup - pMum) / (2.0 * dmu);
 
-    const double pS2p = pressure_Pthermal(T, mu_chem, sigma_sq + ds2, X, Xi);
-    const double pS2m = pressure_Pthermal(T, mu_chem, std::max(0.0, sigma_sq - ds2), X, Xi);
+    const double pS2p = pressure_Pthermal(T, mu_chem, sigma_sq + ds2, X, Xi, r);
+    const double pS2m = pressure_Pthermal(T, mu_chem, std::max(0.0, sigma_sq - ds2), X, Xi, r);
     out.F = 2.0 * (pS2p - pS2m) / (2.0 * ds2);
 
-    const double pXip = pressure_Pthermal(T, mu_chem, sigma_sq, X, Xi + dXi);
-    const double pXim = pressure_Pthermal(T, mu_chem, sigma_sq, X, Xi - dXi);
+    const double pXip = pressure_Pthermal(T, mu_chem, sigma_sq, X, Xi + dXi, r);
+    const double pXim = pressure_Pthermal(T, mu_chem, sigma_sq, X, Xi - dXi, r);
     out.Upsilon = -2.0 * (pXip - pXim) / (2.0 * dXi);
 
+    return out;
+}
+
+FiniteTempRelaxer::ThermoConjugates FiniteTempRelaxer::conjugates_analytic(
+    double T,
+    double mu_chem,
+    double sigma_sq,
+    double X,
+    double Xi,
+    double r) const
+{
+    ThermoConjugates out;
+
+    const double sig2 = std::max(0.0, sigma_sq);
+    // Scalar part: P_scalar = -0.5*(X + sig2*Xi + V(sig2))
+    //   dP_scalar/dsig2 = -0.5*(Xi + V'(sig2))
+    //   dP_scalar/dXi   = -0.5*sig2
+    // d_potential_d_sigma2 expects the field amplitude sigma (not sig2); callers pass sqrt(sig2).
+    const double Vp = d_potential_d_sigma2(std::sqrt(sig2));
+    const double dPsc_ds2 = -0.5 * (Xi + Vp);
+    const double dPsc_dXi = -0.5 * sig2;
+
+    const double sup = compute_suppression_factor(r);
+
+    if (T < 1e-12)
+    {
+        // At T = 0 the thermal piece is defined to be identically zero.
+        out.s = 0.0;
+        out.n = 0.0;
+        out.F = 2.0 * dPsc_ds2;
+        out.Upsilon = -2.0 * dPsc_dXi;
+        return out;
+    }
+
+    // ---------- phonon sector ----------
+    const double eps_cph = std::max(0.0, p_.cph_epsilon);
+    const double Vpp = ddV(sig2);
+    // V''' is zero for the plain quartic; nonzero for the solitonic shape.
+    double Vppp = 0.0;
+    if (p_.solitonic)
+    {
+        const double scale2 = std::max(1e-12, p_.sigma_scale * p_.sigma_scale);
+        Vppp = 24.0 * p_.mu * p_.mu / (scale2 * scale2);
+    }
+    const double g = sig2 * Vpp;
+    const double num = g + eps_cph;
+    const double den_raw = g - 2.0 * Xi;
+    const double den = (std::abs(den_raw) < 1e-12) ? ((den_raw >= 0.0) ? 1e-12 : -1e-12) : den_raw;
+    const bool den_clamped = (std::abs(den_raw) < 1e-12);
+    const double cph2_raw = num / den;
+    const bool cph2_floored = (cph2_raw < 1e-12);
+    const double cph2 = cph2_floored ? 1e-12 : cph2_raw;
+    const double cph = std::sqrt(cph2);
+
+    const double Xi_safe = (std::abs(Xi) < 1e-12) ? ((Xi >= 0.0) ? 1e-12 : -1e-12) : Xi;
+    const bool Xi_clamped = (std::abs(Xi) < 1e-12);
+    const double mu2 = mu_chem * mu_chem;
+    const double bracket_raw = 1.0 + (1.0 - cph2) * mu2 / Xi_safe;
+    const double bracket = (std::abs(bracket_raw) < 1e-12) ? ((bracket_raw >= 0.0) ? 1e-12 : -1e-12) : bracket_raw;
+
+    const double T2 = T * T;
+    const double T4 = T2 * T2;
+    const double inv_bracket = 1.0 / bracket;
+    const double inv_bracket2 = inv_bracket * inv_bracket;
+    constexpr double kPhonCoef = 3.1415926535897932384626433832795 * 3.1415926535897932384626433832795 / 90.0;
+    const double A = kPhonCoef * cph * T4 * inv_bracket2;
+
+    // Partial derivatives of cph^2 wrt sig2 and Xi (zero if floored or den clamped).
+    double dcph2_ds2 = 0.0;
+    double dcph2_dXi = 0.0;
+    if (!cph2_floored && !den_clamped)
+    {
+        const double dg_ds2 = Vpp + sig2 * Vppp;
+        const double inv_den = 1.0 / den;
+        const double inv_den2 = inv_den * inv_den;
+        dcph2_ds2 = dg_ds2 * (-2.0 * Xi - eps_cph) * inv_den2;
+        dcph2_dXi = 2.0 * num * inv_den2;
+    }
+    // d(cph)/dx = d(cph^2)/dx / (2 cph).
+    const double two_cph = 2.0 * cph;
+    const double dcph_ds2 = dcph2_ds2 / two_cph;
+    const double dcph_dXi = dcph2_dXi / two_cph;
+
+    // Partial derivatives of bracket.
+    const double dbr_dmu = 2.0 * (1.0 - cph2) * mu_chem / Xi_safe;
+    const double dbr_ds2 = -dcph2_ds2 * mu2 / Xi_safe;
+    double dbr_dXi = -dcph2_dXi * mu2 / Xi_safe;
+    if (!Xi_clamped)
+    {
+        dbr_dXi -= (1.0 - cph2) * mu2 / (Xi_safe * Xi_safe);
+    }
+
+    // Partial derivatives of A = kPhonCoef * cph * T^4 / bracket^2.
+    const double dA_dT = 4.0 * A / T;
+    const double dA_dmu = A * (-2.0 * dbr_dmu * inv_bracket);
+    const double dA_ds2 = (cph > 1e-20)
+        ? A * (dcph_ds2 / cph - 2.0 * dbr_ds2 * inv_bracket)
+        : 0.0;
+    const double dA_dXi = (cph > 1e-20)
+        ? A * (dcph_dXi / cph - 2.0 * dbr_dXi * inv_bracket)
+        : 0.0;
+
+    // ---------- gas sector ----------
+    // B = (mu_mass/(2pi))^(3/2) * T^(5/2) * exp((mu_chem - mu_mass)/T)
+    constexpr double kTwoPi = 2.0 * 3.1415926535897932384626433832795;
+    const double mass = p_.mu;
+    const double gas_prefac = std::pow(mass / kTwoPi, 1.5);
+    const double T_sqrt = std::sqrt(T);
+    const double T52 = T2 * T_sqrt;             // T^(5/2)
+    // Boltzmann (gas_statistics = 0) or Bose-Einstein (1): B = prefac T^{5/2} F(x), x = (mu - m)/T, kappa = F'/F.
+    // Cap ln B growth to avoid overflow when a line-search trial drives alpha toward zero (mu_chem = omega/alpha
+    // -> infinity). The downstream residual will still be huge and the line search will reject the trial.
+    const double gas_x = (mu_chem - mass) / std::max(1e-12, T);
+    double gas_lnF, gas_kappa;
+    bose_gas::lnF_kappa(std::min(700.0, gas_x), p_.gas_statistics, gas_lnF, gas_kappa);
+    const double B = gas_prefac * T52 * std::exp(std::min(700.0, gas_lnF));
+
+    const double dB_dT = B * (2.5 - gas_x * gas_kappa) / T;
+    const double dB_dmu = B * gas_kappa / T;
+    // dB/ds2 = 0, dB/dXi = 0.
+
+    if (p_.crossover_mode == 1)
+    {
+        // Convex blend P_th = w(sig2) A + G(sig2) B, w = 1 - exp(-x_ph), G = exp(-x_g), x = (sig2/sigma_*^2)^{k/2}
+        // (same as thermal_pressure_term).
+        const double kh = 0.5 * p_.crossover_exponent;
+        const double x_ph = std::pow(sig2 / std::max(1e-300, p_.sigma_phonon * p_.sigma_phonon), kh);
+        const double x_g = std::pow(sig2 / std::max(1e-300, p_.sigma_gas * p_.sigma_gas), kh);
+        const double wph = -std::expm1(-x_ph);
+        const double G = std::exp(-x_g);
+        const double inv_s2 = (sig2 > 1e-300) ? 1.0 / sig2 : 0.0;
+        const double dw_ds2 = std::exp(-x_ph) * kh * x_ph * inv_s2;
+        const double dG_ds2 = -G * kh * x_g * inv_s2;
+        const double Aw = (wph > 0.0) ? wph : 0.0;
+        out.s = sup * (Aw * dA_dT + G * dB_dT);
+        out.n = sup * (Aw * dA_dmu + G * dB_dmu);
+        out.F = 2.0 * (dPsc_ds2 + sup * (Aw * dA_ds2 + ((wph > 0.0) ? dw_ds2 * A : 0.0) + dG_ds2 * B));
+        out.Upsilon = -2.0 * (dPsc_dXi + sup * Aw * dA_dXi);
+        (void)X;
+        return out;
+    }
+
+    // ---------- interpolation: P_th = (A^-q + B^-q)^(-1/q) ----------
+    // Factor out the smaller of A, B to avoid overflow in the intermediates
+    // when either phonon or gas pressure underflows (very common when alpha
+    // -> 0 during a line-search probe, which makes mu_chem -> infinity).
+    //
+    // Let m = min(A, B), M = max(A, B), r = m/M <= 1, w = r^q.
+    // Then P_th = m * (1 + w)^(-1/q), and
+    //   dP_th/dx = u/(1+w) * (dm/dx + m * w/(1+w) * dM/dx/M)
+    //            = u/(1+w) * dm/dx + u * m * w / ((1+w)*(1+w)) * dM/dx / M
+    // where u = (1 + w)^(-1/q).
+    const double q = std::max(1e-12, p_.pressure_interp_power);
+    const double A_pos = std::max(1e-300, A);
+    const double B_pos = std::max(1e-300, B);
+    const bool A_smaller = A_pos <= B_pos;
+    const double m_val = A_smaller ? A_pos : B_pos;
+    const double M_val = A_smaller ? B_pos : A_pos;
+    const double ratio = m_val / M_val;         // in (0, 1]
+    const double w = std::pow(ratio, q);        // in (0, 1]
+    const double one_plus_w = 1.0 + w;
+    const double u = std::pow(one_plus_w, -1.0 / q);
+    const double P_th = m_val * u;
+
+    const double coef_m = u / one_plus_w;             // for dm/dx
+    const double coef_M = m_val * u * w / one_plus_w; // for dM/dx / M
+
+    auto dPth = [&](double dA_dx, double dB_dx) -> double
+    {
+        const double dm_dx = A_smaller ? dA_dx : dB_dx;
+        const double dM_dx = A_smaller ? dB_dx : dA_dx;
+        return coef_m * dm_dx + coef_M * dM_dx / M_val;
+    };
+
+    const double dPth_dT   = dPth(dA_dT,  dB_dT);
+    const double dPth_dmu  = dPth(dA_dmu, dB_dmu);
+    const double dPth_ds2  = dPth(dA_ds2, 0.0);
+    const double dPth_dXi  = dPth(dA_dXi, 0.0);
+
+    // Apply suppression (independent of thermodynamic variables).
+    out.s        = sup * dPth_dT;
+    out.n        = sup * dPth_dmu;
+    out.F        = 2.0 * (dPsc_ds2 + sup * dPth_ds2);
+    out.Upsilon  = -2.0 * (dPsc_dXi + sup * dPth_dXi);
+    (void)X;    // scalar partial wrt X is -0.5, but X is a dependent variable (eta^2), not needed.
     return out;
 }
 
@@ -346,6 +522,7 @@ void FiniteTempRelaxer::initialize_seed()
         shooter.mu = p_.mu;
         shooter.lambda = p_.lambda;
         shooter.solitonic = p_.solitonic;
+        shooter.qball_mode = p_.qball_mode;
         shooter.G = p_.G;
         shooter.sigma_scale = p_.sigma_scale;
         shooter.eigen = p_.seed_eigen;
@@ -416,6 +593,7 @@ bool FiniteTempRelaxer::shoot_for_sigma(double sigma0)
     shooter.mu = p_.mu;
     shooter.lambda = p_.lambda;
     shooter.solitonic = p_.solitonic;
+    shooter.qball_mode = p_.qball_mode;
     shooter.G = p_.G;
     shooter.sigma_scale = p_.sigma_scale;
     shooter.eigen = p_.seed_eigen;
@@ -491,6 +669,15 @@ void FiniteTempRelaxer::enforce_boundary_values()
         state_.omega[static_cast<size_t>(last)] = p_.mu_chem_infty;
         state_.rho[static_cast<size_t>(last)] = 1.0;
     }
+
+    if (p_.qball_mode)
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            state_.alpha[static_cast<size_t>(i)] = 1.0;
+            state_.Xs[static_cast<size_t>(i)] = 1.0;
+        }
+    }
 }
 
 std::vector<double> FiniteTempRelaxer::pack_state() const
@@ -526,6 +713,46 @@ void FiniteTempRelaxer::unpack_state(const std::vector<double>& x)
         if (p_.increment_omega)
         {
             state_.rho[i] = x[5 * n + i];
+        }
+    }
+}
+
+std::vector<double> FiniteTempRelaxer::pack_state_interleaved() const
+{
+    const size_t n = static_cast<size_t>(p_.n_gridpoints);
+    const size_t fields = active_field_count();
+    std::vector<double> x(fields * n);
+    for (size_t i = 0; i < n; ++i)
+    {
+        const size_t base = fields * i;
+        x[base] = state_.sigma[i];
+        x[base + 1] = state_.eta[i];
+        x[base + 2] = state_.alpha[i];
+        x[base + 3] = state_.Xs[i];
+        x[base + 4] = state_.omega[i];
+        if (p_.increment_omega)
+        {
+            x[base + 5] = state_.rho[i];
+        }
+    }
+    return x;
+}
+
+void FiniteTempRelaxer::unpack_state_interleaved(const std::vector<double>& x)
+{
+    const size_t n = static_cast<size_t>(p_.n_gridpoints);
+    const size_t fields = active_field_count();
+    for (size_t i = 0; i < n; ++i)
+    {
+        const size_t base = fields * i;
+        state_.sigma[i] = x[base];
+        state_.eta[i] = x[base + 1];
+        state_.alpha[i] = std::max(1e-12, x[base + 2]);
+        state_.Xs[i] = std::max(1e-12, x[base + 3]);
+        state_.omega[i] = x[base + 4];
+        if (p_.increment_omega)
+        {
+            state_.rho[i] = x[base + 5];
         }
     }
 }
@@ -598,8 +825,8 @@ FiniteTempRelaxer::Residuals FiniteTempRelaxer::compute_residuals() const
         const double omega = state_.omega[j];
         const double mu_chem = omega / alpha;
         const double Xi = -mu_chem * mu_chem;
-        const double P = pressure_Pthermal(temp_local, mu_chem, sigma_sq, X, Xi);
-        const ThermoConjugates tc = conjugates_from_pressure(temp_local, mu_chem, sigma_sq, X, Xi);
+        const double P = pressure_Pthermal(temp_local, mu_chem, sigma_sq, X, Xi, r);
+        const ThermoConjugates tc = conjugates_analytic(temp_local, mu_chem, sigma_sq, X, Xi, r);
 
         const double F = tc.F;
         const double source_X = mu_chem * mu_chem * tc.Upsilon + mu_chem * tc.n + tc.s * temp_local - P;
@@ -629,6 +856,16 @@ FiniteTempRelaxer::Residuals FiniteTempRelaxer::compute_residuals() const
         }
     }
 
+    if (p_.qball_mode)
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            const size_t j = static_cast<size_t>(i);
+            R.alpha[j] = state_.alpha[j] - 1.0;
+            R.Xs[j]    = state_.Xs[j]    - 1.0;
+        }
+    }
+
     return R;
 }
 
@@ -652,8 +889,33 @@ std::vector<double> FiniteTempRelaxer::pack_residual_vector(const Residuals& R) 
     return v;
 }
 
+std::vector<double> FiniteTempRelaxer::pack_residual_vector_interleaved(const Residuals& R) const
+{
+    const size_t n = static_cast<size_t>(p_.n_gridpoints);
+    const size_t fields = active_field_count();
+    std::vector<double> v(fields * n);
+    for (size_t i = 0; i < n; ++i)
+    {
+        const size_t base = fields * i;
+        v[base] = R.sigma[i];
+        v[base + 1] = R.eta[i];
+        v[base + 2] = R.alpha[i];
+        v[base + 3] = R.Xs[i];
+        v[base + 4] = R.omega[i];
+        if (p_.increment_omega)
+        {
+            v[base + 5] = R.rho[i];
+        }
+    }
+    return v;
+}
+
 double FiniteTempRelaxer::residual_norm(const Residuals& R) const
 {
+    if (p_.solver_mode == static_cast<int>(SolverMode::BlockBanded))
+    {
+        return vector_norm_inf(pack_residual_vector_interleaved(R));
+    }
     return vector_norm_inf(pack_residual_vector(R));
 }
 
@@ -673,24 +935,414 @@ void FiniteTempRelaxer::build_jacobian_fd(const std::vector<double>& x_base,
 {
     const size_t nvar = x_base.size();
     const double eps = std::max(1e-12, p_.jacobian_fd_step);
-    J.assign(nvar * nvar, 0.0);
 
-    for (size_t col = 0; col < nvar; ++col)
+    const bool banded_mode = (p_.solver_mode == static_cast<int>(SolverMode::BlockBanded));
+    const size_t fields = active_field_count();
+    const size_t half_bandwidth = banded_mode ? (3U * fields - 1U) : 0U;
+
+    if (banded_mode)
     {
-        std::vector<double> x_pert = x_base;
-        const double step = eps * std::max(1.0, std::abs(x_base[col]));
-        x_pert[col] += step;
-        const_cast<FiniteTempRelaxer*>(this)->unpack_state(x_pert);
-        const Residuals Rp = compute_residuals();
-        const std::vector<double> r_pert = pack_residual_vector(Rp);
+        const size_t stride = 2U * half_bandwidth + 1U;
+        J.assign(stride * nvar, 0.0);
+    }
+    else
+    {
+        J.assign(nvar * nvar, 0.0);
+    }
 
-        for (size_t row = 0; row < nvar; ++row)
+    auto band_index = [nvar, half_bandwidth](size_t row, size_t col) -> size_t
+    {
+        return (half_bandwidth + row - col) * nvar + col;
+    };
+
+    if (!banded_mode)
+    {
+        // Dense mode: perturb each column, recompute all residuals, store full column.
+        for (size_t col = 0; col < nvar; ++col)
         {
-            J[row * nvar + col] = (r_pert[row] - r_base[row]) / step;
+            std::vector<double> x_pert = x_base;
+            const double step = eps * std::max(1.0, std::abs(x_base[col]));
+            x_pert[col] += step;
+            const_cast<FiniteTempRelaxer*>(this)->unpack_state(x_pert);
+            const Residuals Rp = compute_residuals();
+            const std::vector<double> r_pert = pack_residual_vector(Rp);
+            for (size_t row = 0; row < nvar; ++row)
+                J[row * nvar + col] = (r_pert[row] - r_base[row]) / step;
+        }
+        const_cast<FiniteTempRelaxer*>(this)->unpack_state(x_base);
+        return;
+    }
+
+    // Banded mode: local-window optimisation.
+    //
+    // The residual at interior grid point k depends on field values at k-2..k+2 (5-point stencil).
+    // Boundary residuals at k=0 depend on points 0 and 1; at k=last on points last and last-1.
+    // Therefore perturbing the unknown at grid point i_col can only change residuals at grid
+    // points in [i_col-2, i_col+2] (plus boundary handling), so we recompute only that window
+    // instead of calling the full compute_residuals() over all n points.
+    //
+    // Exception: in increment_omega mode, R.rho[last] = particle_number_from_rho() - target
+    // integrates over all rho values, so any rho perturbation also affects that one entry.
+
+    const int n    = p_.n_gridpoints;
+    const int last = n - 1;
+    const double drbar = (p_.rbar_max - p_.rbar_min) / static_cast<double>(n - 1);
+
+    // Parallelism: each thread perturbs its own copy of the five (or six) field vectors.
+    // state_ itself is untouched — safe to read concurrently from residual helpers.
+    // Each column writes to a disjoint slice of J[], so no reduction is needed.
+    #pragma omp parallel
+    {
+        RelaxerState ls = state_;                 // thread-local scratch copy of state
+        std::vector<double> r_window = r_base;    // thread-local window residual buffer
+
+        #pragma omp for schedule(static)
+        for (long col_signed = 0; col_signed < static_cast<long>(nvar); ++col_signed)
+        {
+            const size_t col   = static_cast<size_t>(col_signed);
+            const size_t i_col = col / fields;
+            const size_t f_col = col % fields;
+            const double orig  = x_base[col];
+            const double step  = eps * std::max(1.0, std::abs(orig));
+
+            // Perturb one state variable in the thread-local copy.
+            double* perturbed_ptr = nullptr;
+            switch (f_col)
+            {
+                case 0: ls.sigma[i_col] = orig + step; perturbed_ptr = &ls.sigma[i_col]; break;
+                case 1: ls.eta[i_col]   = orig + step; perturbed_ptr = &ls.eta[i_col];   break;
+                case 2: ls.alpha[i_col] = std::max(1e-12, orig + step); perturbed_ptr = &ls.alpha[i_col]; break;
+                case 3: ls.Xs[i_col]    = std::max(1e-12, orig + step); perturbed_ptr = &ls.Xs[i_col];    break;
+                case 4: ls.omega[i_col] = orig + step; perturbed_ptr = &ls.omega[i_col]; break;
+                default: ls.rho[i_col]  = orig + step; perturbed_ptr = &ls.rho[i_col];   break;
+            }
+
+            const int win_min = std::max(0,    (int)i_col - 2);
+            const int win_max = std::min(last, (int)i_col + 2);
+
+            for (int k = win_min; k <= win_max; ++k)
+            {
+                const size_t kj   = static_cast<size_t>(k);
+                const size_t base = fields * kj;
+
+                if (k == 0)
+                {
+                    r_window[base + 0] = ls.sigma[1] - ls.sigma[0];
+                    r_window[base + 1] = ls.eta[0];
+                    r_window[base + 2] = ls.alpha[1] - ls.alpha[0];
+                    r_window[base + 3] = ls.Xs[0] - 1.0;
+                    r_window[base + 4] = ls.omega[0] - p_.mu_chem_infty;
+                    if (fields > 5)
+                        r_window[base + 5] = ls.rho[1] - ls.rho[0];
+                }
+                else if (k == last)
+                {
+                    r_window[base + 0] = ls.sigma[kj];
+                    r_window[base + 1] = ls.eta[kj];
+                    r_window[base + 2] = ls.alpha[kj] - 1.0;
+                    r_window[base + 3] = ls.Xs[kj] - 1.0;
+                    if (!p_.increment_omega)
+                    {
+                        r_window[base + 4] = ls.omega[kj] - p_.mu_chem_infty;
+                    }
+                    else
+                    {
+                        r_window[base + 4] = ls.omega[kj] - ls.omega[kj - 1];
+                        // R.rho[last] uses the local rho view, consistent with the perturbation.
+                        if (fields > 5)
+                        {
+                            const int rn = p_.n_gridpoints;
+                            const int li = std::max(1, rn - 2);
+                            const double rbar_last = ls.rbar[static_cast<size_t>(li)];
+                            const double r_last = std::max(1e-12, areal_radius(rbar_last));
+                            const double drho_drb_last = d1_rbar(ls.rho, li, drbar);
+                            const double drho_dr_last  = d1_r_from_rbar(drho_drb_last, rbar_last);
+                            r_window[base + 5] = 8.0 * 3.1415926535897932384626433832795 * r_last * r_last * drho_dr_last - target_particle_number_;
+                        }
+                    }
+                }
+                else
+                {
+                    const double rbar   = ls.rbar[kj];
+                    const double r      = std::max(1e-12, areal_radius(rbar));
+                    const double ds_drb = d1_rbar(ls.sigma, k, drbar);
+                    const double de_drb = d1_rbar(ls.eta,   k, drbar);
+                    const double da_drb = d1_rbar(ls.alpha, k, drbar);
+                    const double dx_drb = d1_rbar(ls.Xs,    k, drbar);
+                    const double ds_dr  = d1_r_from_rbar(ds_drb, rbar);
+                    const double de_dr  = d1_r_from_rbar(de_drb, rbar);
+                    const double da_dr  = d1_r_from_rbar(da_drb, rbar);
+                    const double dx_dr  = d1_r_from_rbar(dx_drb, rbar);
+
+                    const double alpha    = std::max(1e-12, ls.alpha[kj]);
+                    const double Xs       = std::max(1e-12, ls.Xs[kj]);
+                    const double sigma    = ls.sigma[kj];
+                    const double sigma_sq = sigma * sigma;
+                    const double eta      = ls.eta[kj];
+                    const double X        = eta * eta;
+                    const double temp_local = local_temperature(alpha);
+                    const double omega    = ls.omega[kj];
+                    const double mu_chem  = omega / alpha;
+                    const double Xi       = -mu_chem * mu_chem;
+                    const double P        = pressure_Pthermal(temp_local, mu_chem, sigma_sq, X, Xi, r);
+                    const ThermoConjugates tc = conjugates_analytic(temp_local, mu_chem, sigma_sq, X, Xi, r);
+
+                    const double F        = tc.F;
+                    const double source_X = mu_chem * mu_chem * tc.Upsilon + mu_chem * tc.n + tc.s * temp_local - P;
+
+                    r_window[base + 0] = ds_dr - Xs * eta;
+                    r_window[base + 1] = de_dr + 2.0 * eta / r + (da_dr / alpha) * eta + Xs * sigma * F;
+                    r_window[base + 2] = da_dr / alpha - ((Xs * Xs - 1.0) / (2.0 * r) + 4.0 * kPi * r * Xs * Xs * (eta * eta + P));
+                    r_window[base + 3] = dx_dr / Xs - ((1.0 - Xs * Xs) / (2.0 * r) + 4.0 * kPi * r * Xs * Xs * source_X);
+
+                    if (!p_.increment_omega)
+                    {
+                        r_window[base + 4] = ls.omega[kj] - p_.mu_chem_infty;
+                    }
+                    else
+                    {
+                        r_window[base + 4] = ls.omega[kj] - ls.omega[kj - 1];
+                        if (fields > 5)
+                        {
+                            const double drho_drb   = d1_rbar(ls.rho, k, drbar);
+                            const double d2rho_drb2 = d2_rbar(ls.rho, k, drbar);
+                            const double drho_dr    = d1_r_from_rbar(drho_drb, rbar);
+                            const double d2rho_dr2  = d2_r_from_rbar(drho_drb, d2rho_drb2, rbar);
+                            const double omega_safe = std::max(1e-12, std::abs(omega));
+                            const double source_rho = tc.Upsilon / (alpha * alpha) + tc.n / (alpha * omega_safe);
+                            r_window[base + 5] = d2rho_dr2 + (2.0 / r + (da_dr / alpha) - (dx_dr / Xs)) * drho_dr - source_rho;
+                        }
+                    }
+                }
+
+                if (p_.qball_mode)
+                {
+                    r_window[base + 2] = ls.alpha[kj] - 1.0;
+                    r_window[base + 3] = ls.Xs[kj]    - 1.0;
+                }
+            }
+
+            // In increment_omega mode, R.rho[last] is a global integral of rho and depends on every
+            // interior rho sample. If the current column perturbs rho at i_col and the window does
+            // not already cover `last`, recompute the global entry using the local rho view.
+            if (fields > 5 && f_col == 5 && (int)i_col + 2 < last)
+            {
+                const size_t base_last = fields * static_cast<size_t>(last);
+                const int rn = p_.n_gridpoints;
+                const int li = std::max(1, rn - 2);
+                const double rbar_last = ls.rbar[static_cast<size_t>(li)];
+                const double r_last = std::max(1e-12, areal_radius(rbar_last));
+                const double drho_drb_last = d1_rbar(ls.rho, li, drbar);
+                const double drho_dr_last  = d1_r_from_rbar(drho_drb_last, rbar_last);
+                r_window[base_last + 5] = 8.0 * 3.1415926535897932384626433832795 * r_last * r_last * drho_dr_last - target_particle_number_;
+            }
+
+            const size_t row_begin = (col > half_bandwidth) ? (col - half_bandwidth) : 0U;
+            const size_t row_end   = std::min(nvar - 1U, col + half_bandwidth);
+            for (size_t row = row_begin; row <= row_end; ++row)
+                J[band_index(row, col)] = (r_window[row] - r_base[row]) / step;
+
+            // Restore the one perturbed state variable to the base value for the next iteration.
+            *perturbed_ptr = orig;
+
+            // Restore r_window entries for the touched window.
+            for (int k = win_min; k <= win_max; ++k)
+            {
+                const size_t base = fields * static_cast<size_t>(k);
+                for (size_t f = 0; f < fields; ++f)
+                    r_window[base + f] = r_base[base + f];
+            }
+            if (fields > 5 && f_col == 5 && (int)i_col + 2 < last)
+            {
+                const size_t base_last = fields * static_cast<size_t>(last);
+                r_window[base_last + 5] = r_base[base_last + 5];
+            }
+        }
+    }
+    // state_ was never mutated; nothing to restore.
+}
+
+bool FiniteTempRelaxer::solve_banded_system(std::vector<double> A,
+                                            std::vector<double> b,
+                                            std::vector<double>& x,
+                                            size_t half_bandwidth) const
+{
+    return solve_compact_banded_system(std::move(A), std::move(b), x, half_bandwidth);
+}
+
+bool FiniteTempRelaxer::solve_compact_banded_system(std::vector<double> A,
+                                                    std::vector<double> b,
+                                                    std::vector<double>& x,
+                                                    size_t half_bandwidth) const
+{
+    const size_t n = b.size();
+    const size_t stride = 2U * half_bandwidth + 1U;
+    x.assign(n, 0.0);
+
+    auto band_index = [stride, half_bandwidth, n](size_t row, size_t col) -> size_t
+    {
+        return (half_bandwidth + row - col) * n + col;
+    };
+
+    auto band_get = [&](size_t row, size_t col) -> double
+    {
+        if (col > row + half_bandwidth || row > col + half_bandwidth)
+        {
+            return 0.0;
+        }
+        return A[band_index(row, col)];
+    };
+
+    auto band_set = [&](size_t row, size_t col, double value)
+    {
+        if (col > row + half_bandwidth || row > col + half_bandwidth)
+        {
+            return;
+        }
+        A[band_index(row, col)] = value;
+    };
+
+    for (size_t k = 0; k < n; ++k)
+    {
+        const double diag = band_get(k, k);
+        if (std::abs(diag) < 1e-18 || !std::isfinite(diag))
+        {
+            return false;
+        }
+
+        const size_t row_end = std::min(n - 1, k + half_bandwidth);
+        const size_t col_end = std::min(n - 1, k + half_bandwidth);
+
+        for (size_t i = k + 1; i <= row_end; ++i)
+        {
+            const double entry = band_get(i, k);
+            if (std::abs(entry) < 1e-30)
+            {
+                continue;
+            }
+
+            const double factor = entry / diag;
+            band_set(i, k, 0.0);
+            const size_t local_end = std::min(col_end, i + half_bandwidth);
+            for (size_t j = k + 1; j <= local_end; ++j)
+            {
+                band_set(i, j, band_get(i, j) - factor * band_get(k, j));
+            }
+            b[i] -= factor * b[k];
         }
     }
 
-    const_cast<FiniteTempRelaxer*>(this)->unpack_state(x_base);
+    for (int i = static_cast<int>(n) - 1; i >= 0; --i)
+    {
+        double sum = b[static_cast<size_t>(i)];
+        const size_t col_end = std::min(n - 1, static_cast<size_t>(i) + half_bandwidth);
+        for (size_t j = static_cast<size_t>(i) + 1; j <= col_end; ++j)
+        {
+            sum -= band_get(static_cast<size_t>(i), j) * x[j];
+        }
+
+        const double diag = band_get(static_cast<size_t>(i), static_cast<size_t>(i));
+        if (std::abs(diag) < 1e-18 || !std::isfinite(diag))
+        {
+            return false;
+        }
+
+        x[static_cast<size_t>(i)] = sum / diag;
+    }
+
+    return true;
+}
+
+bool FiniteTempRelaxer::solve_bordered_banded_system(const std::vector<double>& J,
+                                                     const std::vector<double>& rhs,
+                                                     std::vector<double>& x) const
+{
+    const size_t n = rhs.size();
+    if (n < 2)
+    {
+        return false;
+    }
+
+    const size_t m = n - 1;
+    const size_t fields = active_field_count();
+    const size_t half_bandwidth = 3U * fields - 1U;
+
+    std::vector<double> B((2U * half_bandwidth + 1U) * m, 0.0);
+    std::vector<double> rhs_y(m, 0.0);
+    std::vector<double> bvec(m, 0.0);
+    std::vector<double> cvec(m, 0.0);
+
+    auto band_index = [half_bandwidth, m](size_t row, size_t col) -> size_t
+    {
+        return (half_bandwidth + row - col) * m + col;
+    };
+
+    auto J_get = [half_bandwidth, n, &J](size_t row, size_t col) -> double
+    {
+        if (col > row + half_bandwidth || row > col + half_bandwidth)
+        {
+            return 0.0;
+        }
+        return J[(half_bandwidth + row - col) * n + col];
+    };
+
+    auto band_set = [&](size_t row, size_t col, double value)
+    {
+        if (col > row + half_bandwidth || row > col + half_bandwidth)
+        {
+            return;
+        }
+        B[band_index(row, col)] = value;
+    };
+
+    for (size_t i = 0; i < m; ++i)
+    {
+        rhs_y[i] = rhs[i + 1];
+        bvec[i] = J_get(i + 1, 0);
+        cvec[i] = J_get(0, i + 1);
+
+        const size_t row_begin = (i > half_bandwidth) ? (i - half_bandwidth) : 0U;
+        const size_t row_end = std::min(m - 1U, i + half_bandwidth);
+        for (size_t j = row_begin; j <= row_end; ++j)
+        {
+            band_set(i, j, J_get(i + 1, j + 1));
+        }
+    }
+
+    std::vector<double> y0;
+    std::vector<double> y1;
+    if (!solve_compact_banded_system(B, rhs_y, y0, half_bandwidth))
+    {
+        return false;
+    }
+    if (!solve_compact_banded_system(B, bvec, y1, half_bandwidth))
+    {
+        return false;
+    }
+
+    const double a = J[0];
+    double cTy0 = 0.0;
+    double cTy1 = 0.0;
+    for (size_t i = 0; i < m; ++i)
+    {
+        cTy0 += cvec[i] * y0[i];
+        cTy1 += cvec[i] * y1[i];
+    }
+
+    const double schur = a - cTy1;
+    if (std::abs(schur) < 1e-18 || !std::isfinite(schur))
+    {
+        return false;
+    }
+
+    x.assign(n, 0.0);
+    x[0] = (rhs[0] - cTy0) / schur;
+    for (size_t i = 0; i < m; ++i)
+    {
+        x[i + 1] = y0[i] - y1[i] * x[0];
+    }
+
+    return true;
 }
 
 bool FiniteTempRelaxer::solve_linear_system(std::vector<double> A,
@@ -773,8 +1425,9 @@ bool FiniteTempRelaxer::solve_linear_system(std::vector<double> A,
 
 bool FiniteTempRelaxer::newton_solve_stage()
 {
+    const bool banded_mode = (p_.solver_mode == static_cast<int>(SolverMode::BlockBanded));
     const size_t nvar = active_field_count() * static_cast<size_t>(p_.n_gridpoints);
-    std::vector<double> x = pack_state();
+    std::vector<double> x = banded_mode ? pack_state_interleaved() : pack_state();
     std::vector<double> best_x = x;
     double best_norm = std::numeric_limits<double>::infinity();
 
@@ -797,7 +1450,8 @@ bool FiniteTempRelaxer::newton_solve_stage()
     for (int iter = 0; iter < p_.max_newton_iterations; ++iter)
     {
         const Residuals R = compute_residuals();
-        const std::vector<double> r_base = pack_residual_vector(R);
+        const std::vector<double> r_base = banded_mode ? pack_residual_vector_interleaved(R)
+                                                       : pack_residual_vector(R);
         const double base_norm = vector_norm_inf(r_base);
         if (std::isfinite(base_norm) && base_norm < best_norm)
         {
@@ -851,13 +1505,48 @@ bool FiniteTempRelaxer::newton_solve_stage()
         }
 
         std::vector<double> delta;
-        if (!solve_linear_system(J, rhs, delta))
+        bool banded_ok = false;
+        if (banded_mode)
         {
-            unpack_state(best_x);
-            last_residual_norm_ = best_norm;
-            return false;
+            // Direct banded solve on the full nvar×nvar matrix. The previous
+            // bordered-banded scheme would often fail on well-conditioned
+            // Jacobians and silently fall back to a dense O(N^3) solve, which
+            // dominated runtime. The matrix is strictly banded (half-bandwidth
+            // = 3*fields - 1), so direct Gaussian elimination on the band is
+            // the right primitive.
+            const size_t half_bandwidth = 3U * active_field_count() - 1U;
+            banded_ok = solve_compact_banded_system(J, rhs, delta, half_bandwidth);
         }
+        if (!banded_ok)
+        {
+            if (banded_mode)
+            {
+                const size_t half_bandwidth = 3U * active_field_count() - 1U;
+                std::vector<double> dense_J(nvar * nvar, 0.0);
+                for (size_t col = 0; col < nvar; ++col)
+                {
+                    const size_t row_begin = (col > half_bandwidth) ? (col - half_bandwidth) : 0U;
+                    const size_t row_end = std::min(nvar - 1U, col + half_bandwidth);
+                    for (size_t row = row_begin; row <= row_end; ++row)
+                    {
+                        dense_J[row * nvar + col] = J[(half_bandwidth + row - col) * nvar + col];
+                    }
+                }
 
+                if (!solve_linear_system(std::move(dense_J), rhs, delta))
+                {
+                    unpack_state(best_x);
+                    last_residual_norm_ = best_norm;
+                    return false;
+                }
+            }
+            else if (!solve_linear_system(J, rhs, delta))
+            {
+                unpack_state(best_x);
+                last_residual_norm_ = best_norm;
+                return false;
+            }
+        }
         double step = 1.0;
         bool accepted = false;
         double last_trial_norm = std::numeric_limits<double>::infinity();
@@ -869,7 +1558,14 @@ bool FiniteTempRelaxer::newton_solve_stage()
                 trial[i] += step * delta[i];
             }
 
-            unpack_state(trial);
+            if (banded_mode)
+            {
+                unpack_state_interleaved(trial);
+            }
+            else
+            {
+                unpack_state(trial);
+            }
             const double trial_norm = residual_norm(compute_residuals());
             last_trial_norm = trial_norm;
             if (std::isfinite(trial_norm) && trial_norm < base_norm)
@@ -891,12 +1587,26 @@ bool FiniteTempRelaxer::newton_solve_stage()
                           << " last_trial=" << last_trial_norm
                           << " min_step=" << p_.line_search_min_step << '\n';
             }
-            unpack_state(best_x);
+            if (banded_mode)
+            {
+                unpack_state_interleaved(best_x);
+            }
+            else
+            {
+                unpack_state(best_x);
+            }
             last_residual_norm_ = best_norm;
             return false;
         }
 
-        unpack_state(x);
+        if (banded_mode)
+        {
+            unpack_state_interleaved(x);
+        }
+        else
+        {
+            unpack_state(x);
+        }
     }
 
     const double final_norm = residual_norm(compute_residuals());
@@ -907,12 +1617,26 @@ bool FiniteTempRelaxer::newton_solve_stage()
     }
     if (best_norm < p_.newton_tolerance)
     {
-        unpack_state(best_x);
+        if (banded_mode)
+        {
+            unpack_state_interleaved(best_x);
+        }
+        else
+        {
+            unpack_state(best_x);
+        }
         last_residual_norm_ = best_norm;
         return true;
     }
 
-    unpack_state(best_x);
+    if (banded_mode)
+    {
+        unpack_state_interleaved(best_x);
+    }
+    else
+    {
+        unpack_state(best_x);
+    }
     last_residual_norm_ = best_norm;
     return false;
 }
@@ -962,6 +1686,27 @@ bool FiniteTempRelaxer::run(bool quiet)
 {
     build_grid();
     initialize_seed();
+
+    if (p_.use_suppression_factor)
+        r_cutoff_ = radius_at_mass_fraction(p_.cutoff_percent / 100.0);
+
+    if (p_.solver_mode != static_cast<int>(SolverMode::DenseLegacy) &&
+        p_.solver_mode != static_cast<int>(SolverMode::BlockBanded))
+    {
+        if (!quiet)
+        {
+            std::cout << "[warn] Unknown solver_mode = " << p_.solver_mode
+                      << ", falling back to dense legacy solver\n";
+        }
+        p_.solver_mode = static_cast<int>(SolverMode::DenseLegacy);
+    }
+
+    if (!quiet)
+    {
+        std::cout << "[INFO] solver_mode = "
+                  << (p_.solver_mode == static_cast<int>(SolverMode::BlockBanded) ? "block_banded" : "dense_legacy")
+                  << '\n';
+    }
 
     // initialize sigma trackers used by shooting fallback
     last_saved_sigma0_ = state_.sigma.front();
@@ -1123,6 +1868,8 @@ bool FiniteTempRelaxer::run(bool quiet)
             const double new_sigma0 = state_.sigma.front();
             last_sigma_step_ = new_sigma0 - last_saved_sigma0_;
             last_saved_sigma0_ = new_sigma0;
+            if (p_.use_suppression_factor)
+                r_cutoff_ = radius_at_mass_fraction(p_.cutoff_percent / 100.0);
             // Write the current successful profile so progress can be monitored
             write_profile(p_.output_profile);
         }
@@ -1287,6 +2034,9 @@ bool FiniteTempRelaxer::run(bool quiet)
             }
 
             append_model_summary("bs_models.dat");
+            write_profile(p_.output_profile);
+            if (p_.use_suppression_factor)
+                r_cutoff_ = radius_at_mass_fraction(p_.cutoff_percent / 100.0);
             if (p_.save_model_profiles)
             {
                 // one profile per family member, e.g. for picking SBSE backgrounds along a branch
@@ -1472,9 +2222,10 @@ void FiniteTempRelaxer::write_profile(const std::string& filename) const
     out << "# mu = " << p_.mu << " lambda = " << p_.lambda << " solitonic = " << p_.solitonic
         << " sigma_scale = " << p_.sigma_scale << " G = " << p_.G << '\n';
     out << "# n_gridpoints = " << p_.n_gridpoints << " rbar_min = " << p_.rbar_min << " rbar_max = " << p_.rbar_max << '\n';
-    // Columns 1-11 are unchanged from the original relaxer output; 12-17 were appended for SBSE.
+    // Columns 1-11 are unchanged from the original relaxer output; 12-17 were appended for SBSE (FiniteTempBackground
+    // reads them), and 18-19 are the particle-number integrands that the optimized upstream relaxer writes as 14-15.
     out << "# rbar r sigma eta alpha Xs omega Tlocal P_scalar P_thermal_suppressed P_thermal_raw"
-        << " mu_local P_total s n Upsilon rho\n";
+        << " mu_local P_total s n Upsilon rho n_integrand Noether_integrand\n";
 
     for (int i = 0; i < p_.n_gridpoints - 1; ++i)
     {
@@ -1487,7 +2238,12 @@ void FiniteTempRelaxer::write_profile(const std::string& filename) const
         const double mu_chem = state_.omega[static_cast<size_t>(i)] / alpha;
         const double P_scalar = scalar_pressure_term(sigma_sq, X, Xi);
         const double P_thermal = thermal_pressure_term(Tlocal, mu_chem, sigma_sq, X, Xi);
-        const double suppression_factor = compute_suppression_factor(sigma_sq);
+        const double suppression_factor = compute_suppression_factor(r);
+        const ThermoConjugates tc = conjugates_analytic(Tlocal, mu_chem, sigma_sq, X, Xi, r);
+        const double omega_i = state_.omega[static_cast<size_t>(i)];
+        const double Xs_i = std::max(1e-12, state_.Xs[static_cast<size_t>(i)]);
+        const double N_integrand = 4.0 * kPi * Xs_i * r * r * (tc.Upsilon * omega_i / alpha + tc.n);
+        const double Noether_integrand = 4.0 * kPi * Xs_i * r * r * (omega_i * sigma_sq / alpha);
         
         const double P_thermal_suppressed = suppression_factor * P_thermal;
 
@@ -1504,12 +2260,13 @@ void FiniteTempRelaxer::write_profile(const std::string& filename) const
             << P_thermal;
 
         const PointThermo th = thermo_at(state_.sigma[static_cast<size_t>(i)], state_.eta[static_cast<size_t>(i)],
-                                         alpha, state_.omega[static_cast<size_t>(i)]);
-        out << ' ' << th.mu << ' ' << th.P << ' ' << th.s << ' ' << th.n << ' ' << th.Upsilon << ' ' << th.rho << '\n';
+                                         alpha, state_.omega[static_cast<size_t>(i)], r);
+        out << ' ' << th.mu << ' ' << th.P << ' ' << th.s << ' ' << th.n << ' ' << th.Upsilon << ' ' << th.rho
+            << ' ' << N_integrand << ' ' << Noether_integrand << '\n';
     }
 }
 
-FiniteTempRelaxer::PointThermo FiniteTempRelaxer::thermo_at(double sigma, double eta, double alpha, double omega) const
+FiniteTempRelaxer::PointThermo FiniteTempRelaxer::thermo_at(double sigma, double eta, double alpha, double omega, double r) const
 {
     PointThermo th;
     const double a = std::max(1e-12, alpha);
@@ -1519,8 +2276,8 @@ FiniteTempRelaxer::PointThermo FiniteTempRelaxer::thermo_at(double sigma, double
     th.Xi = -th.mu * th.mu;
     const double sigma_sq = sigma * sigma;
 
-    th.P = pressure_Pthermal(th.T, th.mu, sigma_sq, th.X, th.Xi);
-    const ThermoConjugates tc = conjugates_from_pressure(th.T, th.mu, sigma_sq, th.X, th.Xi);
+    th.P = pressure_Pthermal(th.T, th.mu, sigma_sq, th.X, th.Xi, r);
+    const ThermoConjugates tc = conjugates_analytic(th.T, th.mu, sigma_sq, th.X, th.Xi, r);
     th.s = tc.s;
     th.n = tc.n;
     th.F = tc.F;
@@ -1703,8 +2460,49 @@ double FiniteTempRelaxer::metric_mass(double r, double Xs) const
     return 0.5 * r * (1.0 - 1.0 / (safe_Xs * safe_Xs));
 }
 
+double FiniteTempRelaxer::qball_total_energy() const
+{
+    const int n = p_.n_gridpoints;
+    if (n < 2)
+        return 0.0;
+
+    const int last_interior = std::max(1, n - 2);
+    auto integrand = [this](int i) -> double
+    {
+        const size_t j        = static_cast<size_t>(i);
+        const double r        = areal_radius(state_.rbar[j]);
+        const double alpha    = std::max(1e-12, state_.alpha[j]);
+        const double sigma_sq = state_.sigma[j] * state_.sigma[j];
+        const double X        = state_.eta[j] * state_.eta[j];
+        const double omega    = state_.omega[j];
+        const double mu_chem  = omega / alpha;
+        const double Xi       = -mu_chem * mu_chem;
+        const double Tlocal   = local_temperature(alpha);
+        const double P        = pressure_Pthermal(Tlocal, mu_chem, sigma_sq, X, Xi, r);
+        const ThermoConjugates tc = conjugates_analytic(Tlocal, mu_chem, sigma_sq, X, Xi, r);
+        const double energy_density = tc.s * Tlocal + mu_chem * tc.n - P + tc.Upsilon * omega * omega;
+        return 4.0 * kPi * r * r * energy_density;
+    };
+
+    double integral = 0.0;
+    double prev_r = areal_radius(state_.rbar[0]);
+    double prev_f = integrand(0);
+    for (int i = 1; i <= last_interior; ++i)
+    {
+        const double r = areal_radius(state_.rbar[static_cast<size_t>(i)]);
+        const double f = integrand(i);
+        integral += 0.5 * (prev_f + f) * (r - prev_r);
+        prev_r = r;
+        prev_f = f;
+    }
+    return integral;
+}
+
 double FiniteTempRelaxer::asymptotic_mass() const
 {
+    if (p_.qball_mode)
+        return qball_total_energy();
+
     const int last_interior = std::max(0, p_.n_gridpoints - 2);
     const double r = areal_radius(state_.rbar[static_cast<size_t>(last_interior)]);
     return metric_mass(r, state_.Xs[static_cast<size_t>(last_interior)]);
@@ -1713,44 +2511,74 @@ double FiniteTempRelaxer::asymptotic_mass() const
 double FiniteTempRelaxer::radius_at_mass_fraction(double mass_fraction) const
 {
     const int last_interior = std::max(1, p_.n_gridpoints - 2);
-    const double mass_inf = asymptotic_mass();
     const double mf = std::min(1.0, std::max(0.0, mass_fraction));
+
+    std::vector<double> rbar_vals;
+    std::vector<double> masses;
+
+    if (p_.qball_mode)
+    {
+        // Build cumulative energy integral using trapezoidal rule in r
+        auto integrand = [this](int i) -> double
+        {
+            const size_t j        = static_cast<size_t>(i);
+            const double r        = areal_radius(state_.rbar[j]);
+            const double alpha    = std::max(1e-12, state_.alpha[j]);
+            const double sigma_sq = state_.sigma[j] * state_.sigma[j];
+            const double X        = state_.eta[j] * state_.eta[j];
+            const double omega    = state_.omega[j];
+            const double mu_chem  = omega / alpha;
+            const double Xi       = -mu_chem * mu_chem;
+            const double Tlocal   = local_temperature(alpha);
+            const double P        = pressure_Pthermal(Tlocal, mu_chem, sigma_sq, X, Xi, r);
+            const ThermoConjugates tc = conjugates_analytic(Tlocal, mu_chem, sigma_sq, X, Xi, r);
+            const double energy_density = tc.s * Tlocal + mu_chem * tc.n - P + tc.Upsilon * omega * omega;
+            return 4.0 * kPi * r * r * energy_density;
+        };
+
+        double cumulative = 0.0;
+        double prev_r = areal_radius(state_.rbar[0]);
+        double prev_f = integrand(0);
+        rbar_vals.push_back(state_.rbar[0]);
+        masses.push_back(0.0);
+        for (int i = 1; i <= last_interior; ++i)
+        {
+            const size_t j = static_cast<size_t>(i);
+            const double r = areal_radius(state_.rbar[j]);
+            const double f = integrand(i);
+            cumulative += 0.5 * (prev_f + f) * (r - prev_r);
+            rbar_vals.push_back(state_.rbar[j]);
+            masses.push_back(cumulative);
+            prev_r = r;
+            prev_f = f;
+        }
+    }
+    else
+    {
+        for (int i = 0; i <= last_interior; ++i)
+        {
+            const double r = areal_radius(state_.rbar[static_cast<size_t>(i)]);
+            const double m = metric_mass(r, state_.Xs[static_cast<size_t>(i)]);
+            rbar_vals.push_back(state_.rbar[static_cast<size_t>(i)]);
+            masses.push_back(m);
+        }
+    }
+
+    const double mass_inf = masses.back();
     const double target_mass = mf * mass_inf;
 
     if (!std::isfinite(mass_inf) || mass_inf <= 0.0)
-    {
-        return areal_radius(state_.rbar[static_cast<size_t>(last_interior)]);
-    }
-
-    // Build vectors of rbar and masses for interior points
-    std::vector<double> rbar_vals;
-    std::vector<double> masses;
-    
-    for (int i = 0; i <= last_interior; ++i)
-    {
-        const double r = areal_radius(state_.rbar[static_cast<size_t>(i)]);
-        const double m = metric_mass(r, state_.Xs[static_cast<size_t>(i)]);
-        rbar_vals.push_back(state_.rbar[static_cast<size_t>(i)]);
-        masses.push_back(m);
-    }
+        return areal_radius(rbar_vals.back());
 
     if (rbar_vals.size() < 2)
-    {
         return areal_radius(rbar_vals.back());
-    }
 
-    // Handle out-of-bounds cases
     if (target_mass <= masses.front())
-    {
         return areal_radius(rbar_vals.front());
-    }
 
     if (target_mass >= masses.back())
-    {
         return areal_radius(rbar_vals.back());
-    }
 
-    // Linear interpolation in (mass, rbar) space to find rbar_target
     for (size_t i = 0; i < masses.size() - 1; ++i)
     {
         const double m_prev = masses[i];
@@ -1761,9 +2589,7 @@ double FiniteTempRelaxer::radius_at_mass_fraction(double mass_fraction) const
         {
             const double denom = m_curr - m_prev;
             if (std::abs(denom) < 1e-18)
-            {
                 return areal_radius(rbar_vals[i + 1]);
-            }
             const double t = (target_mass - m_prev) / denom;
             const double rbar_target = rbar_vals[i] * (1.0 - t) + rbar_vals[i + 1] * t;
             return areal_radius(rbar_target);
@@ -1794,7 +2620,7 @@ double FiniteTempRelaxer::particle_number() const
         const double mu_chem = omega / alpha;
         const double Xi = -mu_chem * mu_chem;
         const double Tlocal = local_temperature(alpha);
-        const ThermoConjugates tc = conjugates_from_pressure(Tlocal, mu_chem, sigma_sq, X, Xi);
+        const ThermoConjugates tc = conjugates_analytic(Tlocal, mu_chem, sigma_sq, X, Xi, r);
 
         return 4.0 * kPi * Xs * r * r * (tc.Upsilon * omega / alpha + tc.n);
     };
@@ -1978,8 +2804,8 @@ void FiniteTempRelaxer::print_residual_components(int index) const
     const double omega = state_.omega[j];
     const double mu_chem = omega / alpha;
     const double Xi = -mu_chem * mu_chem;
-    const double P = pressure_Pthermal(temp_local, mu_chem, sigma_sq, X, Xi);
-    const ThermoConjugates tc = conjugates_from_pressure(temp_local, mu_chem, sigma_sq, X, Xi);
+    const double P = pressure_Pthermal(temp_local, mu_chem, sigma_sq, X, Xi, r);
+    const ThermoConjugates tc = conjugates_analytic(temp_local, mu_chem, sigma_sq, X, Xi, r);
 
     const double F = tc.F;
 

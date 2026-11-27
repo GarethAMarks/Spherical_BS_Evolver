@@ -2,9 +2,9 @@
 # SBSE itself compiles these sources via ../make_BSEvolver_gcc.sh; this Makefile is only for running the
 # relaxer on its own, e.g. to produce profile.dat for SBSE's finite_temp = 1, ft_relax = 0 mode.
 CXX ?= g++
-CXXFLAGS ?= -std=c++17 -O2
+CXXFLAGS ?= -std=c++17 -O3 -fopenmp
 CPPFLAGS ?= -I..
-LDLIBS ?= -lm
+LDLIBS ?= -lm -fopenmp
 
 TARGET := finite_temp_relaxer
 SOURCES := relaxer_main.cpp FiniteTempRelaxer.cpp ../mathutils.cpp seed_shooter.cpp
