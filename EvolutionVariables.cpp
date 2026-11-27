@@ -3576,6 +3576,7 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
         ft_model.eos.B_floor = boson_star.ft_B_floor;
         ft_model.eos.q = boson_star.ft_q;
         ft_model.eos.crossover_mode = boson_star.ft_crossover_mode;
+        ft_model.eos.gas_statistics = boson_star.ft_gas_statistics;
         ft_model.eos.sigma_phonon = boson_star.ft_sigma_phonon;
         ft_model.eos.sigma_gas = boson_star.ft_sigma_gas;
         ft_model.eos.crossover_exponent = boson_star.ft_crossover_k;

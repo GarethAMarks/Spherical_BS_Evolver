@@ -151,6 +151,7 @@ class BosonStar
         double ft_cph_epsilon = 1e-8;    // relaxer EoS parameters, needed to evolve the same EoS
         double ft_q = 1.;                // pressure_interp_power
         int ft_crossover_mode = 0;       // relaxer crossover_mode and its parameters
+        int ft_gas_statistics = 0;       // relaxer gas_statistics
         double ft_sigma_phonon = 0.023, ft_sigma_gas = 0.017, ft_crossover_k = 20.;
         bool ft_suppression = 0;         // relaxer use_suppression_factor (not a local EoS: evolutions need 0)
         std::vector<FiniteTempPoint> ft_state; // background thermodynamics on radius_array (draft sign convention)

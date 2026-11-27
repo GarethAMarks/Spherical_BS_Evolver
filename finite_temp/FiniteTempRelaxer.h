@@ -46,6 +46,8 @@ struct RelaxerParams
     //   The weights depend on sigma only, so P stays convex in (T, mu, Pi) and Upsilon > 0 for suitable sigma_phonon,
     //   which the finite-T evolution needs (mode 0 is not hyperbolic in the crossover shell).
     int crossover_mode = 0;
+    // gas_statistics 0: Boltzmann gas (draft eq. 31); 1: Bose-Einstein gas, P_gas = (m/2pi)^{3/2} T^{5/2} Li_{5/2}(e^{(mu-m)/T}) (see bose_gas.h)
+    int gas_statistics = 0;
     double sigma_phonon = 0.023;
     double sigma_gas = 0.017;
     double crossover_exponent = 20.0;

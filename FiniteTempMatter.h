@@ -48,6 +48,7 @@ struct FiniteTempEoS
     double cph_epsilon = 1e-8;
     double B_floor = 0.;   // >0: convex floor on the phonon B factor at B_floor*c^2 (evolution only)
     double q = 1.;          // pressure_interp_power
+    int gas_statistics = 0; // 0 Boltzmann, 1 Bose-Einstein free gas (bose_gas.h)
     int crossover_mode = 0; // 0: q-norm (draft eq. 31); 1: convex sigma blend (see FiniteTempRelaxer.h)
     double sigma_phonon = 0.023, sigma_gas = 0.017, crossover_exponent = 20.;
 

@@ -1,4 +1,5 @@
 #include "FiniteTempMatter.h"
+#include "bose_gas.h"
 #include "EvolutionVariables.h"
 #include "mathutils.h"
 
@@ -103,10 +104,13 @@ FiniteTempEoS::Thermo FiniteTempEoS::thermal(double T, double mu, double sigma_s
     const double Pph_Xi = -2. * Pph / B * Be_B * B_Xs + Pph_c2 * dc2_dXi;
     const double Pph_s2 = Pph_c2 * dc2_ds2;
 
-    // free Boltzmann gas
-    const double lnPg = 1.5 * std::log(m / (2. * M_PI)) + 2.5 * std::log(T) - (m - mu) / T;
-    const double Pg_T_over_Pg = 2.5 / T + (m - mu) / (T * T);
-    const double Pg_mu_over_Pg = 1. / T;
+    // free gas (Boltzmann or Bose-Einstein), P_g = (m/2pi)^{3/2} T^{5/2} F(x), x = (mu - m)/T
+    const double xg = (mu - m) / T;
+    double lnF, kap;
+    bose_gas::lnF_kappa(xg, gas_statistics, lnF, kap);
+    const double lnPg = 1.5 * std::log(m / (2. * M_PI)) + 2.5 * std::log(T) + lnF;
+    const double Pg_T_over_Pg = (2.5 - xg * kap) / T;
+    const double Pg_mu_over_Pg = kap / T;
 
     if (crossover_mode == 1)
     {
