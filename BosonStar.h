@@ -145,7 +145,8 @@ class BosonStar
         double ft_av_quad = 0., ft_av_lin = 0., ft_av_cs = 0.1; // artificial viscosity on the normal fluid
         int ft_hrsc = 0;                 // 1: HRSC (LLF + MC) transport for the normal fluid
         double ft_hrsc_cmax = 1.;
-        int ft_theta_implicit = 0;      // 1: theta_1 conversion applied implicitly (operator split) after each step
+        int ft_theta_implicit = 0;
+        double ft_theta_pole_p = 0.;     // >0: implicit conversion rate enhanced by (c^2/B)^p near the Landau pole      // 1: theta_1 conversion applied implicitly (operator split) after each step
         double ft_B_floor = 0.;         // convex floor on phonon B factor (evolution only)
         double ft_cph_epsilon = 1e-8;    // relaxer EoS parameters, needed to evolve the same EoS
         double ft_q = 1.;                // pressure_interp_power

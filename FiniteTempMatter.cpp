@@ -46,6 +46,18 @@ double FiniteTempEoS::dddV(double /*s2*/) const
     return 24. * m * m / (sc2 * sc2);
 }
 
+// phonon speed^2 and the factor B = 1 + (1 - c^2) mu^2 / Xi (B = c^2 in Josephson equilibrium, B = 0 at the Landau pole)
+void FiniteTempEoS::phonon_B(double mu, double sigma_sq, double Xi, double& c2, double& B) const
+{
+    const double s2 = max(0., sigma_sq);
+    const double Xs = (std::abs(Xi) < 1e-12) ? ((Xi >= 0.) ? 1e-12 : -1e-12) : Xi;
+    const double a = s2 * ddV(s2);
+    double den = a - 2. * Xs;
+    if (std::abs(den) < 1e-12) den = (den >= 0.) ? 1e-12 : -1e-12;
+    c2 = max(1e-12, (a + max(0., cph_epsilon)) / den);
+    B = 1. + (1. - c2) * mu * mu / Xs;
+}
+
 FiniteTempEoS::Thermo FiniteTempEoS::thermal(double T, double mu, double sigma_sq, double Xi) const
 {
     Thermo th;
@@ -680,7 +692,15 @@ void FiniteTempMatter::relax_conversion(BSSNSlice* slice, double h)
         const FTM U0 = st_j.ftm;
         const double g_zz = b.h_zz / max(st->min_chi, b.chi);
         const double s2 = p0.sigma * p0.sigma;
-        const double k = b.alpha * theta1 * h;
+        const double k0 = b.alpha * theta1 * h;
+        // pole-enhanced rate theta_1 (c^2 / B)^p: unchanged in equilibrium (B = c^2), diverges at the Landau pole B -> 0
+        auto rate_k = [&](const Point& q, double Xi_q) {
+            if (!(theta_pole_p > 0.)) return k0;
+            double c2, B;
+            eos.phonon_B(q.mu, s2, Xi_q, c2, B);
+            if (!(B > 1e-12 * c2)) return 1e12 * k0;
+            return k0 * min(1e12, std::pow(c2 / B, theta_pole_p));
+        };
         const double J0 = p0.W * (p0.Pi + p0.v * p0.dz_psi) + p0.mu;
         const double JT0 = J0 / p0.T;
         FTM Ubest = U0;
@@ -701,7 +721,8 @@ void FiniteTempMatter::relax_conversion(BSSNSlice* slice, double h)
                 const double W = 1. / std::sqrt(1. - min(1. - 1e-15, g_zz * q.v * q.v));
                 const double J = W * (q.Pi + q.v * p0.dz_psi) + q.mu;
                 JT1 = J / q.T;
-                g = d - k * J;
+                const double gzz_inv = 1. / g_zz;
+                g = d - rate_k(q, -q.Pi * q.Pi + gzz_inv * p0.dz_psi * p0.dz_psi) * J;
             }
             jt = JT1;
             return true;
@@ -711,6 +732,7 @@ void FiniteTempMatter::relax_conversion(BSSNSlice* slice, double h)
         const double n_mu = (eos.thermal(p0.T, p0.mu + hmu, s2, p0.Xi).n - eos.thermal(p0.T, p0.mu - hmu, s2, p0.Xi).n) / (2. * hmu);
         const double rate = 1. / max(1e-300, p0.W * n_mu) + 1. / max(1e-300, p0.Ups);
         if (!(n_mu > 0.) || !(p0.Ups > 0.)) continue;
+        const double k = rate_k(p0, p0.Xi);
         double da = 0., ga = 0. - k * J0;
         double db = k * J0 / (1. + k * rate), gb, jt;
         FTM U;

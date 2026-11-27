@@ -61,6 +61,7 @@ struct FiniteTempEoS
     };
     // thermal part only (the scalar part is the Lagrangian, handled by SBSE's ComplexScalarField)
     Thermo thermal(double T, double mu, double sigma_sq, double Xi) const;
+    void phonon_B(double mu, double sigma_sq, double Xi, double& c2, double& B) const;
 
     double V(double s2) const;   // V(sigma^2)
     double dV(double s2) const;  // dV/d(sigma^2)
@@ -99,7 +100,8 @@ public:
     // theta_cfl / (dt * rate) so that the explicit RK4 step stays stable (dt = time step of the evolution).
     double theta1 = 0.;
     double theta_cfl = 0.5;
-    bool theta_implicit = false; // theta_1 by implicit operator splitting (relax_conversion) instead of RHS sources
+    bool theta_implicit = false;
+    double theta_pole_p = 0.; // >0: implicit conversion rate theta_1 (c^2/B)^p // theta_1 by implicit operator splitting (relax_conversion) instead of RHS sources
     double dt = 0.;
     int theta_capped = 0;     // points where theta_1 was capped in the last prepare()
     // atmosphere: where sigma < sigma_atm the polar split phi = sigma e^{i psi} is ill-conditioned (Pi = -N_S / sigma^2), so
