@@ -108,6 +108,7 @@ void FiniteTempRelaxer::read_parameters(const std::string& filename, bool quiet)
         fill_parameter(current_line, "decouple_exponent = ", p_.decouple_exponent, quiet);
         fill_parameter(current_line, "use_thermal_Y = ", p_.use_thermal_Y, quiet);
         fill_parameter(current_line, "gap_soft = ", p_.gap_soft, quiet);
+        fill_parameter(current_line, "compactification_scale = ", p_.compactification_scale, quiet);
 
         fill_parameter(current_line, "omega_target = ", p_.omega_target, quiet);
         fill_parameter(current_line, "omega_step = ", p_.omega_step, quiet);
@@ -131,6 +132,8 @@ void FiniteTempRelaxer::read_parameters(const std::string& filename, bool quiet)
         fill_parameter(current_line, "output_profile = ", p_.output_profile, quiet);
         fill_parameter(current_line, "save_model_profiles = ", p_.save_model_profiles, quiet);
     }
+    if (p_.compactification_scale != 1.0)
+        compactification_ = std::make_shared<StandardCompactification>(p_.compactification_scale);
 
     if (p_.cutoff_percent < 0.0 || p_.cutoff_percent > 100.0)
     {

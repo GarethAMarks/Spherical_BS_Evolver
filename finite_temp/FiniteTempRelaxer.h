@@ -58,6 +58,7 @@ struct RelaxerParams
     double sigma_decouple = 0.003;
     double decouple_exponent = 8.0;
     double gap_soft = 0.0; // mode 3: gradient gap delta_eff = (delta + sqrt(delta^2 + gap_soft^2))/2 (0: max(delta, 0)); smooth for X <= 0 in evolutions
+    double compactification_scale = 1.0; // r = L rbar / (1 - rbar); L > 1 resolves large radii (gas halo, boxed runs)
     int use_thermal_Y = 1; // mode 3: 0 drops the X-dependence of P_th from the field equations (Y = 1), for diagnostics
     // crossover_mode 2: width (in units of T) of the softened phase-mode gap at mu_c = m; 0 = hard max (kink)
     double bogoliubov_gap_width = 1.0;

@@ -113,40 +113,42 @@ public:
  */
 class StandardCompactification : public Compactification {
 public:
-    StandardCompactification() = default;
+    // optional length scale L: r = L r_bar / (1 - r_bar) (L = 1: the standard map). Larger L moves grid points outward.
+    explicit StandardCompactification(double L = 1.0) : L_(L > 0.0 ? L : 1.0) {}
+    double scale() const { return L_; }
 
     double r_of_rbar(double rbar) const override {
         const double one_minus = std::max(1e-12, 1.0 - rbar);
-        return rbar / one_minus;
+        return L_ * rbar / one_minus;
     }
 
     double rbar_of_r(double r) const override {
-        return r / (1.0 + r);
+        return r / (L_ + r);
     }
 
     double drbar_dr(double r) const override {
-        const double denom = 1.0 + r;
-        return 1.0 / (denom * denom);
+        const double denom = L_ + r;
+        return L_ / (denom * denom);
     }
 
     double d2rbar_dr2(double r) const override {
-        const double denom = 1.0 + r;
-        return -2.0 / (denom * denom * denom);
+        const double denom = L_ + r;
+        return -2.0 * L_ / (denom * denom * denom);
     }
 
     double d1_r_factor(double rbar) const override {
         const double one_minus = 1.0 - rbar;
-        return one_minus * one_minus;
+        return one_minus * one_minus / L_;
     }
 
     double d2_r_factor_first(double rbar) const override {
         const double one_minus = 1.0 - rbar;
-        return one_minus * one_minus * one_minus * one_minus;
+        return one_minus * one_minus * one_minus * one_minus / (L_ * L_);
     }
 
     double d2_r_factor_second(double rbar) const override {
         const double one_minus = 1.0 - rbar;
-        return -2.0 * one_minus * one_minus * one_minus;
+        return -2.0 * one_minus * one_minus * one_minus / (L_ * L_);
     }
 
     bool validate_inverse(double tolerance) const override {
@@ -175,6 +177,9 @@ public:
         }
         return all_pass;
     }
+
+private:
+    double L_ = 1.0;
 };
 
 #endif // COMPACTIFICATION_H
