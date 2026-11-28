@@ -28,7 +28,14 @@ int main(int argc, char** argv)
     BosonStar boson_star{};
     boson_star.read_parameters();
 
-    if (mpi_rank == 0)
+    if (boson_star.charged)
+    {
+        // charged boson star from the external static solver (charged_bs/make_charged_id.py); every rank reads the file
+        boson_star.read_charged_data();
+        if (mpi_rank == 0)
+            boson_star.write_field();
+    }
+    else if (mpi_rank == 0)
     {
         boson_star.solve();
         if (boson_star.isotropic)
@@ -38,7 +45,8 @@ int main(int argc, char** argv)
         }
         boson_star.write_field();
     }
-    boson_star.broadcast();
+    if (!boson_star.charged)
+        boson_star.broadcast();
 
     if (boson_star.gaussian_start)
         gauss_initialize(boson_star);

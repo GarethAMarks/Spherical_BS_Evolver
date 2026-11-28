@@ -10,7 +10,7 @@ OPTFLAGS=${OPTFLAGS:-"-O2"}
 CXXFLAGS="-Wall -fexceptions $OPTFLAGS -I."
 OBJDIR=obj/Release
 
-SOURCES="mathutils BosonStar LinearPerturbation EvolutionVariables main ComplexScalarField RealScalarField"
+SOURCES="mathutils BosonStar LinearPerturbation EvolutionVariables main ComplexScalarField RealScalarField ChargedScalarField"
 
 mkdir -p "$OBJDIR"
 OBJECTS=""

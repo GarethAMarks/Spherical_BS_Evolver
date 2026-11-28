@@ -33,7 +33,7 @@ using std::min;
 using std::max;
 using std::rotate;
 // Spacetime constructor: initialize reusable CSF model with this context
-Spacetime::Spacetime() : csf_model(this), rsf_model(this) {
+Spacetime::Spacetime() : csf_model(this), rsf_model(this), chsf_model(this) {
 
     sub_min_time = 10.0;
     adaptive_timestep = false;
@@ -157,9 +157,9 @@ void Spacetime::allgather_owned(const std::vector<double>& local_owned,
 // gather and then return.
 void Spacetime::write_checkpoint(BSSNSlice& slice, const std::string& file_name)
 {
-    // 16 doubles per point (theta as 0 when not CCZ4 — but we handle theta
+    // 19 doubles per point (theta as 0 when not CCZ4 — but we handle theta
     // as a separate gather below when CCZ4 is on).
-    constexpr int NCOL = 16;
+    constexpr int NCOL = 19;
     std::vector<double> local(local_N * NCOL);
     for (int k = 0; k < local_N; ++k)
     {
@@ -181,6 +181,9 @@ void Spacetime::write_checkpoint(BSSNSlice& slice, const std::string& file_name)
         p[13] = use_CCZ4 ? slice.theta[j] : 0.0;
         p[14] = slice.states2[j].rsf.psi;
         p[15] = slice.states2[j].rsf.K_psi;
+        p[16] = slice.states2[j].em.A_z;
+        p[17] = slice.states2[j].em.E_z;
+        p[18] = slice.states2[j].em.Phi_e;
     }
 
     std::vector<double> full;
@@ -215,6 +218,9 @@ void Spacetime::write_checkpoint(BSSNSlice& slice, const std::string& file_name)
         if (use_CCZ4) scratch.theta[j]    = p[13];
         scratch.states2[j].rsf.psi        = p[14];
         scratch.states2[j].rsf.K_psi      = p[15];
+        scratch.states2[j].em.A_z         = p[16];
+        scratch.states2[j].em.E_z         = p[17];
+        scratch.states2[j].em.Phi_e       = p[18];
     }
     scratch.write_slice(file_name);
 }
@@ -228,7 +234,7 @@ void Spacetime::write_checkpoint(BSSNSlice& slice, const std::string& file_name)
 //   right ghosts = [global_hi, global_hi + NGHOST)   from right neighbor
 //
 // Wire format per point: NDOF_STATE consecutive doubles laid out as
-//   [BSSNState (9)] [CSF (4)] [RSF (2)]
+//   [BSSNState (9)] [CSF (4)] [RSF (2)] [EMF (3)]
 // matching the struct member ordering below. Theta is a separate double per
 // point sent in a second message when use_CCZ4 is on.
 //
@@ -286,6 +292,9 @@ void Spacetime::exchange_ghosts(BSSNSlice& slice)
             p[12] = s.csf.K_phi_im;
             p[13] = s.rsf.psi;
             p[14] = s.rsf.K_psi;
+            p[15] = s.em.A_z;
+            p[16] = s.em.E_z;
+            p[17] = s.em.Phi_e;
         }
     };
     auto unpack = [&](const std::vector<double>& buf, int global_start)
@@ -309,6 +318,9 @@ void Spacetime::exchange_ghosts(BSSNSlice& slice)
             s.csf.K_phi_im   = p[12];
             s.rsf.psi        = p[13];
             s.rsf.K_psi      = p[14];
+            s.em.A_z         = p[15];
+            s.em.E_z         = p[16];
+            s.em.Phi_e       = p[17];
         }
     };
 
@@ -378,19 +390,19 @@ BSSNState operator*(double c, const BSSNState& s);
 
 // Composite State elementwise operations (applies to both csf and bssn)
 State operator+(const State& a, const State& b) {
-    return State{a.csf + b.csf, a.bssn + b.bssn, a.rsf + b.rsf};
+    return State{a.csf + b.csf, a.bssn + b.bssn, a.rsf + b.rsf, a.em + b.em};
 }
 
 State operator-(const State& a, const State& b) {
-    return State{a.csf - b.csf, a.bssn - b.bssn, a.rsf - b.rsf};
+    return State{a.csf - b.csf, a.bssn - b.bssn, a.rsf - b.rsf, a.em - b.em};
 }
 
 State operator*(const State& a, const State& b) {
-    return State{a.csf * b.csf, a.bssn * b.bssn, a.rsf * b.rsf};
+    return State{a.csf * b.csf, a.bssn * b.bssn, a.rsf * b.rsf, a.em * b.em};
 }
 
 State operator*(double c, const State& a) {
-    return State{c * a.csf, c * a.bssn, c * a.rsf};
+    return State{c * a.csf, c * a.bssn, c * a.rsf, c * a.em};
 }
 
 inline State operator/(const State& a, double c) {
@@ -571,12 +583,15 @@ double BSSNSlice::d_z_with(bssn_var var, const DerivStencil& st, int order) cons
         case v_theta:    for (int j = 0; j < 5; j++) F[j] = theta[J[j]];                 break;
         case v_psi:      for (int j = 0; j < 5; j++) F[j] = states2[J[j]].rsf.psi;       break;
         case v_K_psi:    for (int j = 0; j < 5; j++) F[j] = states2[J[j]].rsf.K_psi;     break;
+        case v_A_z:      for (int j = 0; j < 5; j++) F[j] = states2[J[j]].em.A_z;        break;
+        case v_E_z:      for (int j = 0; j < 5; j++) F[j] = states2[J[j]].em.E_z;        break;
+        case v_Phi_e:    for (int j = 0; j < 5; j++) F[j] = states2[J[j]].em.Phi_e;      break;
         default:
             cerr << "ERROR: invalid variable requested for differentiation" << endl;
             exit(0);
     }
 
-    const bool parity_is_odd = ((var == v_c_chris_Z || var == v_beta)/*|| (has_BH && (var == v_chi || var == v_alpha))*/);
+    const bool parity_is_odd = ((var == v_c_chris_Z || var == v_beta || var == v_A_z || var == v_E_z)/*|| (has_BH && (var == v_chi || var == v_alpha))*/);
 
     //account for odd parity of contracted christoffel symbols and beta across z = 0
     if (st.flip0 && parity_is_odd)
@@ -682,7 +697,7 @@ void Spacetime::apply_damping_at_point(int j,
     State damping_corr = d_mult * sevenPointDeriv(h, 6, sJ0, sJ1, sJ2, sJ3, sJ4, sJ5, sJ6);
 
     // the stencil above reflects every variable as even across z = 0; redo the odd variables (the contracted
-    // Christoffel symbol and the shift) with the correct sign flip for reflected points
+    // Christoffel symbol, the shift and, for charged matter, A_z and E^z) with the correct sign flip for reflected points
     if (j < 3)
     {
         std::array<double, 7> sgn;
@@ -694,6 +709,11 @@ void Spacetime::apply_damping_at_point(int j,
         };
         damping_corr.bssn.c_chris_Z = odd_corr([](const State& st) { return st.bssn.c_chris_Z; });
         damping_corr.bssn.beta      = odd_corr([](const State& st) { return st.bssn.beta; });
+        if (charged)
+        {
+            damping_corr.em.A_z = odd_corr([](const State& st) { return st.em.A_z; });
+            damping_corr.em.E_z = odd_corr([](const State& st) { return st.em.E_z; });
+        }
     }
 
     // CCZ4: taper the dissipation of chi (a zero-speed field) to zero in the outer region
@@ -770,6 +790,11 @@ void Spacetime::sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slic
     if (add_real_field)
         N.rsf = (RSF){p_matter, p_matter};
 
+    // Maxwell field (charged matter): radiative falloff for A_z and Phi_e (both -> 0 at infinity in the Phi(inf) = 0 gauge
+    // of the initial data); E^z ~ Q / r^2, so p = D - 2 keeps a static Coulomb field (and hence the total charge) exactly.
+    if (charged)
+        N.em = (EMF){p_matter, D - 2., p_matter};
+
     //outermost 5 active gridpoints
     State& s1 = slice_ptr->states2[last_active_j - 4 * res_fac];
     State& s2 = slice_ptr->states2[last_active_j - 3 * res_fac];
@@ -786,6 +811,9 @@ void Spacetime::sommerfeld_BC(BSSNSlice& rhs, int res_fac_outer, BSSNSlice* slic
 
     if (add_real_field)
         char_speeds.rsf = (RSF){1., 1.};
+
+    if (charged)
+        char_speeds.em = (EMF){1., 1., 1.};
 
     rhs.states2[last_active_j - res_fac] = (-1.) * char_speeds * ( p4_stencil(dr * res_fac, s1, s2, s3, s4, s5) 
                                          + N * (s4 - asymp_state) / r4 - asymp_deriv);
@@ -906,6 +934,21 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
     // Build contiguous arrays and their splines
     tk::spline s_X, s_A, s_phi, s_psi_iso, s_A_iso, s_phi_iso, s_pert, s_pert_iso;
     tk::spline s_rsf_iso, s_rsf;
+    tk::spline s_E, s_Phi_e, s_Omega; // charged stars only
+    if (boson_star.charged)
+    {
+        if (isotropic)
+        {
+            cerr << "ERROR: charged boson star initial data are only supported in polar-areal coordinates (isotropic = 0)" << endl;
+            exit(1);
+        }
+        s_E.set_boundary(tk::spline::second_deriv, 0.0, tk::spline::second_deriv, 0.0); // E^z is odd: E'' = 0 at z = 0
+        s_Phi_e.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
+        s_Omega.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
+        s_E.set_points(X_nodes, boson_star.E_array, tk::spline::cspline);
+        s_Phi_e.set_points(X_nodes, boson_star.Phi_e_array, tk::spline::cspline);
+        s_Omega.set_points(X_nodes, boson_star.Omega_array, tk::spline::cspline);
+    }
     if (isotropic) {
         if (!boson_star.psi_iso_array.empty()) {
             s_psi_iso.set_boundary(tk::spline::first_deriv, 0.0, tk::spline::second_deriv, 0.0);
@@ -1039,6 +1082,18 @@ void BSSNSlice::read_BS_data (BosonStar& boson_star, int BS_resolution_factor, b
 
     states2[j].csf.K_phi_im = - boson_star.omega * states2[j].csf.phi_re / (2. * states2[j].bssn.alpha) + pert_correction;
 
+        // Charged stars: Maxwell field from the static solution, and K_phi from the gauge-covariant frequency
+        // Omega = (omega + q A_t) / alpha (phi = A e^{+i omega t}, Pi = n^a D_a phi = i Omega A = -2 K_phi)
+        states2[j].em = EMF{0., 0., 0.};
+        if (boson_star.charged)
+        {
+            const double E_z_interp = s_E(z), Phi_e_interp = s_Phi_e(z), Omega_interp = s_Omega(z);
+            states2[j].em.A_z = 0.;
+            states2[j].em.E_z = E_z_interp;
+            states2[j].em.Phi_e = Phi_e_interp;
+            states2[j].csf.K_phi_im = -0.5 * Omega_interp * states2[j].csf.phi_re;
+        }
+
         if (use_CCZ4)
             theta[j] = 0.;
     }
@@ -1091,7 +1146,8 @@ void BSSNSlice::write_slice(std::string file_name)
     data_file <<  std::setprecision (16) << (j) * dr << "   " << states2[j].bssn.chi << "    " << states2[j].bssn.h_zz << "    " << states2[j].bssn.h_ww  << "    " << states2[j].bssn.A_zz
         << "   " << states2[j].bssn.A_ww << "    " << states2[j].bssn.K << "    " << states2[j].bssn.c_chris_Z  << "    " << states2[j].csf.phi_re << "    " << states2[j].csf.phi_im
         << "   " << states2[j].csf.K_phi_re << "    " << states2[j].csf.K_phi_im << "    " << states2[j].bssn.alpha << "    " << states2[j].bssn.beta << "    " <<  theta0
-        << "   " << states2[j].rsf.psi << "    " << states2[j].rsf.K_psi << endl;
+        << "   " << states2[j].rsf.psi << "    " << states2[j].rsf.K_psi
+        << "   " << states2[j].em.A_z << "    " << states2[j].em.E_z << "    " << states2[j].em.Phi_e << endl;
     }
 }
 
@@ -1111,6 +1167,14 @@ void BSSNSlice::read_checkpoint(int time, int n_gridpoints)
     int j = 0;
     while (std::getline(checkpoint_file, line))
     {
+        // Maxwell variables (charged matter) are the last three of the 19 data columns written by write_slice
+        {
+            std::istringstream iss_all(line);
+            std::vector<double> v; double x;
+            while (iss_all >> x) v.push_back(x);
+            if (v.size() >= 20 && j < (int)states2.size())
+                states2[j].em = EMF{v[17], v[18], v[19]};
+        }
         std::istringstream iss(line);
     double z;
     // read into temporaries to populate both legacy states and new states2
@@ -1227,10 +1291,14 @@ double Spacetime::d_z(bssn_var var, int index, int order = 1)
             deriv_vals[v_alpha][k] = st.bssn.alpha;       deriv_vals[v_beta][k] = st.bssn.beta;
             deriv_vals[v_theta][k] = has_theta ? sl->theta[deriv_cache.J[k]] : 0.;
             deriv_vals[v_psi][k] = st.rsf.psi;            deriv_vals[v_K_psi][k] = st.rsf.K_psi;
+            deriv_vals[v_A_z][k] = st.em.A_z;             deriv_vals[v_E_z][k] = st.em.E_z;
+            deriv_vals[v_Phi_e][k] = st.em.Phi_e;
         }
-        //odd parity of the contracted Christoffel symbol and the shift across z = 0
-        if (deriv_cache.flip0) { deriv_vals[v_c_chris_Z][0] = -deriv_vals[v_c_chris_Z][0]; deriv_vals[v_beta][0] = -deriv_vals[v_beta][0]; }
-        if (deriv_cache.flip1) { deriv_vals[v_c_chris_Z][1] = -deriv_vals[v_c_chris_Z][1]; deriv_vals[v_beta][1] = -deriv_vals[v_beta][1]; }
+        //odd parity of the contracted Christoffel symbol, the shift and the Maxwell A_z, E^z across z = 0
+        for (int k = 0; k < 2; k++)
+            if (k == 0 ? deriv_cache.flip0 : deriv_cache.flip1)
+                for (int v : {v_c_chris_Z, v_beta, v_A_z, v_E_z})
+                    deriv_vals[v][k] = -deriv_vals[v][k];
     }
 
     const double* F = deriv_vals[var];
@@ -1753,10 +1821,22 @@ void Spacetime::auxiliary_quantities_at_point(BSSNSlice* slice_ptr, int j)
     CSF d_z_csf{d_z_phi_re, d_z_phi_im, 0.0, 0.0};
     CSF d_zz_csf{0.0, 0.0, 0.0, 0.0};
 
-    rho[j] = csf_model.rho(csf, bssn, d_z_csf, d_zz_csf);
-    j_z[j] = csf_model.j_z(csf, bssn, d_z_csf, d_zz_csf);
-    S_zz[j] = csf_model.S_zz(csf, bssn, d_z_csf, d_zz_csf);
-    S_ww[j] = csf_model.S_ww(csf, bssn, d_z_csf, d_zz_csf);
+    if (charged)
+    {
+        // charged scalar (gauge-covariant gradients) + electromagnetic stress-energy
+        const EMF& em = slice_ptr->states2[j].em;
+        rho[j] = chsf_model.rho(csf, em, bssn, d_z_csf);
+        j_z[j] = chsf_model.j_z(csf, em, bssn, d_z_csf);
+        S_zz[j] = chsf_model.S_zz(csf, em, bssn, d_z_csf);
+        S_ww[j] = chsf_model.S_ww(csf, em, bssn, d_z_csf);
+    }
+    else
+    {
+        rho[j] = csf_model.rho(csf, bssn, d_z_csf, d_zz_csf);
+        j_z[j] = csf_model.j_z(csf, bssn, d_z_csf, d_zz_csf);
+        S_zz[j] = csf_model.S_zz(csf, bssn, d_z_csf, d_zz_csf);
+        S_ww[j] = csf_model.S_ww(csf, bssn, d_z_csf, d_zz_csf);
+    }
 
     // If configured, add massless real scalar field contributions
     if (add_real_field)
@@ -1923,6 +2003,16 @@ void Spacetime::slice_rhs_into(BSSNSlice* slice_ptr, BSSNSlice& rhs, int skipped
         // Optimization: K_phi second derivatives not used by RHS; pass zeros for those entries
         CSF d_zz_csf{d_zz(v_phi_re, j), d_zz(v_phi_im, j), 0.0, 0.0};
 
+        if (charged)
+        {
+            // ChargedScalarField: gauge-covariant scalar equations + Maxwell (Lorenz gauge)
+            const EMF d_z_em{d_z(v_A_z, j), d_z(v_E_z, j), d_z(v_Phi_e, j)};
+            const ChargedGeom geom{d_z_alpha, d_z_chi, d_z_h_zz, d_z_h_ww, d_z_beta, chris_Zzz[j], chris_Zww[j], z};
+            chsf_model.rhs(slice_ptr->states2[j].csf, slice_ptr->states2[j].em, slice_ptr->states2[j].bssn,
+                           d_z_csf, d_zz_csf, d_z_em, maxwell_divergence(v_A_z, j), geom, rhs.states2[j].csf, rhs.states2[j].em);
+        }
+        else
+        {
         const CSF csf_rhs = csf_model.rhs_CSF(
             slice_ptr->states2[j].csf,
             slice_ptr->states2[j].bssn,
@@ -1935,6 +2025,8 @@ void Spacetime::slice_rhs_into(BSSNSlice* slice_ptr, BSSNSlice& rhs, int skipped
             z);
 
         rhs.states2[j].csf = csf_rhs;
+        rhs.states2[j].em = EMF{0., 0., 0.};
+        }
 
         // RealScalarField RHS for massless real scalar (optional)
         if (add_real_field)
@@ -2107,6 +2199,50 @@ double Spacetime::slice_charge(BSSNSlice* slice_ptr)
     return bss_mpi::sum(charge);
 }
 
+// Total electric charge Q = int rho_e dV over the inner 95% of the grid (charged matter; equals q times the Noether charge,
+// since rho_e = q * Noether density). Collective under MPI.
+double Spacetime::slice_electric_charge(BSSNSlice* slice_ptr)
+{
+    return q_charge * slice_charge(slice_ptr);
+}
+
+double Spacetime::maxwell_divergence(bssn_var var, int index)
+{
+    const double n = D - 2.;
+    d_z(var, index); // fills the derivative cache (stencil + values of every variable) at this index
+    const BSSNSlice::DerivStencil& st = deriv_cache;
+    const double z = (index + grid_offset) * dr;
+
+    double V[5], W[5];
+    for (int k = 0; k < 5; k++)
+    {
+        V[k] = deriv_vals[var][k]; // odd-parity sign flips across z = 0 already applied
+        if (var == v_A_z)
+            V[k] *= deriv_vals[v_chi][k] / deriv_vals[v_h_zz][k]; // A^z = chi h^zz A_z
+    }
+    const double h = st.h;
+    auto deriv = [&](const double* F)
+    {
+        if (st.outer_pos == 5) return p5_stencil(h, F[0], F[1], F[2], F[3], F[4]);
+        if (st.outer_pos == 4) return p4_stencil(h, F[0], F[1], F[2], F[3], F[4]);
+        return ((1.0 / 12.0) * F[0] - (2.0 / 3.0) * F[1] + (2.0 / 3.0) * F[3] - (1.0 / 12.0) * F[4]) / h;
+    };
+    if (z <= min_z) // origin of a vertex-centred grid: (1/W) d_z (W V) -> (n + 1) d_z V for odd V
+        return (n + 1.) * deriv(V);
+
+    // coordinates of the stencil points (mirrored ghosts sit at negative z); kc = position of index in the stencil
+    const int kc = (st.outer_pos == 5) ? 4 : ((st.outer_pos == 4) ? 3 : 2);
+    double WV[5];
+    for (int k = 0; k < 5; k++)
+    {
+        const double zk = z + (k - kc) * h;
+        const double chi_k = std::max(min_chi, deriv_vals[v_chi][k]);
+        W[k] = pow(zk, n) * sqrt(deriv_vals[v_h_zz][k] * pow(deriv_vals[v_h_ww][k], n)) * pow(chi_k, -0.5 * (n + 1.));
+        WV[k] = W[k] * V[k];
+    }
+    return deriv(WV) / W[kc];
+}
+
 // Integrands of the Misner-Sharp mass split, dM_X/dz = Omega_n R^n (rho_X R' - j_z,X R K^theta_theta), for the complex
 // (f_phi) and real (f_psi) fields at gridpoint j. Along a slice the MS mass gradient depends only on rho and j_z (the
 // stress contributions cancel in the unified first law), and the integrand is linear in T_ab, so the field parts add up to
@@ -2131,7 +2267,13 @@ void Spacetime::ms_split_integrand(BSSNSlice* slice_ptr, int j, double& f_phi, d
     const CSF& csf = slice_ptr->states2[j].csf;
     const CSF d_z_csf{slice_ptr->d_z(v_phi_re, j, 1), slice_ptr->d_z(v_phi_im, j, 1), 0.0, 0.0};
     const CSF d_zz_csf{0.0, 0.0, 0.0, 0.0};
-    f_phi = pref * (csf_model.rho(csf, b, d_z_csf, d_zz_csf) * dz_R_ar - csf_model.j_z(csf, b, d_z_csf, d_zz_csf) * R_ar * K_th);
+    if (charged) // charged scalar + its electromagnetic field
+    {
+        const EMF& em = slice_ptr->states2[j].em;
+        f_phi = pref * (chsf_model.rho(csf, em, b, d_z_csf) * dz_R_ar - chsf_model.j_z(csf, em, b, d_z_csf) * R_ar * K_th);
+    }
+    else
+        f_phi = pref * (csf_model.rho(csf, b, d_z_csf, d_zz_csf) * dz_R_ar - csf_model.j_z(csf, b, d_z_csf, d_zz_csf) * R_ar * K_th);
 
     if (add_real_field)
     {
@@ -2167,6 +2309,7 @@ void Spacetime::compute_scalar_energies(BSSNSlice* slice_ptr)
 
     double e_phi = 0.0;
     double e_psi = 0.0;
+    double e_em = 0.0;  // electromagnetic field energy (charged matter)
     double m_phi = 0.0; // Misner-Sharp mass split (see ms_split_integrand)
     double m_psi = 0.0;
 
@@ -2189,8 +2332,15 @@ void Spacetime::compute_scalar_energies(BSSNSlice* slice_ptr)
             const CSF csf = slice_ptr->states2[j].csf;
             const CSF d_z_csf{slice_ptr->d_z(v_phi_re, j), slice_ptr->d_z(v_phi_im, j), 0.0, 0.0};
             const CSF d_zz_csf{0.0, 0.0, 0.0, 0.0};
-            const double rho_phi = csf_model.rho(csf, bssn, d_z_csf, d_zz_csf);
-            e_phi += quad_weights[j] * sphere_area * rho_phi * std::pow(z, D - 2.) * std::pow(chi, 0.5 * (1.0 - D));
+            const double vol = quad_weights[j] * sphere_area * std::pow(z, D - 2.) * std::pow(chi, 0.5 * (1.0 - D));
+            if (charged) // scalar part (gauge-covariant gradients) and electromagnetic part separately
+            {
+                const EMF& em = slice_ptr->states2[j].em;
+                e_phi += vol * chsf_model.rho_scalar(csf, em, bssn, d_z_csf);
+                e_em  += vol * chsf_model.rho_em(em, bssn);
+            }
+            else
+                e_phi += vol * csf_model.rho(csf, bssn, d_z_csf, d_zz_csf);
         }
 
         // Real scalar field (optional)
@@ -2211,6 +2361,7 @@ void Spacetime::compute_scalar_energies(BSSNSlice* slice_ptr)
 
     E_phi = bss_mpi::sum(e_phi);
     E_psi = add_real_field ? bss_mpi::sum(e_psi) : 0.0;
+    E_em = charged ? bss_mpi::sum(e_em) : 0.0;
     M_ms_phi = bss_mpi::sum(m_phi);
     M_ms_psi = add_real_field ? bss_mpi::sum(m_psi) : 0.0;
 }
@@ -2300,6 +2451,7 @@ void Spacetime::compute_diagnostics (BSSNSlice* slice_ptr)
 
     Ham_L2 = 0.;
     Mom_L2 = 0.;
+    Gauss_L2 = 0.;
 
     // Owned-range partial accumulation; global L2 norms combined via bss_mpi::sum below.
     const int j_lo_d = std::max(owned_begin(), 0);
@@ -2337,6 +2489,12 @@ void Spacetime::compute_diagnostics (BSSNSlice* slice_ptr)
 
         det_h[j] =  h_zz * pow(h_ww,n);
 
+        if (charged)
+        {
+            rho_e[j] = chsf_model.charge_density(slice_ptr->states2[j].csf);
+            Gauss[j] = chsf_model.gauss(slice_ptr->states2[j].csf, maxwell_divergence(v_E_z, j));
+        }
+
         double start_val = (make_tangherlini ? pow(0.5, 1. / (D - 3.)) : 0.);
         double end_val = R * (only_BS_violation ? (r_99 / R) : 0.9);
 
@@ -2346,6 +2504,8 @@ void Spacetime::compute_diagnostics (BSSNSlice* slice_ptr)
         {
             Ham_L2 += quad_weights[j] * Ham_adm[j] * Ham_adm[j] * pow(z, D - 2.) * pow(chi, (1. - D) / 2.);
             Mom_L2 += quad_weights[j] * Mom_Z[j] * Mom_Z[j] * pow(z, D - 2.) * pow(chi, (1. - D) / 2.);
+            if (charged)
+                Gauss_L2 += quad_weights[j] * Gauss[j] * Gauss[j] * pow(z, D - 2.) * pow(chi, (1. - D) / 2.);
         }
     }
 
@@ -2353,6 +2513,8 @@ void Spacetime::compute_diagnostics (BSSNSlice* slice_ptr)
     // MPI: combine per-rank sums-of-squares before sqrt.
     Ham_L2 = sqrt(bss_mpi::sum(Ham_L2)) / (16. * M_PI * rho0_init);
     Mom_L2 = sqrt(bss_mpi::sum(Mom_L2)) / (16. * M_PI * rho0_init);
+    if (charged)
+        Gauss_L2 = sqrt(bss_mpi::sum(Gauss_L2)) / (4. * M_PI * rho_e0_init);
 }
 
 //writes diagnostic quantities to output file. maybe just make appropriate call to write_slice() instead?
@@ -2362,8 +2524,8 @@ void Spacetime:: write_current_slice(std::string file_name)
     const BSSNSlice& s = *current_slice_ptr;
     dr = R / ((double)n_gridpoints - 1.0);
 
-    // 16 doubles per point (all state fields; theta packed as 0 if not CCZ4).
-    constexpr int NCOL = 16;
+    // 19 doubles per point (all state fields; theta packed as 0 if not CCZ4; Maxwell fields last, written if charged).
+    constexpr int NCOL = 19;
     std::vector<double> local(local_N * NCOL);
     for (int k = 0; k < local_N; ++k)
     {
@@ -2385,6 +2547,9 @@ void Spacetime:: write_current_slice(std::string file_name)
         p[13] = use_CCZ4 ? s.theta[j] : 0.0;
         p[14] = s.states2[j].rsf.psi;
         p[15] = s.states2[j].rsf.K_psi;
+        p[16] = s.states2[j].em.A_z;
+        p[17] = s.states2[j].em.E_z;
+        p[18] = s.states2[j].em.Phi_e;
     }
 
     std::vector<double> full;
@@ -2408,7 +2573,10 @@ void Spacetime:: write_current_slice(std::string file_name)
                   << "   " << p[4]  << "    " << p[5]  << "    " << p[6]
                   << "    " << p[7] << "    " << p[8]  << "   " << p[9]  << "    " << p[10]
                   << "    " << p[11]<< "    " << p[12] << "    " << p[13]
-                  << "   " << p[14] << "    " << p[15] << endl;
+                  << "   " << p[14] << "    " << p[15];
+        if (charged)
+            data_file << "   " << p[16] << "    " << p[17] << "    " << p[18];
+        data_file << endl;
     }
 }
 
@@ -2426,7 +2594,7 @@ void Spacetime:: write_diagnostics(std::string file_name)
     // 10 doubles per row (skip the `r` column — reconstructed from j on rank 0):
     //   Ham, Mom_Z, det_h, aux_test, A, ricci_4_val, r4m, MS mass, dM_phi/dz, dM_psi/dz
     //   (the last three only if output_ms_profile; the field parts are integrated cumulatively on rank 0)
-    constexpr int NCOL = 10;
+    constexpr int NCOL = 12;
     std::vector<double> local(local_N * NCOL, 0.0);
     double local_r4max = 0.0;
 
@@ -2453,6 +2621,11 @@ void Spacetime:: write_diagnostics(std::string file_name)
         p[7] = output_ms_profile ? ms_mass_at_point(current_slice_ptr, j) : 0.;
         if (output_ms_profile)
             ms_split_integrand(current_slice_ptr, j, p[8], p[9]);
+        if (charged)
+        {
+            p[10] = Gauss[j];
+            p[11] = rho_e[j];
+        }
     }
     ricci_4_grid_max = bss_mpi::max(local_r4max);
 
@@ -2470,6 +2643,7 @@ void Spacetime:: write_diagnostics(std::string file_name)
 
     data_file << "#z   Ham   Mom_z   det_h   rho   |phi|   ricci_4   ricci_4_matter";
     if (output_ms_profile) data_file << "   MS_mass   MS_mass_complex_field   MS_mass_real_field";
+    if (charged) data_file << "   Gauss   rho_e";
     data_file << endl;
 
     // cumulative (trapezoidal) integrals of the MS mass split from the centre, over active points
@@ -2490,6 +2664,8 @@ void Spacetime:: write_diagnostics(std::string file_name)
             z_prev = z; f_phi_prev = p[8]; f_psi_prev = p[9];
             data_file << "    " << p[7] << "    " << M_phi_cum << "    " << M_psi_cum;
         }
+        if (charged)
+            data_file << "    " << p[10] << "    " << p[11];
         data_file << endl;
     }
 }
@@ -2798,6 +2974,8 @@ void Spacetime::resize_temp_arrays()
     ham_corr.resize(n_gridpoints);
     Mom_Z.resize(n_gridpoints);
     det_h.resize(n_gridpoints);
+    Gauss.assign(n_gridpoints, 0.);
+    rho_e.assign(n_gridpoints, 0.);
 
     if (use_CCZ4)
     {
@@ -3304,6 +3482,9 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
     M = boson_star.M;
     r_99 = boson_star.r_99;
     BS_perturbed = boson_star.perturb;
+    charged = boson_star.charged;
+    q_charge = boson_star.q_charge;
+    chsf_model.q = q_charge;
 
     if (!skip_read)
     {
@@ -3492,6 +3673,12 @@ void Spacetime::initialize(BosonStar& boson_star, bool skip_read)
 
     compute_auxiliary_quantities(current_slice_ptr);
     rho0_init = make_tangherlini ? 1. : rho[0];
+    if (charged)
+    {
+        double rho_e_c = owns_origin() ? std::abs(chsf_model.charge_density(slices[0].states2[0].csf)) : 0.;
+        bss_mpi::bcast_doubles(&rho_e_c, 1);
+        rho_e0_init = (rho_e_c > 0.) ? rho_e_c : 1.;
+    }
     compute_diagnostics(current_slice_ptr);
     dtK_L2 = 0;
 
@@ -3566,7 +3753,10 @@ void Spacetime::evolve()
                 << "   " << "Mom_L2"<<  "   " << "chi_central" << "   "
                 << "A_central" << "   "  << "AH radius" << "   " <<  "M_ADM" << "   "  << "Noether charge"
                 << "   " << "Central dK/dt" << "   " << "freq_central" << "   " << "lapse_central" <<
-                "   " << "complex field energy" << "   " << "real field energy" << "   " << "central 4D ricci scalar" << "   " << "phi_re_central" << "   " << "AH mass" << "   " << "MS mass" << "   " << "MS mass complex field" << "   " << "MS mass real field" << endl;
+                "   " << "complex field energy" << "   " << "real field energy" << "   " << "central 4D ricci scalar" << "   " << "phi_re_central" << "   " << "AH mass" << "   " << "MS mass" << "   " << "MS mass complex field" << "   " << "MS mass real field";
+        if (charged)
+            constraints_file << "   " << "Gauss_L2" << "   " << "electric charge Q" << "   " << "EM field energy" << "   " << "Phi_e_central";
+        constraints_file << endl;
     }
 
     // A0 is the initial central field amplitude, used later for migration
@@ -3660,7 +3850,10 @@ void Spacetime::evolve()
                 << "   " << Mom_L2 <<  "   " << chi_central << "   "
                 << A_ctr << "   "  << ah_radius << "   " <<  M << "   "  << charge_now
                 << "   " << dtK_L2 << "   " << omega_approx << "   " << alpha_central <<
-                "   " << E_phi << "   " << E_psi << "   " << ricci_4 << "   " << phi_re_ctr << "   " << ah_mass_now << "   " << ms_mass_now << "   " << M_ms_phi << "   " << M_ms_psi << endl;
+                "   " << E_phi << "   " << E_psi << "   " << ricci_4 << "   " << phi_re_ctr << "   " << ah_mass_now << "   " << ms_mass_now << "   " << M_ms_phi << "   " << M_ms_psi;
+                if (charged)
+                    constraints_file << "   " << Gauss_L2 << "   " << q_charge * charge_now << "   " << E_em << "   " << slices[n].states2[0].em.Phi_e;
+                constraints_file << endl;
             }
         }
 

@@ -8,6 +8,7 @@
 #include "BosonStar.h"
 #include "ComplexScalarField.h" // for CSF in composite State
 #include "RealScalarField.h"   // for RSF in composite State
+#include "ChargedScalarField.h" // for EMF (Maxwell field) in composite State
 
 class ComplexScalarField; // forward declaration for friendship
 
@@ -29,8 +30,12 @@ enum bssn_var
     v_beta,
     v_theta, //this isn't a BSSN var (CCZ4), but added for derivatives.
     v_psi,
-    v_K_psi
+    v_K_psi,
+    v_A_z,   // Maxwell field (charged matter): radial vector potential (odd)
+    v_E_z,   // contravariant radial electric field (odd)
+    v_Phi_e  // scalar potential -n^a A_a (even)
 };
+static constexpr int N_BSSN_VARS = 19; // number of entries in bssn_var
 
 struct BSSNState
 {
@@ -52,6 +57,7 @@ struct State {
     CSF csf;         // complex scalar field variables
     BSSNState bssn;  // geometric and gauge variables
     RSF rsf;        // real scalar field variables if enabled
+    EMF em;         // Maxwell field variables if the charged matter model is enabled (zero otherwise)
 };
 
 //the BSSN variables, along with some auxiliary quantities, on a single time slice.
@@ -202,10 +208,28 @@ class Spacetime
     private:
         friend class ComplexScalarField; // allow matter models to access potential V, dV
         friend class RealScalarField;    // allow RSF to access spacetime internals (e.g., D, min_z)
+        friend class ChargedScalarField; // charged scalar + Maxwell model: V, dV, D, min_z
 
         // Matter model instances reused across evaluations to avoid per-point construction
         ComplexScalarField csf_model;
         RealScalarField    rsf_model;
+        ChargedScalarField chsf_model;   // used instead of csf_model when charged = 1
+
+    public:
+        // Charged boson stars (charged = 1): the complex field is minimally coupled to a Maxwell field with coupling q_charge.
+        // Initial data are read from charged_BSdata.dat (see charged_bs/make_charged_id.py) via BosonStar::read_charged_data.
+        bool charged = 0;
+        double q_charge = 0.;
+        double Gauss_L2 = 0.;           // L2 norm of the Gauss constraint (normalised by 4 pi |rho_e| at the centre initially)
+        double rho_e0_init = 1.;
+        double slice_electric_charge(BSSNSlice* slice_ptr); // Q = int rho_e dV (collective)
+        // D_i V^i = (1/W) d_z (W V^z), W = z^n sqrt(gamma), on the current slice at index, for V^z = E^z (var = v_E_z)
+        // or V^z = A^z = chi h^zz A_z (var = v_A_z); (n + 1) d_z V^z at the origin
+        double maxwell_divergence(bssn_var var, int index);
+        double E_em = 0.;               // electromagnetic field energy int rho_em dV (in compute_scalar_energies)
+    private:
+        std::vector<double> Gauss;      // Gauss constraint D_i E^i - 4 pi rho_e
+        std::vector<double> rho_e;      // charge density
         BSSNSlice* current_slice_ptr; //pointer to current slice, updated on each time step
         
         double D;
@@ -353,8 +377,8 @@ class Spacetime
 
         void init_domain_decomposition(); // sets rank/size/local_N/global_lo/global_hi
 
-        // Number of doubles per gridpoint on the wire: 9 BSSN + 4 CSF + 2 RSF
-        static constexpr int NDOF_STATE = 9 + 4 + 2;
+        // Number of doubles per gridpoint on the wire: 9 BSSN + 4 CSF + 2 RSF + 3 EMF
+        static constexpr int NDOF_STATE = 9 + 4 + 2 + 3;
 
         // Fill left/right NGHOST ghost slots of slice.states2 (and slice.theta
         // when use_CCZ4) with owned data from the left/right neighbor.
@@ -529,7 +553,7 @@ class Spacetime
         //one-entry cache of the stencil at the last (slice, index) used by d_z / d_zz: the RHS evaluates ~24 derivatives
         //per point, so the index set is built once per point instead of once per call
         BSSNSlice::DerivStencil deriv_cache;
-        double deriv_vals[16][5];                 //stencil values of every variable at the cached point (parity applied)
+        double deriv_vals[N_BSSN_VARS][5];                 //stencil values of every variable at the cached point (parity applied)
         const BSSNSlice* deriv_cache_slice = nullptr;
         int deriv_cache_index = -1, deriv_cache_n = -1, deriv_cache_frf = 0, deriv_cache_fbj = -1;
         double deriv_cache_R = -1.;

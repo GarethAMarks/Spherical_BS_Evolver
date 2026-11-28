@@ -129,6 +129,17 @@ class BosonStar
         void rk4_solve (const long double freq);
         void read_parameters(bool quiet = 0);
         void read_thinshell();
+
+        // Charged boson stars (charged = 1): static U(1)-gauged solitonic stars from the external solver in charged_bs/
+        // (make_charged_id.py), read from charged_BSdata.dat. Columns: r  A  X  ln(alpha)  E^z  Phi_e  Omega, where
+        // Omega = (omega + q A_t) / alpha and Phi_e = -A_t / alpha (A_t -> 0 at infinity, alpha -> 1); header lines
+        // "# key = value" carry sigma, mu, q, omega, M, Q, N, r_99. Fills state / E_array / Phi_e_array / Omega_array
+        // on the uniform BS grid of n_gridpoints points over [0, R].
+        bool charged = false;
+        double q_charge = 0.;     // gauge coupling q
+        double Q_charge = 0.;     // total electric charge of the star (from the solver)
+        std::vector<double> E_array, Phi_e_array, Omega_array;
+        void read_charged_data(std::string filename = "charged_BSdata.dat");
         void write_field(std::string filename="BSdata.dat");
         void convergence_test(long double freq = 0.);
         void double_resolution();

@@ -9,4 +9,5 @@ mpicxx -Wall -fexceptions -g -DUSE_MPI -I.  -c "EvolutionVariables.cpp" -o obj/M
 mpicxx -Wall -fexceptions -g -DUSE_MPI -I.  -c "main.cpp" -o obj/MPI/main.o
 mpicxx -Wall -fexceptions -g -DUSE_MPI -I.  -c "ComplexScalarField.cpp" -o obj/MPI/ComplexScalarField.o
 mpicxx -Wall -fexceptions -g -DUSE_MPI -I.  -c "RealScalarField.cpp" -o obj/MPI/RealScalarField.o
-mpicxx  -o BosonStarStability_mpi.o obj/MPI/BosonStar.o obj/MPI/LinearPerturbation.o obj/MPI/EvolutionVariables.o obj/MPI/main.o obj/MPI/mathutils.o obj/MPI/ComplexScalarField.o obj/MPI/RealScalarField.o  -lm
+mpicxx -Wall -fexceptions -g -DUSE_MPI -I.  -c "ChargedScalarField.cpp" -o obj/MPI/ChargedScalarField.o
+mpicxx  -o BosonStarStability_mpi.o obj/MPI/BosonStar.o obj/MPI/LinearPerturbation.o obj/MPI/EvolutionVariables.o obj/MPI/main.o obj/MPI/mathutils.o obj/MPI/ComplexScalarField.o obj/MPI/RealScalarField.o obj/MPI/ChargedScalarField.o  -lm

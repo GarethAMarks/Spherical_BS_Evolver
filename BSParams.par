@@ -12,6 +12,7 @@ frequency_guess = 1.8
 freq_epsilon = 1e-19
 isotropic = 0
 r_match_fac = 0.85 #cutoff radius for BS construction
+charged = 0 #if 1, evolve a charged boson star (U(1)-gauged scalar + Maxwell) read from charged_BSdata.dat (charged_bs/make_charged_id.py); overrides mu, sigma, solitonic, lambda
 
 #Dynamical perturbation params
 perturb = 0

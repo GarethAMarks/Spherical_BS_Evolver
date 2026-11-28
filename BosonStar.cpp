@@ -8,6 +8,7 @@
 #include "BosonStar.h"
 #include "mathutils.h"
 #include "mpi_helpers.h"
+#include "spline.h"
 #include <sstream>
 #include<iomanip>
 
@@ -117,6 +118,7 @@ void BosonStar::read_parameters(bool quiet)
         fill_parameter(current_line, "A0 = ", A0, quiet);
         fill_parameter(current_line, "dA = ", dA, quiet);
         fill_parameter(current_line, "n_stars = ", n_stars, quiet);
+        fill_parameter(current_line, "charged = ", charged, quiet);
     }
 }
 
@@ -1327,6 +1329,114 @@ void BosonStar::read_thinshell()
     noether_charge = get_noether_charge();
     binding_energy = M - mu * get_noether_charge();
     cout << "Successfully read thinshell model with central amplitude A = " << A_central << ", mass M = " << M << ", noether charge N = " << noether_charge <<  ", and binding energy E = " << binding_energy << endl;
+}
+
+//reads a charged boson star produced by charged_bs/make_charged_id.py (see BosonStar.h for the file format) and
+//interpolates it onto the uniform BS grid (exactly, if the file was written at the grid nodes)
+void BosonStar::read_charged_data(std::string filename)
+{
+    ifstream file(filename);
+    if (!file.is_open())
+    {
+        cerr << "ERROR: could not open charged boson star data file " << filename << endl;
+        exit(1);
+    }
+
+    double sigma_file = sigma, mu_file = mu, N_file = 0., r99_file = -1.;
+    vector<double> r, A, X, L, E, P, W;
+    string line;
+    while (getline(file, line))
+    {
+        if (line.empty()) continue;
+        if (line[0] == '#')
+        {
+            // header: "# key = value"
+            std::istringstream iss(line.substr(1));
+            string key, eq; double val;
+            if (iss >> key >> eq >> val && eq == "=")
+            {
+                if (key == "sigma") sigma_file = val;
+                else if (key == "mu") mu_file = val;
+                else if (key == "q") q_charge = val;
+                else if (key == "omega") omega = val;
+                else if (key == "M") M = val;
+                else if (key == "Q") Q_charge = val;
+                else if (key == "N") N_file = val;
+                else if (key == "r_99" && r99_file < 0.) r99_file = val;
+                else if (key == "r_norm") r99_file = val; // radius enclosing all but 1e-6 of N: sets the constraint-norm domain
+            }
+            continue;
+        }
+        std::istringstream iss(line);
+        double v[7];
+        if (iss >> v[0] >> v[1] >> v[2] >> v[3] >> v[4] >> v[5] >> v[6])
+        {
+            r.push_back(v[0]); A.push_back(v[1]); X.push_back(v[2]); L.push_back(v[3]);
+            E.push_back(v[4]); P.push_back(v[5]); W.push_back(v[6]);
+        }
+    }
+    if (r.size() < 8)
+    {
+        cerr << "ERROR: too few data rows in " << filename << endl;
+        exit(1);
+    }
+    if (r.back() < R * (1. - 1e-12))
+    {
+        cerr << "ERROR: " << filename << " extends to r = " << r.back() << " < R = " << R
+             << "; regenerate it with make_charged_id.py for this grid" << endl;
+        exit(1);
+    }
+    if (std::abs(sigma_file - sigma) > 1e-12 * sigma || std::abs(mu_file - mu) > 1e-12 * mu || !solitonic || lambda != 0. || D != 4.)
+        cout << "WARNING: charged star data use sigma = " << sigma_file << ", mu = " << mu_file
+             << " (solitonic, lambda = 0, D = 4); overriding the BSParams.par values" << endl;
+    sigma = sigma_file; mu = mu_file; solitonic = 1; lambda = 0.; D = 4.;
+    charged = true;
+
+    const double dr = R / (n_gridpoints - 1.);
+    state.assign(n_gridpoints, FieldState{});
+    radius_array.resize(n_gridpoints);
+    E_array.resize(n_gridpoints); Phi_e_array.resize(n_gridpoints); Omega_array.resize(n_gridpoints);
+
+    // file written at the grid nodes: copy directly; otherwise cubic-spline interpolation (r may be nonuniform)
+    bool on_nodes = (r.size() >= (size_t)n_gridpoints);
+    for (int k = 0; on_nodes && k < n_gridpoints; k++)
+        if (std::abs(r[k] - k * dr) > 1e-9 * dr) on_nodes = false;
+
+    tk::spline sA, sX, sL, sE, sP, sW;
+    if (!on_nodes)
+    {
+        cout << "Interpolating charged star data onto the grid (write it at the grid nodes for exact data)" << endl;
+        sA.set_points(r, A); sX.set_points(r, X); sL.set_points(r, L);
+        sE.set_points(r, E); sP.set_points(r, P); sW.set_points(r, W);
+    }
+    for (int k = 0; k < n_gridpoints; k++)
+    {
+        const double rk = k * dr;
+        radius_array[k] = rk;
+        if (on_nodes)
+        {
+            state[k] = FieldState{A[k], X[k], L[k], 0.};
+            E_array[k] = E[k]; Phi_e_array[k] = P[k]; Omega_array[k] = W[k];
+        }
+        else
+        {
+            state[k] = FieldState{sA(rk), sX(rk), sL(rk), 0.};
+            E_array[k] = sE(rk); Phi_e_array[k] = sP(rk); Omega_array[k] = sW(rk);
+        }
+    }
+    // eta: A' = X eta (only used by diagnostics of the BS solver)
+    for (int k = 1; k < n_gridpoints - 1; k++)
+        state[k].eta = (state[k + 1].A - state[k - 1].A) / (2. * dr * state[k].X);
+
+    A_central = state[0].A;
+    omega_pre_rescale = omega;
+    noether_charge = N_file;
+    binding_energy = M - mu * noether_charge;
+    r_99 = (r99_file > 0.) ? r99_file : R;
+    compactness = M / r_99;
+
+    cout << "Read charged boson star from " << filename << ": q = " << q_charge << ", omega = " << (double)omega
+         << ", M = " << M << ", Q = " << Q_charge << ", N = " << noether_charge << ", r_99 = " << r_99 << endl;
 }
 
 //ensures all field arrays are zero

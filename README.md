@@ -39,6 +39,54 @@ This compiles the same sources with `-DUSE_MPI` into `BosonStarStability_mpi.o`,
 
 ---
 
+## Charged boson stars
+
+Setting `charged = 1` evolves a charged solitonic boson star: the complex scalar field is minimally coupled to a U(1) gauge
+field, and the Maxwell field is evolved with it. Units are G = 1 with Gaussian Maxwell, so the action is
+
+    S = ∫ √-g [ R/16π − ½ ( g^ab (D_a φ)* D_b φ + V(|φ|) ) − F_ab F^ab / 16π ],   D_a = ∇_a + i q A_a,
+
+with the scalar normalised as in `ComplexScalarField` and V the solitonic potential (σ0 = `sigma`, μ = 1).
+
+**Matter model.** `ChargedScalarField` (`ChargedScalarField.h/.cpp`) is the charged analogue of `ComplexScalarField`.
+- Scalar variables are the usual `CSF` fields, with K_φ = −½ n^a D_a φ gauge covariant.
+- Maxwell variables are a new `EMF` member of `State`: the radial vector potential `A_z`, the electric field `E_z` = E^z
+  (contravariant), and the Eulerian scalar potential `Phi_e` = −n^a A_a.
+- The gauge is Lorenz, ∇_a A^a = 0, in which a static star stays stationary.
+- B = 0 in spherical symmetry, so E^z is evolved with Ampère's law and the Gauss constraint D_i E^i = 4π ρ_e is monitored.
+- The electromagnetic stress-energy enters ρ, S_zz and S_ww.
+- Divergences are taken in conservative form, (1/W) ∂_z(W V^z) with W = z^n √γ. With the pointwise form ∂_z V + n V/z,
+  the first-order Lorenz system (A_z, Φ_e) has growing modes at the origin.
+- `A_z` and `E_z` are odd across z = 0. Outer boundary: Sommerfeld for `A_z` and `Phi_e`, and the static fall-off
+  E^z ∼ Q/r² for `E_z`, which conserves the total charge.
+
+**Initial data.** These come from the static Einstein-Maxwell-Klein-Gordon solver in `charged_bs/`
+(`emkg.py`, `emkg2.py`, `arc2.py`: pseudo-arclength continuation in the central local frequency).
+`charged_bs/make_charged_id.py` traces a family, lists same-N pairs across an N maximum, and writes one star at the nodes
+of the evolution grid. It re-integrates the metric and Maxwell equations (DOP853, rtol 1e-12) for the solver's scalar
+profile, so the initial Hamiltonian and Gauss constraints converge at 4th order with the evolution resolution.
+
+```bash
+cd my_run      # with BSParams.par: charged = 1, cycle_only = 0, isotropic = 0, R and n_gridpoints set
+python3 path/to/charged_bs/make_charged_id.py trace --s0 0.1 --qhat 1.0 --rmax 100 --out fam.pkl
+python3 path/to/charged_bs/make_charged_id.py pairs --family fam.pkl --nfrac 0.97
+python3 path/to/charged_bs/make_charged_id.py write --family fam.pkl --index 447   # writes charged_BSdata.dat
+path/to/BosonStarStability.o
+```
+
+`charged_BSdata.dat` overrides `mu`, `sigma`, `solitonic` and `lambda`. The constraint-norm domain (`only_BS_violation`)
+extends to the radius enclosing all but 1e-6 of the Noether charge. Only polar-areal initial data (`isotropic = 0`) are
+supported. The Python scripts need numpy, scipy and contourpy.
+
+Extra output when `charged = 1`:
+- `constraint_norms.dat` gains `Gauss_L2`, the electric charge Q, the EM field energy and the central `Phi_e`.
+- `Diagnostics.dat` gains the Gauss constraint and ρ_e.
+- `SliceData.dat` gains `A_z`, `E_z` and `Phi_e`.
+
+`charged_bs/plot_convergence.py` makes three-resolution constraint convergence plots from `constraint_norms.dat`.
+
+---
+
 ## Output files
 
 | File | Written every | Contents |
@@ -158,6 +206,7 @@ This compiles the same sources with `-DUSE_MPI` into `BosonStarStability_mpi.o`,
 | `dump_time` | `0` | Write timestamped `SliceData_<T>.dat` and `Diagnostics_<T>.dat` snapshots whenever `t` passes a new multiple of this value; disabled if zero |
 | `run_quietly` | `0` | Suppress per-step console output |
 | `store_A0` | `1` | Store the initial central field amplitude for later use in migration detection |
+| `charged` | `0` | Evolve a charged boson star read from `charged_BSdata.dat` (see "Charged boson stars") |
 | `read_thinshell` | `0` | Read initial data from the output of an external thin-shell solver instead of the built-in BS ODE solver |
 | `cutoff_frac` | `0.75` | Fraction of the grid used when reading thin-shell initial data |
 | `make_tangherlini` | `0` | Initialise a Tangherlini (higher-dimensional Schwarzschild) black hole instead of a boson star |
